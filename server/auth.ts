@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { betterAuth } from "better-auth";
+import { revokeUnprovenAccountAccess } from "better-auth/db";
 import { emailOTP, organization } from "better-auth/plugins";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, existsSync, chmodSync } from "node:fs";
@@ -613,6 +614,33 @@ export const auth = betterAuth({
     sendOnSignUp: isEmailConfigured(),
     autoSignInAfterVerification: true,
     expiresIn: 60 * 60,
+    // Custody (A0 follow-up): BOTH inbox-proof routes that flip
+    // emailVerified — the OTP plugin's /email-otp/verify-email and the
+    // verification-LINK route — call this hook BEFORE the promotion. The
+    // sign-in route runs the library's revokeUnprovenAccountAccess itself,
+    // but these two routes promote WITHOUT it, so a pre-registered
+    // mailbox's password and standing session would survive an owner proof
+    // made through them. Re-running the same library-owned cleanup here
+    // (it re-reads the user under its own reservation lock and no-ops for
+    // already-verified accounts) closes that gap without any Muster-side
+    // reimplementation: unproven links and sessions end at the moment of
+    // mailbox proof, whatever route proved it, and proven accounts pass
+    // through untouched.
+    beforeEmailVerification: async (user) => {
+      if (user.emailVerified) return;
+      type UnprovenAccessHelperContext = Parameters<typeof revokeUnprovenAccountAccess>[0];
+      // SAFETY: the helper's parameter type demands a full endpoint context,
+      // but its implementation (verified in the installed library source)
+      // reads only ctx.context.internalAdapter — exactly the surface
+      // auth.$context resolves (this deployment's inferred options refine
+      // the generic BetterAuthOptions the helper types parameterize on).
+      // The library's own sign-in route hands it the same context.
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions
+      const cleanupCall = {
+        context: await auth.$context,
+      } as unknown as UnprovenAccessHelperContext;
+      await revokeUnprovenAccountAccess(cleanupCall, user.id);
+    },
   },
   session: {
     expiresIn: 60 * 60 * 24 * 7,
@@ -637,6 +665,12 @@ export const auth = betterAuth({
       "/email-otp/send-verification-otp": { window: 60, max: 8 },
       "/email-otp/check-verification-otp": { window: 60, max: 15 },
       "/sign-in/email-otp": { window: 60, max: 15 },
+      // The verify-email route sits with check/sign-in on the retry cadence:
+      // the plugin's own default (3/min per IP) blocks a user who mis-typed
+      // one code and immediately retries — the exact cadence this window
+      // pricing exists to keep possible — while the per-code attempt budget
+      // (3) still bounds guessing.
+      "/email-otp/verify-email": { window: 60, max: 15 },
     },
   },
   // Verification links, reset links, and OAuth callbacks are absolute URLs, so
