@@ -23,20 +23,27 @@
 //      still pays the windows exactly as before (study §5 S3). Sign-up
 //      gates run first: a stored key can never answer for an address the
 //      gate closes.
-//   4. The unverified-user promotion — the load-bearing one. The plugin's
-//      sign-in route calls revokeUnprovenAccountAccess() for any
-//      pre-existing emailVerified: false user: it DELETES every account link
-//      (password included) and every standing session, then flips
-//      emailVerified. On a deployment with no mailer, every password account
-//      is emailVerified: false — so a bare OTP sign-in would silently remove
-//      the user's password. An existing login method must keep working
-//      unchanged, so for those users we validate the code FIRST through the
-//      plugin's non-consuming check route, flip emailVerified ourselves on
-//      success, and only then delegate: the plugin then sees a verified user
-//      and skips the revocation entirely.
+//   4. Custody stays with the plugin on the sign-in route. A pre-existing
+//      emailVerified: false user (an address pre-registered with a password
+//      by someone who never proved the inbox) is NOT promoted or skipped
+//      past the plugin: delegating the sign-in untouched lets Better Auth's
+//      revokeUnprovenAccountAccess() run — a database-locked cleanup that
+//      deletes every account link (password included) and every standing
+//      session for the unproven account, then flips emailVerified. The
+//      mailbox owner's successful OTP proof is exactly the event that must
+//      END that unproven access, so an earlier wrapper step that validated
+//      the code first and pre-marked the account verified — silencing the
+//      revocation while keeping the attacker's session and password alive —
+//      was removed (reproduced in server/email-otp-custody.test.ts).
+//      Consequence, accepted by the owner: on a deployment with no mailer,
+//      a password account that completes an OTP sign-in loses its password
+//      link — an existing login method does NOT survive unchanged across
+//      the mailbox proof; the account itself, its name and its workspace
+//      data do.
 //
 // Everything else flows through untouched: unknown emails hit the plugin's
-// own sign-up-on-verify (gated above), already-verified users skip the check.
+// own sign-up-on-verify (gated above), and unproven (unverified) accounts
+// hit the plugin's own revocation on verify.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { auth, forwardedProtoOf, getDb, OTP_TTL_SECONDS } from "./auth.ts";
@@ -46,7 +53,6 @@ import { parseJson, type JsonObject, type JsonValue } from "./schema.ts";
 
 export const OTP_SEND_PATH = "/api/auth/email-otp/send-verification-otp";
 export const OTP_SIGN_IN_PATH = "/api/auth/sign-in/email-otp";
-const OTP_CHECK_PATH = "/api/auth/email-otp/check-verification-otp";
 
 /** The two plugin routes this wrapper intercepts. Every other auth path —
  * including the plugin's own check route when hit directly — falls through
@@ -275,39 +281,19 @@ export const otpSendPolicy = {
   sizes: sendStateSizes,
 };
 
-interface OtpUserRow {
-  id: string;
-  emailVerified: number | bigint | boolean;
-}
-
-/** Local lookup carrying the one column the promotion needs —
- * findUserByEmail() in auth.ts deliberately projects less. */
-function findUserForOtp(email: string): OtpUserRow | null {
+/** Local lookup for the sign-up gate — findUserByEmail() in auth.ts
+ * deliberately projects less. The wrapper never mutates verification state
+ * itself: the plugin owns both the promotion (sign-up-on-verify) and the
+ * unproven-access revocation. */
+function findUserForOtp(email: string): { id: string } | null {
   try {
-    // SAFETY: the SELECT projects exactly the id/emailVerified columns read here
+    // SAFETY: the SELECT projects exactly the id column read here
     const row = getDb()
-      .prepare('SELECT "id", "emailVerified" FROM "user" WHERE lower("email") = lower(?) LIMIT 1')
-      .get(email) as OtpUserRow | undefined;
+      .prepare('SELECT "id" FROM "user" WHERE lower("email") = lower(?) LIMIT 1')
+      .get(email) as { id: string } | undefined;
     return row ?? null;
   } catch {
     return null;
-  }
-}
-
-/** Flip emailVerified for a user whose code just proved mailbox control.
- * "emailVerified" is `integer not null` and timestamps are ISO strings —
- * the exact representations server/auth.ts's migrate() and createBridgedUser
- * write. Idempotent (the guard makes a concurrent promotion a no-op), and a
- * failure is reported rather than thrown: the caller has already validated
- * the code, so it can still delegate safely. */
-function markUserVerified(id: string): boolean {
-  try {
-    const result = getDb()
-      .prepare('UPDATE "user" SET "emailVerified" = 1, "updatedAt" = ? WHERE "id" = ? AND "emailVerified" = 0')
-      .run(new Date().toISOString(), id);
-    return Number(result.changes) > 0;
-  } catch {
-    return false;
   }
 }
 
@@ -578,28 +564,19 @@ export async function handleEmailOtpAuthRequest(
     }
   }
 
-  // 4. Pre-existing, not-yet-verified user: validate the code FIRST through
-  //    the plugin's non-consuming check route (wrong/expired/exhausted
-  //    answers relay unchanged, attempts counted as usual), promote the
-  //    user on success, and only then let sign-in run — at which point the
-  //    plugin skips revokeUnprovenAccountAccess entirely.
-  if (!isSend && user && !user.emailVerified) {
-    const checked = await delegateToAuth(req, OTP_CHECK_PATH, {
-      email,
-      type: "sign-in",
-      otp: isText(body?.otp) ? String(body.otp) : "",
-    });
-    if (checked.status < 200 || checked.status >= 300) return relay(res, checked);
-    markUserVerified(user.id);
-  }
-
-  // 5. Delegate the real route. Send stores + emails/logs the code; sign-in
+  // 4. Delegate the real route. Send stores + emails/logs the code; sign-in
   //    consumes it and mints the session (creating the account first when
-  //    the address is new — gated in step 2 above). The per-IP window is
-  //    spent at the point the request reaches the plugin — mirroring what
-  //    the plugin's own limiter counts — while cooldown and replay map are
-  //    armed only for an accepted send, and delegated send rejections are
-  //    relayed through the same uniform shape as the wrapper's own.
+  //    the address is new — gated in step 2 above). For a pre-existing
+  //    emailVerified: false user the plugin runs its database-locked
+  //    revokeUnprovenAccountAccess during this delegation — deleting the
+  //    unproven account's links (password included) and standing sessions
+  //    before flipping emailVerified — which is the custody contract this
+  //    wrapper must not shortcut: see the header note and
+  //    server/email-otp-custody.test.ts. The per-IP window is spent at the
+  //    point the request reaches the plugin — mirroring what the plugin's
+  //    own limiter counts — while cooldown and replay map are armed only for
+  //    an accepted send, and delegated send rejections are relayed through
+  //    the same uniform shape as the wrapper's own.
   if (isSend) spendIpSend(clientIpOf(req), Date.now());
   const delegated = await delegateToAuth(req, path, body);
   if (isSend && delegated.status >= 200 && delegated.status < 300) {

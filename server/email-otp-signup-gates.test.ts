@@ -3,7 +3,8 @@
 // the way /api/auth/sign-up/email's door closes — unknown addresses rejected
 // on BOTH send and verify (a guessed code must not register anyone),
 // allowlisted addresses still get accounts, and accounts that exist
-// regardless of the gate keep signing in, by password and by code.
+// regardless of the gate keep signing in by code; a pre-registered unverified account's unproven
+// password access ends when its owner proves the mailbox (the custody contract).
 // Its own spawned server because the gate is read per-request from env.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -167,10 +168,11 @@ describe.skipIf(process.platform === "win32")("email one-time-code sign-in honor
     }
   }, 30_000);
 
-  it("keeps an allowlisted account's password sign-in working across an OTP sign-in", async () => {
+  it("ends an allowlisted account's unproven password access once the mailbox owner proves an OTP sign-in", async () => {
     const email = ALLOWLISTED[1];
     const password = randomBytes(24).toString("base64url");
-    // The password sign-up gate admits allowlisted addresses identically.
+    // The password sign-up gate admits allowlisted addresses identically —
+    // the account pre-registered here is unproven until its inbox is.
     const signup = await api("/api/auth/sign-up/email", "POST", { email, password, name: "Allowlisted Member" }, "");
     expect(signup.status).toBe(200);
     const before = await api("/api/auth/sign-in/email", "POST", { email, password }, "");
@@ -181,8 +183,24 @@ describe.skipIf(process.platform === "win32")("email one-time-code sign-in honor
     const code = await harvestCode(email, since);
     expect((await verifyCode(email, code)).status).toBe(200);
 
+    // Mailbox proof revokes the unproven credential: the password stops
+    // authenticating (the plugin's revokeUnprovenAccountAccess deleted the
+    // link), while the account itself stays verified and intact.
     const after = await api("/api/auth/sign-in/email", "POST", { email, password }, "");
-    expect(after.status).toBe(200);
+    expect(after.status).toBe(401);
+
+    const db = authDb();
+    try {
+      // SAFETY: the SELECT projects the provider column asserted below.
+      const links = db
+        .prepare(
+          'SELECT "providerId" FROM "account" WHERE "userId" = (SELECT "id" FROM "user" WHERE "email" = ?)',
+        )
+        .all(email) as Array<{ providerId: string }>;
+      expect(links, "unproven account links are deleted by the mailbox proof").toEqual([]);
+    } finally {
+      db.close();
+    }
   }, 30_000);
 
   it("lets a pre-existing non-allowlisted account sign in by code (gates close NEW accounts only)", async () => {

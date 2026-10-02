@@ -3,13 +3,14 @@
 // mailer is configured (a fresh child env never carries RESEND_API_KEY),
 // verify mints the standard session cookie, an unknown email registers with
 // an owner membership and an active organization, wrong/expired/exhausted
-// codes fail with the plugin's own error codes, a password account keeps
-// its password after an OTP sign-in (the revokeUnprovenAccountAccess
-// hazard the policy wrapper exists to prevent), and both the per-mailbox
-// cooldown and the per-IP send budget hold — now uniformly priced in
-// machine-readable `retryAfterSeconds` on every send rejection, with an
-// Idempotency-Key replaying its accepted send instead of tripping the
-// cooldown (study §5 S2/S3). Boot pattern mirrors
+// codes fail with the plugin's own error codes, a password account's
+// UNPROVEN pre-registered access (password + standing session) is revoked
+// when the mailbox owner proves an OTP sign-in (the custody contract the
+// wrapper must preserve by NOT pre-promoting the account), and both the
+// per-mailbox cooldown and the per-IP send budget hold — now uniformly
+// priced in machine-readable `retryAfterSeconds` on every send rejection,
+// with an Idempotency-Key replaying its accepted send instead of tripping
+// the cooldown (study §5 S2/S3). Boot pattern mirrors
 // server/workspace-brain-harness.test.ts; the gated describe mirrors
 // server/email-otp-signup-gates.test.ts (its own child because the gate is
 // read per-request from env); the otpSendPolicy describe runs on an
@@ -273,15 +274,20 @@ describe.skipIf(process.platform === "win32")("email one-time-code sign-in over 
     expect(((await res.json()) as { code?: string }).code).toBe("OTP_EXPIRED");
   }, 30_000);
 
-  it("keeps a password account working across an OTP sign-in (the revocation hazard)", async () => {
+  it("ends a password account's unproven access when the mailbox owner proves an OTP sign-in", async () => {
     const email = uniqueEmail("pwuser");
     const password = randomBytes(24).toString("base64url");
     const signup = await api("/api/auth/sign-up/email", "POST", { email, password, name: "Password User" }, "");
     expect(signup.status).toBe(200);
 
-    // Baseline: the password works before the OTP flow touches anything.
+    // Baseline: where the deployment permits it, the pre-registered
+    // password opens the account BEFORE the owner proves the mailbox.
     const before = await api("/api/auth/sign-in/email", "POST", { email, password }, "");
     expect(before.status).toBe(200);
+    const standingCookie = (before.headers.getSetCookie() ?? [])
+      .find((cookie) => cookie.startsWith("better-auth.session_token="))
+      ?.split(";")[0] ?? "";
+    expect(standingCookie).not.toBe("");
 
     const since = output.length;
     expect((await sendCode(email)).status).toBe(200);
@@ -290,22 +296,27 @@ describe.skipIf(process.platform === "win32")("email one-time-code sign-in over 
     expect(otpRes.status).toBe(200);
     expect(sessionCookie(otpRes)).not.toBe("");
 
-    // THE regression this suite exists for: without the wrapper's
-    // check-then-promote step, the plugin's sign-in route would run
-    // revokeUnprovenAccountAccess on this emailVerified: false account and
-    // DELETE its password link — this sign-in would come back 401.
+    // THE custody contract: the owner's OTP proof must end the unproven
+    // access — the pre-proof session dies (the plugin's
+    // revokeUnprovenAccountAccess runs because the wrapper no longer
+    // pre-marks the account verified) …
+    const stale = await api("/api/auth/get-session?disableRefresh=true", "GET", undefined, standingCookie);
+    expect(stale.status).toBe(200);
+    expect(await stale.json()).toBeNull();
+
+    // … and the attacker-chosen password no longer authenticates.
     const after = await api("/api/auth/sign-in/email", "POST", { email, password }, "");
-    expect(after.status).toBe(200);
+    expect(after.status).toBe(401);
 
     const db = authDb();
     try {
-      // SAFETY: the SELECT projects exactly the columns asserted below.
-      const account = db
+      // SAFETY: the SELECT projects the provider column asserted below.
+      const links = db
         .prepare(
-          'SELECT "id" FROM "account" WHERE "userId" = (SELECT "id" FROM "user" WHERE "email" = ?) AND "providerId" = ?',
+          'SELECT "providerId" FROM "account" WHERE "userId" = (SELECT "id" FROM "user" WHERE "email" = ?)',
         )
-        .get(email, "credential") as { id: string } | undefined;
-      expect(account, "credential/password account link survives the OTP sign-in").toBeDefined();
+        .all(email) as Array<{ providerId: string }>;
+      expect(links, "unproven account links are deleted by the mailbox proof").toEqual([]);
       // SAFETY: the SELECT projects exactly the column asserted below.
       const user = db
         .prepare('SELECT "emailVerified" FROM "user" WHERE "email" = ?')
