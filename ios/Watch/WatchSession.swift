@@ -22,6 +22,43 @@ import WatchKit
 
 private let log = Logger(subsystem: "com.muster.companion.watch", category: "stream")
 
+protocol CalendarCleanupMarkerPersistence {
+    func persist(_ value: String, forKey key: String) throws
+}
+
+struct UserDefaultsCalendarCleanupMarkerPersistence: CalendarCleanupMarkerPersistence {
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+    }
+
+    func persist(_ value: String, forKey key: String) throws {
+        defaults.set(value, forKey: key)
+        // This verifies what UserDefaults can report: a successful synchronize
+        // request followed by matching readback. It is not a promise against
+        // storage-provider or power-loss behavior beyond that API contract.
+        guard defaults.synchronize() else {
+            throw CalendarCleanupMarkerPersistenceError.flushFailed
+        }
+        guard defaults.string(forKey: key) == value else {
+            throw CalendarCleanupMarkerPersistenceError.readbackMismatch
+        }
+    }
+}
+
+enum CalendarCleanupMarkerPersistenceError: LocalizedError {
+    case flushFailed
+    case readbackMismatch
+
+    var errorDescription: String? {
+        switch self {
+        case .flushFailed: return "The cleanup marker could not be flushed."
+        case .readbackMismatch: return "The cleanup marker could not be verified."
+        }
+    }
+}
+
 struct WatchCallContext: Equatable {
     let sessionId: UUID
     let viewId: UUID
@@ -81,6 +118,14 @@ final class WatchSession: ObservableObject {
     }
     /// Transient, user-facing failures from an action they just took.
     @Published var actionError: String?
+    /// A failed primary or calendar credential removal can be retried in Settings.
+    @Published private(set) var credentialRemovalNeedsRetry = false
+    /// The remote tombstone whose local cleanup has not yet committed to trust.
+    /// Stored in this session's injected defaults so a retry can finish after relaunch.
+    var pendingRemoteUnpairGeneration: UInt64? {
+        defaults.string(forKey: Self.pendingRemoteUnpairGenerationKey).flatMap { UInt64($0) }
+    }
+    private var remoteUnpairCommitHandler: ((UInt64) -> Void)?
 
     /// Haptic vocabulary (musterwatch plan §3.6 #3): the planner owns
     /// *which* event a frame is — one pure, tested decision replacing the
@@ -148,9 +193,10 @@ final class WatchSession: ObservableObject {
     /// state change and a status change; the store's freshness rule turns a
     /// stale one into "offline" at render time. A status didSet also fires
     /// this: offline/unpaired must reach the complication, not just fleet
-    /// data changes.
+    /// data changes. The publisher is instance-scoped so tests never write the
+    /// shared app-group snapshot.
     func publishSnapshot() {
-        FleetSnapshotStore.publish(fleetSnapshot(state: state, mood: fleetMood))
+        snapshotPublisher(fleetSnapshot(state: state, mood: fleetMood))
     }
 
     private func clearLocalFirstStatus() {
@@ -180,6 +226,10 @@ final class WatchSession: ObservableObject {
             clearLocalFirstStatus()
         }
     }
+    var hasActiveClient: Bool { client != nil }
+#if DEBUG
+    var hasActiveStreamTaskForTesting: Bool { streamTask != nil }
+#endif
     private var pairingGeneration = 0
     private lazy var approvalCoordinator = ApprovalActionCoordinator(
         readState: { [weak self] in self?.state ?? CompanionState() },
@@ -256,7 +306,10 @@ final class WatchSession: ObservableObject {
     var calendarBusy: Bool { calendarCoordinator.busy }
     var calendarNotice: String? { calendarCoordinator.notice }
     private var calendarStorageKey: String? {
-        guard let connection, let token = try? Keychain.token(for: connection.id) else { return nil }
+        guard let connection, let token = try? credentialStore.token(for: connection.id) else { return nil }
+        return Self.calendarCredentialKey(connection: connection, token: token)
+    }
+    private static func calendarCredentialKey(connection: Connection, token: String) -> String {
         let binding = "\(connection.id)|\(connection.scheme.rawValue)|\(connection.host)|\(connection.port)|\(token)"
         return "calendar:" + SHA256.hash(data: Data(binding.utf8)).map { String(format: "%02x", $0) }.joined()
     }
@@ -264,15 +317,26 @@ final class WatchSession: ObservableObject {
         guard callContextAvailable(context), let scope = callCoordinator.calendarScope, let client, let key = calendarStorageKey else { return false }
         if calendarBoundContext != context || calendarBoundCallId != scope.callId {
             var issued: CallCalendarIssued?
-            if let text = try? Keychain.token(for: key) { issued = try? JSONDecoder().decode(CallCalendarIssued.self, from: Data(text.utf8)) }
+            if let text = try? credentialStore.token(for: key) { issued = try? JSONDecoder().decode(CallCalendarIssued.self, from: Data(text.utf8)) }
             calendarBoundContext = context; calendarBoundCallId = scope.callId
-            calendarCoordinator.bind(scope: scope, transport: client, issued: issued, save: { value in
-                let data = try JSONEncoder().encode(value)
-                try Keychain.save(String(decoding: data, as: UTF8.self), for: key)
-            })
+            calendarCoordinator.bind(scope: scope, transport: client, issued: issued, save: calendarSaveClosure(for: key))
         }
         return true
     }
+    private func calendarSaveClosure(for key: String) -> (CallCalendarIssued) throws -> Void {
+        let capturedCredentialStore = credentialStore
+        return { value in
+            let data = try JSONEncoder().encode(value)
+            try capturedCredentialStore.save(String(decoding: data, as: UTF8.self), for: key)
+        }
+    }
+
+#if DEBUG
+    func testingCalendarSaveClosure(for key: String) -> (CallCalendarIssued) throws -> Void {
+        calendarSaveClosure(for: key)
+    }
+#endif
+
     func loadCalendar(_ context: WatchCallContext) { _ = bindCalendar(context) }
     func beginCalendarEnrollment(_ context: WatchCallContext) async {
         guard bindCalendar(context) else { return }
@@ -303,10 +367,28 @@ final class WatchSession: ObservableObject {
     /// A saved connection exists, but its token could not be read yet. Keeps
     /// "the keychain is locked" from being mistaken for "not paired".
     private var restorePending = false
+    private let credentialStore: CredentialStore
+    private let defaults: UserDefaults
+    private let snapshotPublisher: (FleetSnapshot) -> Void
+    private let calendarCleanupMarkerPersistence: CalendarCleanupMarkerPersistence
 
     private static let connectionKey = "companion.connection"
+    private static let pendingCalendarCleanupKey = "companion.pending-calendar-credential-removal"
+    private static let pendingRemoteUnpairGenerationKey = "companion.pending-remote-unpair-generation"
 
-    init() {
+    init(
+        credentialStore: CredentialStore = SystemCredentialStore(),
+        defaults: UserDefaults = .standard,
+        snapshotPublisher: @escaping (FleetSnapshot) -> Void = { FleetSnapshotStore.publish($0) },
+        calendarCleanupMarkerPersistence: CalendarCleanupMarkerPersistence? = nil
+    ) {
+        self.credentialStore = credentialStore
+        self.defaults = defaults
+        self.snapshotPublisher = snapshotPublisher
+        self.calendarCleanupMarkerPersistence = calendarCleanupMarkerPersistence
+            ?? UserDefaultsCalendarCleanupMarkerPersistence(defaults: defaults)
+        credentialRemovalNeedsRetry = defaults.string(forKey: Self.pendingCalendarCleanupKey) != nil
+            || defaults.string(forKey: Self.pendingRemoteUnpairGenerationKey) != nil
         restore()
         // A fresh install reaches no didSet — no state arrives, status never
         // changes from .unpaired — so the complication would show nothing
@@ -324,16 +406,17 @@ final class WatchSession: ObservableObject {
     /// — holds on and retries rather than demanding a new code.
     private func restore() {
         restorePending = false
-        guard let data = UserDefaults.standard.data(forKey: Self.connectionKey),
+        guard let data = defaults.data(forKey: Self.connectionKey),
               let saved = try? JSONDecoder().decode(Connection.self, from: data)
         else { return }
 
         let stored: String?
         do {
-            stored = try Keychain.token(for: saved.id)
+            stored = try credentialStore.token(for: saved.id)
         } catch {
             connection = saved
             restorePending = true
+            refreshCredentialRemovalRetryState()
             status = .offline(
                 (error as? KeychainError)?.isLocked == true
                     ? "Unlock this watch to reach your computer."
@@ -341,11 +424,58 @@ final class WatchSession: ObservableObject {
             )
             return
         }
-        guard let stored else { return } // no token: genuinely not paired
+        guard let stored else {
+            if defaults.string(forKey: Self.pendingCalendarCleanupKey) != nil
+                || pendingRemoteUnpairGeneration != nil {
+                connection = saved
+                refreshCredentialRemovalRetryState()
+                status = .offline("Unpair cleanup is incomplete. Retry cleanup.")
+            }
+            return // no token: genuinely not paired, unless partial cleanup is pending
+        }
 
         connection = saved
         client = CompanionClient(connection: saved, token: stored)
+        refreshCredentialRemovalRetryState()
         status = .connecting
+    }
+
+    private func refreshCredentialRemovalRetryState() {
+        credentialRemovalNeedsRetry = defaults.string(forKey: Self.pendingCalendarCleanupKey) != nil
+            || pendingRemoteUnpairGeneration != nil
+    }
+
+    /// The receiver reattaches this callback at app startup. The generation
+    /// itself remains durable while a credential deletion is being retried.
+    func setRemoteUnpairCommitHandler(_ handler: @escaping (UInt64) -> Void) {
+        remoteUnpairCommitHandler = handler
+    }
+
+    /// A pairing newer than the pending tombstone supersedes it. The receiver
+    /// calls this only after both the credential and trust commit have succeeded.
+    func clearPendingRemoteUnpair(ifSupersededBy generation: UInt64?) {
+        guard let generation,
+              let pendingRemoteUnpairGeneration,
+              generation > pendingRemoteUnpairGeneration else { return }
+        defaults.removeObject(forKey: Self.pendingRemoteUnpairGenerationKey)
+        refreshCredentialRemovalRetryState()
+    }
+
+    private func recordPendingRemoteUnpair(generation: UInt64) {
+        if let pendingRemoteUnpairGeneration, generation <= pendingRemoteUnpairGeneration { return }
+        defaults.set(String(generation), forKey: Self.pendingRemoteUnpairGenerationKey)
+        refreshCredentialRemovalRetryState()
+    }
+
+    private func commitPendingRemoteUnpairIfPossible() {
+        guard let generation = pendingRemoteUnpairGeneration,
+              let remoteUnpairCommitHandler else {
+            refreshCredentialRemovalRetryState()
+            return
+        }
+        remoteUnpairCommitHandler(generation)
+        defaults.removeObject(forKey: Self.pendingRemoteUnpairGenerationKey)
+        refreshCredentialRemovalRetryState()
     }
 
     /// Redeem the six-digit code shown by Companion on the computer. The
@@ -368,8 +498,8 @@ final class WatchSession: ObservableObject {
         var stored = connection
         if !paired.serverName.isEmpty { stored.name = paired.serverName }
 
-        try Keychain.save(paired.token, for: stored.id)
-        UserDefaults.standard.set(try? JSONEncoder().encode(stored), forKey: Self.connectionKey)
+        try credentialStore.save(paired.token, for: stored.id)
+        defaults.set(try? JSONEncoder().encode(stored), forKey: Self.connectionKey)
 
         self.connection = stored
         self.client = CompanionClient(connection: stored, token: paired.token)
@@ -395,21 +525,21 @@ final class WatchSession: ObservableObject {
             try WatchHandoffAdoption.perform(
                 handoff,
                 replacing: connection,
-                saveCredential: { try Keychain.save($0, for: $1) },
+                saveCredential: { try credentialStore.save($0, for: $1) },
                 activate: { encoded in
                     self.pairingGeneration += 1
                     self.streamGeneration += 1
                     self.streamTask?.cancel()
                     self.streamTask = nil
                     self.restorePending = false
-                    UserDefaults.standard.set(encoded, forKey: Self.connectionKey)
+                    defaults.set(encoded, forKey: Self.connectionKey)
                     self.connection = handoff.connection
                     self.client = CompanionClient(connection: handoff.connection, token: handoff.token)
                     self.state = CompanionState()
                     self.status = .connecting
                     self.reconnectDelay = 0
                 },
-                removeCredential: { Keychain.remove($0) }
+                removeCredential: { credentialStore.remove($0) }
             )
         } catch {
             // Keep the current connection usable; the receiver has not advanced
@@ -422,19 +552,82 @@ final class WatchSession: ObservableObject {
         return true
     }
 
-    func signOut() {
+    @discardableResult
+    func signOut(remoteUnpairGeneration: UInt64? = nil) -> Bool {
+        if let remoteUnpairGeneration {
+            recordPendingRemoteUnpair(generation: remoteUnpairGeneration)
+        }
+        let savedConnection: Connection? = connection ?? {
+            guard let data = defaults.data(forKey: Self.connectionKey) else { return nil }
+            return try? JSONDecoder().decode(Connection.self, from: data)
+        }()
+        var calendarKey = defaults.string(forKey: Self.pendingCalendarCleanupKey)
+
+        if let savedConnection {
+            let token: String?
+            do {
+                token = try credentialStore.token(for: savedConnection.id)
+            } catch {
+                credentialRemovalNeedsRetry = true
+                actionError = error.localizedDescription
+                return false
+            }
+            if let token {
+                let derivedCalendarKey = Self.calendarCredentialKey(connection: savedConnection, token: token)
+                // Require the persistence adapter's flush/readback check before
+                // deleting the primary token, so a restart can find cleanup.
+                do {
+                    try calendarCleanupMarkerPersistence.persist(derivedCalendarKey, forKey: Self.pendingCalendarCleanupKey)
+                } catch {
+                    credentialRemovalNeedsRetry = true
+                    actionError = "Couldn't record pending calendar cleanup. Your pairing is still active; try again."
+                    return false
+                }
+                calendarKey = derivedCalendarKey
+            }
+
+            // If this fails, do not clear the client, connection, saved
+            // defaults, or calendar credential. The pairing remains usable.
+            guard credentialStore.remove(savedConnection.id) else {
+                credentialRemovalNeedsRetry = true
+                actionError = "Couldn't remove this watch's pairing credential. Your pairing is still active; try again."
+                return false
+            }
+        }
+
+        if let calendarKey, !credentialStore.remove(calendarKey) {
+            // Keychain has no transaction spanning these two accounts. The
+            // primary token is already gone; retain the connection identity
+            // and persisted cleanup key, stop the authenticated client, and
+            // report precisely what remains for retry.
+            pairingGeneration += 1
+            streamGeneration += 1
+            streamTask?.cancel()
+            streamTask = nil
+            restorePending = false
+            connection = savedConnection
+            client = nil
+            state = CompanionState()
+            status = .offline("Calendar credential cleanup is incomplete. Retry cleanup.")
+            credentialRemovalNeedsRetry = true
+            actionError = "The pairing token was removed, but its calendar credential remains. Retry cleanup."
+            return false
+        }
+
         pairingGeneration += 1
         streamGeneration += 1
         streamTask?.cancel()
         streamTask = nil
         restorePending = false
-        if let key = calendarStorageKey { Keychain.remove(key) }
-        if let id = connection?.id { Keychain.remove(id) }
-        UserDefaults.standard.removeObject(forKey: Self.connectionKey)
+        defaults.removeObject(forKey: Self.pendingCalendarCleanupKey)
+        defaults.removeObject(forKey: Self.connectionKey)
         connection = nil
         client = nil
         state = CompanionState()
         status = .unpaired
+        actionError = nil
+        commitPendingRemoteUnpairIfPossible()
+        return true
     }
 
     // MARK: - Lifecycle

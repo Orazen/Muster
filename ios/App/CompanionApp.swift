@@ -6,9 +6,60 @@
 // back asks the harness what was missed rather than asking for everything.
 import SwiftUI
 
+@MainActor
+enum CompanionAppComposition {
+    static var isTestHost: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-XCTest") })
+#else
+        false
+#endif
+    }
+
+    static func makeSession() -> Session {
+#if DEBUG
+        if isTestHost {
+            guard let defaults = UserDefaults(suiteName: "com.muster.companion.testhost.\(UUID().uuidString)") else {
+                preconditionFailure("Could not create isolated XCTest defaults")
+            }
+            return Session(
+                credentialStore: InertTestHostCredentialStore(),
+                defaults: defaults,
+                pushUnpair: {},
+                activateWatchBridge: {},
+                pushPairing: { _, _ in },
+                snapshotPublisher: nil,
+                testHostInert: true
+            )
+        }
+#endif
+        return Session()
+    }
+}
+
+#if DEBUG
+private final class InertTestHostCredentialStore: CredentialStore {
+    private var values: [String: String] = [:]
+
+    func save(_ token: String, for connectionId: String) throws {
+        values[connectionId] = token
+    }
+
+    func token(for connectionId: String) throws -> String? {
+        values[connectionId]
+    }
+
+    func remove(_ connectionId: String) -> Bool {
+        values.removeValue(forKey: connectionId)
+        return true
+    }
+}
+#endif
+
 @main
 struct CompanionApp: App {
-    @StateObject private var session = Session()
+    @StateObject private var session = CompanionAppComposition.makeSession()
     /// One speaker for the whole app, hoisted out of Walkie so the roster and
     /// the chat header can see whose reply is being read. The watch does the
     /// same with `WatchVoice`; two speakers would fight over the single audio
@@ -24,16 +75,20 @@ struct CompanionApp: App {
                 .environmentObject(session)
                 .environmentObject(announcer)
                 .onAppear {
-                    // Categories must exist before a banner is delivered, or
-                    // its action is a dead tap; the closure routes a tap to
-                    // the conversation that produced the alert.
-                    NotificationCoordinator.shared.registerCategories()
-                    NotificationCoordinator.shared.onOpenThread = { threadId in
-                        session.pendingOpenThreadId = threadId
+                    if !CompanionAppComposition.isTestHost {
+                        // Categories must exist before a banner is delivered, or
+                        // its action is a dead tap; the closure routes a tap to
+                        // the conversation that produced the alert.
+                        NotificationCoordinator.shared.registerCategories()
+                        NotificationCoordinator.shared.onOpenThread = { threadId in
+                            session.pendingOpenThreadId = threadId
+                        }
+                        session.connect()
                     }
-                    session.setForeground(scenePhase == .active); session.connect()
+                    session.setForeground(scenePhase == .active)
                 }
                 .onOpenURL { url in
+                    guard !CompanionAppComposition.isTestHost else { return }
                     // Two flavors ride the `muster` scheme: pairing invites
                     // (muster://pair?…) and the cloud OAuth finish
                     // (muster://oauth/finish#code=…). Route by host.
@@ -45,6 +100,7 @@ struct CompanionApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     session.setForeground(phase == .active)
+                    guard !CompanionAppComposition.isTestHost else { return }
                     switch phase {
                     case .active:
                         session.connect()
@@ -91,6 +147,9 @@ struct RootView: View {
             ),
             presenting: session.actionError
         ) { _ in
+            if session.credentialRemovalNeedsRetry {
+                Button("Retry unpair") { _ = session.signOut() }
+            }
             Button("OK", role: .cancel) { session.actionError = nil }
         } message: { message in
             Text(message)

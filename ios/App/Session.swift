@@ -57,6 +57,8 @@ final class Session: ObservableObject {
     }
     /// Transient, user-facing failures from an action they just took.
     @Published var actionError: String?
+    /// A failed credential deletion can be retried without discarding the pairing.
+    @Published private(set) var credentialRemovalNeedsRetry = false
     /// One exact message the next opened chat should reveal.
     @Published private(set) var focusedMessageId: String?
     @Published private(set) var notificationAuthorization: UNAuthorizationStatus = .notDetermined
@@ -68,14 +70,8 @@ final class Session: ObservableObject {
     /// decide WelcomeView vs PairingView while unpaired. The owned UI
     /// tests pass -com.muster.companion.reset-welcome to start cold even
     /// on a simulator that has launched the app before.
-    @Published var welcomeSeen: Bool = {
-        if ProcessInfo.processInfo.arguments.contains("-com.muster.companion.reset-welcome") {
-            UserDefaults.standard.removeObject(forKey: "onboardingWelcomeSeen.v1")
-            return false
-        }
-        return UserDefaults.standard.bool(forKey: "onboardingWelcomeSeen.v1")
-    }() {
-        didSet { UserDefaults.standard.set(welcomeSeen, forKey: "onboardingWelcomeSeen.v1") }
+    @Published var welcomeSeen: Bool {
+        didSet { defaults.set(welcomeSeen, forKey: "onboardingWelcomeSeen.v1") }
     }
     /// A conversation a notification tap asked to open. It stays set until a
     /// roster can actually resolve it to a chat, because a cold launch from a
@@ -117,6 +113,7 @@ final class Session: ObservableObject {
             clearLocalFirstStatus()
         }
     }
+    var hasActiveClient: Bool { client != nil }
     private var pairingGeneration = 0
     private lazy var seedCoordinator: SeedActionCoordinator = SeedActionCoordinator(
         readState: { [weak self] in self?.state ?? CompanionState() },
@@ -153,6 +150,14 @@ final class Session: ObservableObject {
     /// A saved connection exists, but its token could not be read yet. Keeps
     /// "the keychain is locked" from being mistaken for "not paired".
     private var restorePending = false
+    private let credentialStore: CredentialStore
+    private let defaults: UserDefaults
+    private let pushUnpair: @MainActor () -> Void
+    private let pushPairing: @MainActor (Connection, String) -> Void
+    private let activateWatchBridge: @MainActor () -> Void
+    private let snapshotPublisher: (@MainActor (FleetSnapshot) -> Void)?
+    private let testHostInert: Bool
+    var isTestHostInert: Bool { testHostInert }
 
     private static let connectionKey = "companion.connection"
 
@@ -161,6 +166,7 @@ final class Session: ObservableObject {
     /// Publish the mascot's external surfaces after every state change.
     /// Content-throttled: only a real change writes to the shared group.
     private func publishFleetSnapshot() {
+        guard let snapshotPublisher else { return }
         var isOffline = false
         if case .offline = status { isOffline = true }
         if case .unpaired = status { isOffline = true }
@@ -175,14 +181,37 @@ final class Session: ObservableObject {
            current.bots == snapshot.bots, current.moodState == snapshot.moodState {
             return
         }
-        FleetSnapshotStore.publish(snapshot)
-        FleetActivitySync.sync(snapshot)
+        snapshotPublisher(snapshot)
     }
 
     // MARK: - Pairing
 
-    init() {
-        _ = NotificationCoordinator.shared
+    init(
+        credentialStore: CredentialStore = SystemCredentialStore(),
+        defaults: UserDefaults = .standard,
+        pushUnpair: @escaping @MainActor () -> Void = { WatchHandoffBridge.shared.pushUnpair() },
+        activateWatchBridge: @escaping @MainActor () -> Void = { WatchHandoffBridge.shared.activateIfNeeded() },
+        pushPairing: @escaping @MainActor (Connection, String) -> Void = { connection, token in
+            WatchHandoffBridge.shared.pushPairing(connection: connection, token: token)
+        },
+        snapshotPublisher: (@MainActor (FleetSnapshot) -> Void)? = { snapshot in
+            FleetSnapshotStore.publish(snapshot)
+            FleetActivitySync.sync(snapshot)
+        },
+        testHostInert: Bool = false
+    ) {
+        self.credentialStore = credentialStore
+        self.defaults = defaults
+        self.pushUnpair = pushUnpair
+        self.activateWatchBridge = activateWatchBridge
+        self.pushPairing = pushPairing
+        self.snapshotPublisher = snapshotPublisher
+        self.testHostInert = testHostInert
+        if ProcessInfo.processInfo.arguments.contains("-com.muster.companion.reset-welcome") {
+            defaults.removeObject(forKey: "onboardingWelcomeSeen.v1")
+        }
+        _welcomeSeen = Published(initialValue: defaults.bool(forKey: "onboardingWelcomeSeen.v1"))
+        if !testHostInert { _ = NotificationCoordinator.shared }
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-store-preview"),
            let url = Bundle.main.url(forResource: "StorePreview", withExtension: "json"),
@@ -197,8 +226,10 @@ final class Session: ObservableObject {
         restore()
         // Wake the radio early so a handoff sent while the phone was closed
         // (application context) is readable by the time the watch asks.
-        WatchHandoffBridge.shared.activateIfNeeded()
-        Task { await refreshNotificationAuthorization() }
+        if !testHostInert {
+            activateWatchBridge()
+            Task { await refreshNotificationAuthorization() }
+        }
     }
 
     /// Rebuild the last connection at launch.
@@ -212,13 +243,13 @@ final class Session: ObservableObject {
     /// only the first should ever send someone back to the pairing screen.
     private func restore() {
         restorePending = false
-        guard let data = UserDefaults.standard.data(forKey: Self.connectionKey),
+        guard let data = defaults.data(forKey: Self.connectionKey),
               let saved = try? JSONDecoder().decode(Connection.self, from: data)
         else { return }
 
         let stored: String?
         do {
-            stored = try Keychain.token(for: saved.id)
+            stored = try credentialStore.token(for: saved.id)
         } catch {
             // Keep the connection and say why. `.offline` rather than
             // `.unpaired` matters: the latter is what puts PairingView on
@@ -256,13 +287,13 @@ final class Session: ObservableObject {
         var stored = connection
         if !paired.serverName.isEmpty { stored.name = paired.serverName }
 
-        try Keychain.save(paired.token, for: stored.id)
-        UserDefaults.standard.set(try? JSONEncoder().encode(stored), forKey: Self.connectionKey)
+        try credentialStore.save(paired.token, for: stored.id)
+        defaults.set(try? JSONEncoder().encode(stored), forKey: Self.connectionKey)
 
         // The watch follows the phone: same computer, its own device token,
         // no six-digit dance on the wrist. Silent no-op without a paired
         // watch.
-        WatchHandoffBridge.shared.pushPairing(connection: stored, token: paired.token)
+        pushPairing(stored, paired.token)
 
         self.state = CompanionState()
         self.connection = stored
@@ -289,21 +320,33 @@ final class Session: ObservableObject {
         pairingInvite = nil
     }
 
-    func signOut() {
+    @discardableResult
+    func signOut() -> Bool {
+        // Do the fallible operation before cancelling the stream or changing
+        // any in-memory/durable pairing state. A rejection leaves the current
+        // authenticated session available while the owner retries.
+        if let id = connection?.id, !credentialStore.remove(id) {
+            credentialRemovalNeedsRetry = true
+            actionError = "Couldn't remove this phone's saved credential. Your pairing is still active; try again."
+            return false
+        }
+
         pairingGeneration += 1
         streamTask?.cancel()
         streamTask = nil
         restorePending = false
-        if let id = connection?.id { Keychain.remove(id) }
-        UserDefaults.standard.removeObject(forKey: Self.connectionKey)
+        defaults.removeObject(forKey: Self.connectionKey)
         connection = nil
         client = nil
         state = CompanionState()
-        NotificationCoordinator.shared.setBadge(0)
+        if !testHostInert { NotificationCoordinator.shared.setBadge(0) }
         status = .unpaired
+        credentialRemovalNeedsRetry = false
+        actionError = nil
         // The watch follows the phone off the computer too — a wrist that
         // kept the token would be a stale trust root.
-        WatchHandoffBridge.shared.pushUnpair()
+        pushUnpair()
+        return true
     }
 
     // MARK: - Lifecycle

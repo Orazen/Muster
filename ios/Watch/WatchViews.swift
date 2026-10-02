@@ -995,7 +995,10 @@ struct WatchSettingsView: View {
                 Section { Text(error).foregroundStyle(.red) }
             }
             Section {
-                Button("Unpair this watch", role: .destructive) { session.signOut() }
+                Button(
+                    session.credentialRemovalNeedsRetry ? "Retry cleanup" : "Unpair this watch",
+                    role: .destructive
+                ) { _ = session.signOut() }
             }
         }
         .navigationTitle("Settings")

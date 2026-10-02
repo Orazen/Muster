@@ -30,7 +30,7 @@ final class WatchHandoffReceiver: NSObject, WCSessionDelegate {
     /// activation does nothing rather than deciding without persistence.
     private var ordering: WatchHandoffOrdering?
 
-    private override init() {
+    override init() {
         super.init()
     }
 
@@ -40,6 +40,10 @@ final class WatchHandoffReceiver: NSObject, WCSessionDelegate {
     func attach(to session: WatchSession) {
         self.session = session
         ordering = WatchHandoffOrdering(store: UserDefaultsHandoffTrustStore())
+        session.setRemoteUnpairCommitHandler { [weak self] generation in
+            guard let self else { return }
+            self.ordering?.commitUnpair(generation: generation)
+        }
 #if DEBUG
         // Owned acceptance: the rig delivers the handoff as a launch
         // argument (JSON, identical to what the radio would carry). The
@@ -60,6 +64,18 @@ final class WatchHandoffReceiver: NSObject, WCSessionDelegate {
             adoptPendingContext()
         }
     }
+
+#if DEBUG
+    /// Attach an isolated ordering store for unit tests without activating or
+    /// reading the real WatchConnectivity session or standard defaults.
+    func attachForTesting(to session: WatchSession, ordering: WatchHandoffOrdering) {
+        self.session = session
+        self.ordering = ordering
+        session.setRemoteUnpairCommitHandler { [weak self] generation in
+            self?.ordering?.commitUnpair(generation: generation)
+        }
+    }
+#endif
 
     private func adoptPendingContext() {
         let context = WCSession.default.receivedApplicationContext
@@ -87,12 +103,27 @@ final class WatchHandoffReceiver: NSObject, WCSessionDelegate {
         switch CompanionHandoffCodec.classify(data) {
         case .unpair(let tombstone):
             // The phone unpaired, so does the watch — unless a newer pairing has
-            // already superseded this tombstone.
-            if case .unpair = ordering.decideUnpair(generation: tombstone.generation), session.connection != nil {
-                session.signOut()
+            // already superseded this tombstone. Trust is committed only after
+            // the watch has removed both its primary and derived credentials.
+            if let pending = session.pendingRemoteUnpairGeneration,
+               tombstone.generation.map({ $0 < pending }) ?? true {
+                break
+            }
+            if case let .unpair(generation) = ordering.decideUnpair(generation: tombstone.generation) {
+                _ = session.signOut(remoteUnpairGeneration: generation)
             }
 
         case .pair(let handoff):
+            if let pending = session.pendingRemoteUnpairGeneration,
+               !(handoff.generation.map({ $0 > pending }) ?? false) {
+                break
+            }
+            if session.credentialRemovalNeedsRetry, !session.signOut() {
+                // Finish the old credential cleanup before adopting a newer
+                // pairing, so no pending local-cleanup marker can become
+                // attached to the new connection.
+                break
+            }
             switch ordering.decidePairing(handoff) {
             case .adopt:
                 // Trust advances only once the credential is actually stored.
@@ -101,9 +132,12 @@ final class WatchHandoffReceiver: NSObject, WCSessionDelegate {
                 // so a pairing that failed to store could never be retried.
                 if session.adoptHandoff(handoff) {
                     ordering.commitAdoption(handoff)
+                    session.clearPendingRemoteUnpair(ifSupersededBy: handoff.generation)
                     WKInterfaceDevice.current().play(.notification)
                 }
-            case .duplicate, .stale:
+            case .duplicate:
+                session.clearPendingRemoteUnpair(ifSupersededBy: handoff.generation)
+            case .stale:
                 break
             case .unpair:
                 break

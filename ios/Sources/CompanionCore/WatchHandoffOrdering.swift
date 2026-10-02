@@ -174,30 +174,45 @@ public struct WatchHandoffOrdering {
         return .adopt(handoff)
     }
 
-    /// An unpair tombstone. `generation` is nil for the 1.20 bare-string
-    /// marker, which carries no ordering at all.
+    /// Classify an unpair tombstone without advancing persisted trust.
+    /// `generation` is nil for the 1.20 bare-string marker, which carries no
+    /// ordering at all. The shell deletes credentials before calling
+    /// `commitUnpair`, so a failed Keychain operation remains retryable.
     public func decideUnpair(generation: UInt64?) -> HandoffDecision {
         let state = store.load()
         if let generation {
             // A delayed tombstone must not clear a pairing created after it.
-            if generation < state.generation { return .stale }
-            var updated = state
-            updated.generation = max(updated.generation, generation)
-            updated.connection = nil
-            updated.tokenFingerprint = nil
-            updated.pairingRevoked = true
-            store.save(updated)
+            if generation < state.generation
+                || (generation == state.generation && state.isPaired && state.pairingRevoked != true) {
+                return .stale
+            }
             return .unpair(generation: generation)
+        }
+        // A bare marker from an old phone carries no ordering information. On
+        // a fresh, empty watch it must not create a generation-zero revocation
+        // that would reject the first legitimate legacy pairing.
+        if !state.isPaired, state.generation == 0, state.pairingRevoked != true {
+            return .duplicate
         }
         // An unnumbered tombstone from an old phone: honour it, because
         // refusing would leave a watch paired to a phone that has moved on, and
-        // an unpair is the safe direction to be wrong in.
+        // an unpair is the safe direction to be wrong in. Persisted trust still
+        // waits for the shell to remove credentials successfully.
+        return .unpair(generation: state.generation)
+    }
+
+    /// Commit an unpair only after the shell has successfully removed its
+    /// credentials. A newer pairing committed between decision and cleanup
+    /// wins rather than being erased by an obsolete tombstone.
+    public func commitUnpair(generation: UInt64) {
+        let state = store.load()
+        guard generation >= state.generation else { return }
         var updated = state
+        updated.generation = max(updated.generation, generation)
         updated.connection = nil
         updated.tokenFingerprint = nil
         updated.pairingRevoked = true
         store.save(updated)
-        return .unpair(generation: state.generation)
     }
 
     /// Commit an adopted pairing. Separate from `decidePairing` so the shell

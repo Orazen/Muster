@@ -130,6 +130,7 @@ final class WatchHandoffOrderingTests: XCTestCase {
         ordering.commitAdoption(handoff)
 
         XCTAssertEqual(ordering.decideUnpair(generation: 2), .unpair(generation: 2))
+        ordering.commitUnpair(generation: 2)
         XCTAssertNil(ordering.currentState().connection)
         XCTAssertFalse(ordering.currentState().isPaired)
         // The floor survives the unpair, which is what makes a LATER stale
@@ -137,11 +138,40 @@ final class WatchHandoffOrderingTests: XCTestCase {
         XCTAssertEqual(ordering.currentState().generation, 2)
     }
 
+    func testUnpairTrustAdvancesOnlyAfterCredentialCleanupSucceedsAndCanRetry() {
+        let store = MemoryTrustStore()
+        let ordering = WatchHandoffOrdering(store: store)
+        let handoff = pairing("conn-a", token: "token-a", generation: 1)
+        ordering.commitAdoption(handoff)
+        let pairedTrust = ordering.currentState()
+
+        // Classification is not revocation: the receiver can attempt local
+        // credential deletion without persisting a tombstone first.
+        XCTAssertEqual(ordering.decideUnpair(generation: 2), .unpair(generation: 2))
+
+        // Model the primary-token delete failing: the receiver must not commit
+        // the decision. A redelivery remains actionable rather than stale.
+        var primaryRemovalSucceeded = false
+        if primaryRemovalSucceeded { ordering.commitUnpair(generation: 2) }
+        XCTAssertEqual(ordering.currentState(), pairedTrust)
+        XCTAssertEqual(ordering.decideUnpair(generation: 2), .unpair(generation: 2))
+
+        // The receiver commits only after the credential-removal retry succeeds.
+        primaryRemovalSucceeded = true
+        if primaryRemovalSucceeded { ordering.commitUnpair(generation: 2) }
+        XCTAssertNil(ordering.currentState().connection)
+        XCTAssertNil(ordering.currentState().tokenFingerprint)
+        XCTAssertTrue(ordering.currentState().pairingRevoked == true)
+        XCTAssertEqual(ordering.currentState().generation, 2)
+        XCTAssertEqual(ordering.decideUnpair(generation: 1), .stale)
+    }
+
     func testUnpairThenStalePairStaysUnpaired() {
         let store = MemoryTrustStore()
         let ordering = WatchHandoffOrdering(store: store)
         ordering.commitAdoption(pairing("conn-a", token: "token-a", generation: 1))
-        ordering.decideUnpair(generation: 5)
+        XCTAssertEqual(ordering.decideUnpair(generation: 5), .unpair(generation: 5))
+        ordering.commitUnpair(generation: 5)
 
         // A pairing queued long before that unpair finally arrives.
         XCTAssertEqual(ordering.decidePairing(pairing("conn-a", token: "token-a", generation: 1)), .stale)
@@ -155,7 +185,8 @@ final class WatchHandoffOrderingTests: XCTestCase {
         let first = WatchHandoffOrdering(store: store)
         let revoked = pairing("conn-a", token: "token-a", generation: 1)
         first.commitAdoption(revoked)
-        first.decideUnpair(generation: 2)
+        XCTAssertEqual(first.decideUnpair(generation: 2), .unpair(generation: 2))
+        first.commitUnpair(generation: 2)
         XCTAssertNil(first.currentState().connection)
 
         // The wrist app is relaunched. The queued user-info transfer for the
@@ -207,7 +238,30 @@ final class WatchHandoffOrderingTests: XCTestCase {
         guard case .unpair = ordering.decideUnpair(generation: nil) else {
             return XCTFail("a 1.20 unpair marker must still unpair")
         }
+        ordering.commitUnpair(generation: ordering.currentState().generation)
         XCTAssertNil(ordering.currentState().connection)
+    }
+
+    func testFreshWatchIgnoresUnnumberedTombstoneThenAcceptsLegacyPairing() {
+        let store = MemoryTrustStore()
+        let ordering = WatchHandoffOrdering(store: store)
+
+        XCTAssertEqual(ordering.decideUnpair(generation: nil), .duplicate)
+        XCTAssertEqual(ordering.currentState(), HandoffTrustState())
+
+        let legacy = pairing("conn-a", token: "token-a", generation: nil)
+        XCTAssertEqual(ordering.decidePairing(legacy), .adopt(legacy))
+        ordering.commitAdoption(legacy)
+        XCTAssertEqual(ordering.currentState().connection?.id, "conn-a")
+        XCTAssertEqual(ordering.currentState().pairingRevoked, false)
+    }
+
+    func testNumberedUnpairAtPairingGenerationIsStale() {
+        let ordering = WatchHandoffOrdering(store: MemoryTrustStore())
+        ordering.commitAdoption(pairing("conn-a", token: "token-a", generation: 4))
+
+        XCTAssertEqual(ordering.decideUnpair(generation: 4), .stale)
+        XCTAssertEqual(ordering.currentState().connection?.id, "conn-a")
     }
 
     func testEqualGenerationCannotChangeConnectionTokenOrEndpoint() {
@@ -238,6 +292,7 @@ final class WatchHandoffOrderingTests: XCTestCase {
         let old = pairing("conn-a", token: "token-a", generation: 3)
         ordering.commitAdoption(old)
         XCTAssertEqual(ordering.decideUnpair(generation: nil), .unpair(generation: 3))
+        ordering.commitUnpair(generation: 3)
         XCTAssertEqual(ordering.decidePairing(old), .stale)
 
         // Round-trip the actual persisted state, then build a new reducer.
@@ -255,7 +310,8 @@ final class WatchHandoffOrderingTests: XCTestCase {
 
     func testNumberedUnpairRejectsConflictingPairAtItsOwnGeneration() {
         let ordering = WatchHandoffOrdering(store: MemoryTrustStore())
-        _ = ordering.decideUnpair(generation: 4)
+        XCTAssertEqual(ordering.decideUnpair(generation: 4), .unpair(generation: 4))
+        ordering.commitUnpair(generation: 4)
         XCTAssertEqual(ordering.decidePairing(pairing("conn-a", token: "token-a", generation: 4)), .stale)
     }
 
@@ -266,7 +322,8 @@ final class WatchHandoffOrderingTests: XCTestCase {
         XCTAssertEqual(ordering.decidePairing(legacy), .adopt(legacy))
         ordering.commitAdoption(legacy)
         XCTAssertEqual(ordering.decidePairing(legacy), .duplicate)
-        _ = ordering.decideUnpair(generation: nil)
+        XCTAssertEqual(ordering.decideUnpair(generation: nil), .unpair(generation: 0))
+        ordering.commitUnpair(generation: 0)
         let reloaded = MemoryTrustStore(try JSONDecoder().decode(
             HandoffTrustState.self, from: JSONEncoder().encode(store.state)
         ))
@@ -293,7 +350,8 @@ final class WatchHandoffOrderingTests: XCTestCase {
         let original = WatchHandoffOrdering(store: UserDefaultsHandoffTrustStore(defaults: defaults))
         let old = pairing("conn-a", token: "token-a", generation: nil)
         original.commitAdoption(old)
-        _ = original.decideUnpair(generation: nil)
+        XCTAssertEqual(original.decideUnpair(generation: nil), .unpair(generation: 0))
+        original.commitUnpair(generation: 0)
         XCTAssertTrue(defaults.synchronize())
 
         let reopenedDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))

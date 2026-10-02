@@ -104,6 +104,29 @@ enum Keychain {
     }
 }
 
+/// The session boundary around device-only credentials. Production continues
+/// to use Keychain; tests can inject an isolated store that rejects removal.
+protocol CredentialStore {
+    func save(_ token: String, for connectionId: String) throws
+    func token(for connectionId: String) throws -> String?
+    @discardableResult func remove(_ connectionId: String) -> Bool
+}
+
+struct SystemCredentialStore: CredentialStore {
+    func save(_ token: String, for connectionId: String) throws {
+        try Keychain.save(token, for: connectionId)
+    }
+
+    func token(for connectionId: String) throws -> String? {
+        try Keychain.token(for: connectionId)
+    }
+
+    @discardableResult
+    func remove(_ connectionId: String) -> Bool {
+        Keychain.remove(connectionId)
+    }
+}
+
 struct KeychainError: LocalizedError {
     let status: OSStatus
 
