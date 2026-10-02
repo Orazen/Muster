@@ -66,10 +66,10 @@ public func fleetSnapshot(state: CompanionState, mood: FleetMood) -> FleetSnapsh
     return FleetSnapshot(moodState: mood.state, moodLabel: mood.label, bots: Array(bots))
 }
 
-/// The shared store. The app-group container is only available when both
-/// targets carry the entitlement; without it every write is a silent no-op
-/// and every read returns nil, so a misconfigured build degrades to the
-/// widget's placeholder instead of crashing or showing stale data.
+/// The shared store. Production callers use the app-group defaults; tests
+/// inject their own suite through the internal overloads. A nil defaults
+/// object makes writes no-ops and reads nil. Entitlement failures are not an
+/// isolation mechanism for tests.
 public enum FleetSnapshotStore {
     /// The app group id. Matched by the entitlements in project.yml.
     public static let appGroupId = "group.com.muster.companion"
@@ -80,12 +80,20 @@ public enum FleetSnapshotStore {
     }
 
     public static func publish(_ snapshot: FleetSnapshot) {
+        publish(snapshot, defaults: defaults)
+    }
+
+    static func publish(_ snapshot: FleetSnapshot, defaults: UserDefaults?) {
         guard let defaults = defaults else { return }
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         defaults.set(data, forKey: key)
     }
 
     public static func read() -> FleetSnapshot? {
+        read(defaults: defaults)
+    }
+
+    static func read(defaults: UserDefaults?) -> FleetSnapshot? {
         guard let defaults = defaults, let data = defaults.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(FleetSnapshot.self, from: data)
     }
@@ -95,7 +103,11 @@ public enum FleetSnapshotStore {
     public static let maxAge: TimeInterval = 15 * 60
 
     public static func readFresh(now: Date = Date()) -> FleetSnapshot? {
-        guard let snapshot = read() else { return nil }
+        readFresh(now: now, defaults: defaults)
+    }
+
+    static func readFresh(now: Date, defaults: UserDefaults?) -> FleetSnapshot? {
+        guard let snapshot = read(defaults: defaults) else { return nil }
         guard now.timeIntervalSince(snapshot.generatedAt) < maxAge else { return nil }
         return snapshot
     }

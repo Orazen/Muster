@@ -7,6 +7,15 @@ import XCTest
 @testable import CompanionCore
 
 final class FleetSnapshotPublishTests: XCTestCase {
+    private func isolatedDefaults() throws -> UserDefaults {
+        let suite = "com.muster.tests.fleet-snapshot.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        return defaults
+    }
+
     private func bot(
         _ id: String = "ursa",
         name: String = "Ursa",
@@ -71,11 +80,50 @@ final class FleetSnapshotPublishTests: XCTestCase {
         XCTAssertEqual(snapshot.bots.map { $0.id }, ["ursa"])
     }
 
-    func testReadFreshReturnsNilWhenAbsent() {
-        // Suite name is unused by the reader path (reads the shared store);
-        // a fresh test host must see no snapshot rather than a stale one.
-        FleetSnapshotStore.publish(fleetSnapshot(state: state([]), mood: .idle))
-        XCTAssertNotNil(FleetSnapshotStore.readFresh())
+    func testReadFreshReturnsNilWhenAbsent() throws {
+        let defaults = try isolatedDefaults()
+        XCTAssertNil(FleetSnapshotStore.read(defaults: defaults))
+        XCTAssertNil(FleetSnapshotStore.readFresh(now: Date(), defaults: defaults))
+    }
+
+    func testPublishedSnapshotRoundTripsAndExpiresAtTheFreshnessBoundary() throws {
+        let defaults = try isolatedDefaults()
+        var snapshot = fleetSnapshot(state: state([bot(busy: true)]), mood: .working)
+        snapshot.generatedAt = Date(timeIntervalSince1970: 1_760_000_000)
+
+        FleetSnapshotStore.publish(snapshot, defaults: defaults)
+
+        XCTAssertEqual(FleetSnapshotStore.read(defaults: defaults), snapshot)
+        XCTAssertEqual(FleetSnapshotStore.readFresh(
+            now: snapshot.generatedAt.addingTimeInterval(FleetSnapshotStore.maxAge - 1),
+            defaults: defaults
+        ), snapshot)
+        XCTAssertNil(FleetSnapshotStore.readFresh(
+            now: snapshot.generatedAt.addingTimeInterval(FleetSnapshotStore.maxAge),
+            defaults: defaults
+        ))
+        // Expiry changes presentation, not the persisted snapshot.
+        XCTAssertEqual(FleetSnapshotStore.read(defaults: defaults), snapshot)
+    }
+
+    func testPublishingToOneStoreDoesNotChangeAnother() throws {
+        let first = try isolatedDefaults()
+        let second = try isolatedDefaults()
+        let working = fleetSnapshot(state: state([bot(busy: true)]), mood: .working)
+        let offline = fleetSnapshot(state: state([]), mood: .offline)
+
+        FleetSnapshotStore.publish(working, defaults: first)
+        XCTAssertNil(FleetSnapshotStore.read(defaults: second))
+        FleetSnapshotStore.publish(offline, defaults: second)
+
+        XCTAssertEqual(FleetSnapshotStore.read(defaults: first), working)
+        XCTAssertEqual(FleetSnapshotStore.read(defaults: second), offline)
+    }
+
+    func testUnavailableInjectedStoreDoesNotProduceASnapshot() {
+        FleetSnapshotStore.publish(fleetSnapshot(state: state([]), mood: .idle), defaults: nil)
+        XCTAssertNil(FleetSnapshotStore.read(defaults: nil))
+        XCTAssertNil(FleetSnapshotStore.readFresh(now: Date(), defaults: nil))
     }
 
     func testRoundTripSurvivesJSON() {
