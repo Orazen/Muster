@@ -157,13 +157,13 @@ export function VaultSection() {
               value={localPath}
               onChange={(e) => setLocalPath(e.target.value)}
               placeholder="/path/to/file-or-folder"
-              className="min-w-0 flex-1 rounded-md border border-hairline bg-transparent px-2 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
+              className="min-w-0 flex-1 rounded-md border border-hairline bg-transparent px-2 py-1.5 text-[13px] text-ink outline-none focus:border-focus"
             />
             <input
               value={vaultPath}
               onChange={(e) => setVaultPath(e.target.value)}
               placeholder="vault-name"
-              className="w-40 rounded-md border border-hairline bg-transparent px-2 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
+              className="w-40 rounded-md border border-hairline bg-transparent px-2 py-1.5 text-[13px] text-ink outline-none focus:border-focus"
             />
             <button
               type="button"
@@ -179,7 +179,7 @@ export function VaultSection() {
               value={takeoutDir}
               onChange={(e) => setTakeoutDir(e.target.value)}
               placeholder="/path/to/extracted-google-takeout"
-              className="min-w-0 flex-1 rounded-md border border-hairline bg-transparent px-2 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
+              className="min-w-0 flex-1 rounded-md border border-hairline bg-transparent px-2 py-1.5 text-[13px] text-ink outline-none focus:border-focus"
             />
             <button
               type="button"

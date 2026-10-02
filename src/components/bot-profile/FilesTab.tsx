@@ -152,7 +152,7 @@ export function FilesTab({ bot }: { bot: Bot }) {
                     value={editing.draft}
                     onChange={(e) => setEditing({ ...editing, draft: e.target.value })}
                     rows={10}
-                    className="w-full resize-y rounded-md bg-card p-2 font-mono text-[12.5px] leading-relaxed text-ink focus:outline-none focus:ring-1 focus:ring-accent/50"
+                    className="w-full resize-y rounded-md bg-card p-2 font-mono text-[12.5px] leading-relaxed text-ink focus:outline-none focus:ring-1 focus:ring-focus/50"
                   />
                   <div className="mt-2 flex items-center gap-2">
                     <button
@@ -219,7 +219,7 @@ export function FilesTab({ bot }: { bot: Bot }) {
                           value={creating}
                           onChange={(e) => setCreating(e.target.value)}
                           placeholder="notes/todo.md"
-                          className="min-w-0 flex-1 rounded-md bg-inset px-2 py-1.5 font-mono text-[12.5px] text-ink focus:outline-none focus:ring-1 focus:ring-accent/50"
+                          className="min-w-0 flex-1 rounded-md bg-inset px-2 py-1.5 font-mono text-[12.5px] text-ink focus:outline-none focus:ring-1 focus:ring-focus/50"
                         />
                         <button
                           onClick={() => void create()}

@@ -42,7 +42,7 @@
 }
 .rooms-self-name:focus {
   outline: none;
-  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-hairline));
+  border-color: var(--color-focus);
 }
 
 /* ── new-room form ───────────────────────────────────────────────────── */
@@ -71,7 +71,7 @@
 .rooms-input:focus,
 .rooms-select:focus {
   outline: none;
-  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-hairline));
+  border-color: var(--color-focus);
 }
 
 /* ── buttons ─────────────────────────────────────────────────────────── */

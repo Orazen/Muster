@@ -42,7 +42,7 @@
   --color-accent: #0066cc;
   --color-primary: var(--color-accent);
   --color-accent-border: #00bbff;
-  --color-focus: #00bbff;
+  --color-focus: #a3a3a3;
   --color-bubble-user: #013f56;
   --color-bubble-user-border: #19536a;
   --workspace-send: #00bbff;
@@ -359,10 +359,6 @@
   background: var(--workspace-composer);
   box-shadow: 0 6px 24px rgb(0 0 0 / 0.06);
   transition: border-color 150ms var(--workspace-motion);
-}
-
-.muster-workspace .workspace-composer-input:focus-within {
-  border-color: var(--color-focus);
 }
 
 .muster-workspace .workspace-composer-input > textarea {

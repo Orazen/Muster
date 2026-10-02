@@ -24,7 +24,7 @@ export function GroupParticipants({
       tabIndex={welcome ? undefined : 0}
       className={cn(
         "min-w-0 max-w-full",
-        !welcome && "overflow-x-auto rounded-xl pb-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        !welcome && "overflow-x-auto rounded-xl pb-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
       )}
     >
     <ul

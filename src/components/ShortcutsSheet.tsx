@@ -97,7 +97,7 @@ export function ShortcutsSheet({ open, onClose }: { open: boolean; onClose: () =
         </div>
 
         <div className="px-5 pb-3">
-          <div className="flex items-center gap-2 rounded-xl border border-hairline/50 bg-inset px-3 py-1.5 focus-within:border-accent/60">
+          <div className="flex items-center gap-2 rounded-xl border border-hairline/50 bg-inset px-3 py-1.5 focus-within:border-focus/60">
             <Search size={14} className="shrink-0 text-ink-secondary" />
             <input
               ref={inputRef}

@@ -725,7 +725,7 @@ function SectionAssignPanel({
             placeholder={mode === "move" ? "New section name" : "Section name"}
             aria-label={mode === "move" ? "New section name" : "Section name"}
             maxLength={24}
-            className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary/60 focus:border-accent/50 focus:outline-none"
+            className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary/60 focus:border-focus/50 focus:outline-none"
           />
           <button
             type="submit"

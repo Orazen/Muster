@@ -106,7 +106,7 @@ function TeamContextCard() {
         rows={6}
         maxLength={24_000}
         placeholder={status === "loading" ? "Loading shared brain…" : status === "load-error" ? "Load your saved brief before editing." : "e.g. We ship under the Orazen brand. Deploy days are Tue/Thu. Never email clients directly."}
-        className="w-full resize-y rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent disabled:cursor-wait disabled:opacity-60"
+        className="w-full resize-y rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-focus disabled:cursor-wait disabled:opacity-60"
       />
       <div className="mt-1 text-[12px] text-ink-secondary" role={status === "error" || status === "load-error" ? "alert" : status === "idle" ? undefined : "status"}>
         {status === "loading" ? "Loading…" : status === "load-error" ? `Could not load shared brain: ${error}` : status === "saving" ? "Saving…" : status === "saved" ? "Saved" : status === "error" ? `Could not save: ${error}` : `${text.length}/24,000 characters`}

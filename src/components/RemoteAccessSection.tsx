@@ -497,7 +497,7 @@ export function RemoteAccessSection() {
               aria-label="Remote Muster server address or pairing link"
               autoComplete="off"
               spellCheck={false}
-              className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px] text-ink placeholder:text-ink-secondary/60 focus:border-accent/50 focus:outline-none"
+              className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px] text-ink placeholder:text-ink-secondary/60 focus:border-focus/50 focus:outline-none"
             />
             <button
               type="submit"

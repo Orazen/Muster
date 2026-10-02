@@ -81,7 +81,7 @@ export function ProjectScout({ onDone }: { onDone: () => void }) {
           onKeyDown={(e) => e.key === "Enter" && void scout()}
           placeholder="/absolute/path/to/project"
           spellCheck={false}
-          className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent"
+          className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-focus"
         />
         <button
           onClick={() => void scout()}

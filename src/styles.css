@@ -41,9 +41,8 @@
   --color-ink-secondary: #cfd3d8;
   --color-accent: #1084fe;
   --color-accent-border: #459ffe;
-  /* the ring a keyboard user follows; sits on the accent so focus reads as
-     "the app is talking to you", not as a browser default */
-  --color-focus: #459ffe;
+  /* Focus stays neutral and independent of brand/action colors. */
+  --color-focus: #a3a3a3;
   /* User bubbles carry the accent hue so YOUR words are findable by color
      alone — plain grey read as part of the background on dark panels. */
   --color-bubble-user: #2a5079;
@@ -111,7 +110,7 @@
   --color-ink-secondary: #cfd3d8;
   --color-accent: #1084fe;
   --color-accent-border: #459ffe;
-  --color-focus: #459ffe;
+  --color-focus: #a3a3a3;
   --color-bubble-user: #2a5079;
   --color-bubble-user-border: #459ffe66;
   --color-success: #38d591;
@@ -135,7 +134,7 @@
   --color-ink-secondary: #626262;
   --color-accent: #0066cc;
   --color-accent-border: #007cac;
-  --color-focus: #007cac;
+  --color-focus: #666666;
   --color-bubble-user: #eaf7fc;
   --color-bubble-user-border: #bbe6f7;
   --color-success: #26734f;
@@ -158,7 +157,7 @@
   --color-ink-secondary: #6b5d43;
   --color-accent: #a94e26;
   --color-accent-border: #c4683d;
-  --color-focus: #c4683d;
+  --color-focus: #666666;
   --color-bubble-user: #ecd9bf;
   --color-bubble-user-border: #c4683d55;
   --color-success: #25774a;
@@ -181,7 +180,7 @@
   --color-ink-secondary: #cdc0a8;
   --color-accent: #aa6418;
   --color-accent-border: #d89136;
-  --color-focus: #d89136;
+  --color-focus: #a3a3a3;
   --color-bubble-user: #503d24;
   --color-bubble-user-border: #d8913655;
   --color-success: #4cc48c;
@@ -204,7 +203,7 @@
   --color-ink-secondary: #476b74;
   --color-accent: #0e6e80;
   --color-accent-border: #2a8fa1;
-  --color-focus: #2a8fa1;
+  --color-focus: #666666;
   --color-bubble-user: #c5e0e8;
   --color-bubble-user-border: #2a8fa155;
   --color-success: #1d7a4e;
@@ -238,22 +237,20 @@ body {
 
 /* Keep focus visible after components clear the browser outline. These
    unlayered rules outrank Tailwind utilities without needing !important.
-   Keyboard users get the ring (:focus-visible); pointer clicks on text
-   controls do NOT draw the box — the control's own border highlights. */
+   Text inputs may also match :focus-visible after a pointer click; the
+   neutral token keeps both input methods free of a blue outline. */
 :focus-visible {
-  outline: 1.5px solid color-mix(in oklab, var(--color-focus) 70%, transparent);
+  outline: 1.5px solid var(--color-focus);
   outline-offset: 2px;
 }
 
-/* Pointer focus on text controls: quiet, no blue box. The caret plus the
-   control's border change is enough — the loud ring is reserved for
-   keyboard navigation. */
+/* Replace the browser focus treatment with the neutral cue below. */
 :is(input, textarea, select):focus {
   outline: none;
 }
 
 :is(input, textarea, select):focus-visible {
-  outline: 1.5px solid color-mix(in oklab, var(--color-focus) 70%, transparent);
+  outline: 1.5px solid var(--color-focus);
   outline-offset: -2px;
 }
 
