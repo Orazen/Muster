@@ -25,7 +25,6 @@
 .workspace-today .wt-mint { color: var(--color-success); background: color-mix(in srgb, var(--color-success) 10%, transparent); }
 .workspace-today .wt-action-arrow { position: absolute; top: 16px; right: 12px; color: var(--color-ink-secondary); }
 .workspace-today .wt-composer { overflow: hidden; border: 1px solid var(--color-hairline); border-radius: 24px; background: var(--color-panel); box-shadow: 0 5px 18px #0000000a; }
-.workspace-today .wt-composer:focus-within { border-color: var(--color-focus); }
 .workspace-today textarea { display: block; resize: vertical; width: 100%; min-width: 0; min-height: 105px; max-height: 260px; border: 0; outline: none; padding: 18px 18px 10px; color: var(--color-ink); background: transparent; font: inherit; font-size: 14px; line-height: 1.6; }
 .workspace-today textarea::placeholder { color: var(--color-ink-secondary); opacity: .8; }
 .workspace-today .wt-composer-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 14px 13px; }
@@ -85,7 +84,10 @@
 .workspace-today .wt-connected { background: var(--color-success); }
 .workspace-today button:disabled { opacity: .5; cursor: not-allowed; }
 .workspace-today button:focus-visible, .workspace-today select:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
-.workspace-today textarea:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -3px; }
+.workspace-today textarea:focus-visible { outline: none; box-shadow: inset 0 -1px 0 var(--color-focus); }
+@media (forced-colors: active) {
+  .workspace-today textarea:focus-visible { outline: 2px solid CanvasText; outline-offset: -2px; box-shadow: none; }
+}
 @container (max-width: 900px) {
   .workspace-today .wt-grid { grid-template-columns: minmax(0, 1fr); }
   .workspace-today .wt-main { max-width: 770px; }

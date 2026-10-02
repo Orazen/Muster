@@ -717,12 +717,15 @@ Socket.prototype.connect = function (...args) {
       // than treating a blocked call as contact with a real service.
       if (blockedNetworkAttempts) console.info(`[restore-process-restart] blocked-network-attempts=${blockedNetworkAttempts.trim()}`);
     } finally {
-      if (active) await stopServer(active);
-      // Keep the child PID, exit result, and captured stderr visible in the
-      // focused test log as a cleanup receipt for this isolated run.
-      await removeTempDir(root);
-      console.info(`[restore-process-restart] ${JSON.stringify({ children: processReceipts, tempRootRemoved: !existsSync(root) })}`);
-      expect(existsSync(root), "all owned children exited before the disposable fixture root was removed").toBe(false);
+      try {
+        if (active) await stopServer(active);
+      } finally {
+        // Keep the child PID, exit result, and captured stderr visible in the
+        // focused test log as a cleanup receipt for this isolated run.
+        await removeTempDir(root);
+        console.info(`[restore-process-restart] ${JSON.stringify({ children: processReceipts, tempRootRemoved: !existsSync(root) })}`);
+        expect(existsSync(root), "all owned children exited before the disposable fixture root was removed").toBe(false);
+      }
     }
   }, 120_000);
 });

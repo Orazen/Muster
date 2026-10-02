@@ -24,7 +24,7 @@
 }
 
 .muster-bloom__button:focus-visible {
-  outline: 3px solid var(--color-accent, #f08a24);
+  outline: 3px solid var(--color-focus, #a3a3a3);
   outline-offset: 4px;
 }
 

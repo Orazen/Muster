@@ -407,7 +407,7 @@ export function RoutineEditor({
         <div className="space-y-5 p-5">
           <label className="block">
             <span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">Schedule name</span>
-            <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Morning research brief" className="w-full rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none placeholder:text-ink-secondary/60 focus:border-accent/70" />
+            <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Morning research brief" className="w-full rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none placeholder:text-ink-secondary/60 focus:border-focus/70" />
           </label>
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-hairline/60 bg-inset p-3.5">
             <input type="checkbox" checked={sentry} onChange={(event) => setSentry(event.target.checked)} className="mt-0.5 size-4 accent-[#ff7a45]" />
@@ -443,13 +443,13 @@ export function RoutineEditor({
                     value={overnightIterations}
                     onChange={(event) => setOvernightIterations(Math.max(2, Math.min(12, Number(event.target.value) || 2)))}
                     aria-label="Iterations"
-                    className="w-24 rounded-lg border border-hairline/60 bg-inset px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent/70"
+                    className="w-24 rounded-lg border border-hairline/60 bg-inset px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-focus/70"
                   />
                   <input
                     value={notesFile}
                     onChange={(event) => setNotesFile(event.target.value)}
                     placeholder="notes file path — e.g. ~/project/NOTES.md"
-                    className="w-full rounded-lg border border-hairline/60 bg-inset px-2.5 py-1.5 text-[12.5px] text-ink placeholder:text-ink-secondary/60 outline-none focus:border-accent/70"
+                    className="w-full rounded-lg border border-hairline/60 bg-inset px-2.5 py-1.5 text-[12.5px] text-ink placeholder:text-ink-secondary/60 outline-none focus:border-focus/70"
                   />
                 </span>
               )}
@@ -484,7 +484,7 @@ export function RoutineEditor({
                         }
                         placeholder={`Check ${index + 1} — e.g. "mentions the final total"`}
                         aria-label={`Check ${index + 1} label`}
-                        className="min-w-0 flex-1 rounded-md border border-hairline/60 bg-panel px-2 py-1 text-[12.5px] text-ink placeholder:text-ink-secondary/60 outline-none focus:border-accent/70"
+                        className="min-w-0 flex-1 rounded-md border border-hairline/60 bg-panel px-2 py-1 text-[12.5px] text-ink placeholder:text-ink-secondary/60 outline-none focus:border-focus/70"
                       />
                       <button
                         type="button"
@@ -504,7 +504,7 @@ export function RoutineEditor({
                           setChecks((current) => current.map((c, i) => (i === index ? { ...c, kind } : c)));
                         }}
                         aria-label={`Check ${index + 1} kind`}
-                        className="shrink-0 rounded-md border border-hairline/60 bg-panel px-1.5 py-1 text-[11.5px] text-ink outline-none focus:border-accent/70"
+                        className="shrink-0 rounded-md border border-hairline/60 bg-panel px-1.5 py-1 text-[11.5px] text-ink outline-none focus:border-focus/70"
                       >
                         <option value="contains">contains</option>
                         <option value="not_contains">doesn't contain</option>
@@ -517,7 +517,7 @@ export function RoutineEditor({
                         }
                         placeholder={check.kind === "matches" ? "regex — e.g. total:\\s*\\$?[0-9]+" : "text to look for"}
                         aria-label={`Check ${index + 1} value`}
-                        className="min-w-0 flex-1 rounded-md border border-hairline/60 bg-panel px-2 py-1 font-mono text-[11.5px] text-ink placeholder:text-ink-secondary/60 outline-none focus:border-accent/70"
+                        className="min-w-0 flex-1 rounded-md border border-hairline/60 bg-panel px-2 py-1 font-mono text-[11.5px] text-ink placeholder:text-ink-secondary/60 outline-none focus:border-focus/70"
                       />
                     </div>
                   </div>
@@ -596,7 +596,7 @@ export function RoutineEditor({
             <select
               value={destination}
               onChange={(event) => setDestination(event.target.value)}
-              className="w-full rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-accent/70"
+              className="w-full rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-focus/70"
             >
               <option value="">A new task each run (fresh context)</option>
               {botTasks.map((t) => (
@@ -613,7 +613,7 @@ export function RoutineEditor({
           </label>
           <label className="block">
             <span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">What should this teammate do?</span>
-            <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={6} placeholder="Check the latest project activity, summarize what changed, and call out anything that needs my attention…" className="w-full resize-y rounded-xl border border-hairline/60 bg-inset px-3.5 py-3 text-[14px] leading-relaxed text-ink outline-none placeholder:text-ink-secondary/60 focus:border-accent/70" />
+            <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={6} placeholder="Check the latest project activity, summarize what changed, and call out anything that needs my attention…" className="w-full resize-y rounded-xl border border-hairline/60 bg-inset px-3.5 py-3 text-[14px] leading-relaxed text-ink outline-none placeholder:text-ink-secondary/60 focus:border-focus/70" />
           </label>
           <div>
             <div className="mb-2 text-[12px] font-medium text-ink-secondary">When?</div>
@@ -623,10 +623,10 @@ export function RoutineEditor({
               ))}
             </div>
             {kind === "once" ? (
-              <input type="datetime-local" value={at} onChange={(event) => setAt(event.target.value)} className="block rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-accent/70 [color-scheme:dark]" />
+              <input type="datetime-local" value={at} onChange={(event) => setAt(event.target.value)} className="block rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-focus/70 [color-scheme:dark]" />
             ) : (
               <div className="space-y-3">
-                <input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-accent/70 [color-scheme:dark]" />
+                <input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-focus/70 [color-scheme:dark]" />
                 <div className="flex flex-wrap gap-1.5">
                   {DAY_NAMES.map((label, day) => (
                     <button key={label} type="button" onClick={() => setWeekdays((current) => current.includes(day) ? (current.length === 1 ? current : current.filter((value) => value !== day)) : [...current, day].sort())} className={cn("size-10 rounded-xl border text-[11px] font-medium", weekdays.includes(day) ? "border-accent bg-accent text-white" : "border-hairline/50 bg-inset text-ink-secondary hover:text-ink")}>{label.slice(0, 2)}</button>
@@ -637,7 +637,7 @@ export function RoutineEditor({
           </div>
           <label className="block">
             <span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">Calendar block</span>
-            <select value={durationMinutes} onChange={(event) => setDurationMinutes(Number(event.target.value))} className="rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-accent/70">
+            <select value={durationMinutes} onChange={(event) => setDurationMinutes(Number(event.target.value))} className="rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-focus/70">
               {[15, 30, 45, 60, 90, 120].map((minutes) => <option key={minutes} value={minutes}>{minutes < 60 ? `${minutes} minutes` : `${minutes / 60} ${minutes === 60 ? "hour" : "hours"}`}</option>)}
             </select>
           </label>
@@ -873,7 +873,7 @@ export function RoutinesPage() {
           <div className="min-w-[190px] px-2 text-[14px] font-semibold text-ink">
             {new Date(rangeStart).toLocaleDateString([], { month: "long", year: "numeric" })}
           </div>
-          <select value={botFilter} onChange={(event) => setBotFilter(event.target.value)} className="rounded-xl border border-hairline/50 bg-panel px-3 py-2 text-[12px] text-ink outline-none focus:border-accent/60">
+          <select value={botFilter} onChange={(event) => setBotFilter(event.target.value)} className="rounded-xl border border-hairline/50 bg-panel px-3 py-2 text-[12px] text-ink outline-none focus:border-focus/60">
             <option value="all">All teammates</option>
             {visibleBots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
           </select>

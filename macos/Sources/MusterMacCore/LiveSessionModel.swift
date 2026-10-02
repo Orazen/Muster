@@ -86,9 +86,25 @@ public final class LiveSessionModel: ObservableObject {
         connectionID == id && account != nil && transport != nil
     }
 
+    /// Invoked on the main actor immediately before this model replaces or
+    /// abandons its session by any route that is *not* a pending sign-in being
+    /// adopted — startup restore, explicit sign-out, an external account change.
+    ///
+    /// The app points this at `NativeSignInCoordinator` so a sign-in response that
+    /// is still in flight is invalidated before it can save or connect. Without
+    /// it, `connect`/`disconnect` are invisible to an attempt that began earlier,
+    /// and a late response can resurrect a session the user just ended.
+    ///
+    /// Fencing *after* connect is already handled by `connectionID` above; this
+    /// hook covers the window before the first `connect`.
+    public var onSessionWillChangeExternally: (() -> Void)?
+
     // MARK: - Connection lifecycle
 
     public func connect(account: HarnessAccount) {
+        // `connect` always routes through `disconnect()` first, and that is where
+        // the external-change hook fires — so startup restore, sign-out and an
+        // external account swap are all fenced by the single call below.
         disconnect()
         self.account = account
         state = .connecting
@@ -104,6 +120,9 @@ public final class LiveSessionModel: ObservableObject {
     }
 
     public func disconnect() {
+        // Fence any sign-in still in flight before this model abandons or
+        // replaces its session. Cheap and idempotent when nothing is pending.
+        onSessionWillChangeExternally?()
         // Invalidate first: a cancelled operation may already have queued its
         // completion, or an injected transport may ignore cancellation.
         connectionID = UUID()

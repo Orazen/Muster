@@ -4,7 +4,7 @@ import { useStore } from "@/state/store";
 import { onboardingDriveReturn, prepareOnboardingConsent, readOnboardingDrive, readOnboardingGmail, type DriveSetupStatus, type GmailSetupStatus } from "@/lib/onboarding-connections";
 
 type Load<T> = { kind: "loading" } | { kind: "ready"; value: T } | { kind: "error"; message: string };
-const control = "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-hairline px-3 py-2 text-[13px] font-medium text-ink hover:bg-raised disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+const control = "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-hairline px-3 py-2 text-[13px] font-medium text-ink hover:bg-raised disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 /** Connection cards only; the wizard owns progress, drafts and navigation. */
 export function OnboardingConnections() {
