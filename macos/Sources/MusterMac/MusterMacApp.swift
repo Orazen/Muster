@@ -12,18 +12,30 @@ import SwiftUI
 @main
 struct MusterMacApp: App {
     @StateObject private var live: LiveSessionModel
+    @StateObject private var signIn: NativeSignInCoordinator
     @StateObject private var demo: PrototypeModel
     @State private var sessionRestoreError: String?
 
     init() {
-        _live = StateObject(wrappedValue: LiveSessionModel())
+        let session = LiveSessionModel()
+        // One coordinator for the whole app, shared by every window: it is the
+        // only authority for which sign-in attempt may still be adopted.
+        let coordinator = NativeSignInCoordinator(live: session)
+        _live = StateObject(wrappedValue: session)
+        _signIn = StateObject(wrappedValue: coordinator)
         _demo = StateObject(wrappedValue: PrototypeModel.fixture())
+        // Startup restore, sign-out and any external account change invalidate
+        // pending sign-in work before it can save or connect.
+        session.onSessionWillChangeExternally = { [weak coordinator] in
+            coordinator?.invalidateForExternalSessionChange()
+        }
     }
 
     var body: some Scene {
         WindowGroup("Muster") {
             GateView()
                 .environmentObject(live)
+                .environmentObject(signIn)
                 .environmentObject(demo)
                 .frame(minWidth: 1040, minHeight: 640)
                 .preferredColorScheme(live.appearance.colorScheme)
@@ -73,17 +85,30 @@ struct GateView: View {
 // MARK: - Sign in
 
 struct SignInView: View {
-    @EnvironmentObject private var live: LiveSessionModel
+    @EnvironmentObject private var signIn: NativeSignInCoordinator
     var initialError: String? = nil
+    /// Identity of this window, so the app-scoped coordinator can tell a newer
+    /// attempt from an older one and refuse duplicate submits from this window.
+    ///
+    /// This MUST be `@State`, not a plain stored property with a `UUID()`
+    /// default: a struct default is re-evaluated on every initialisation, and
+    /// `GateView` rebuilds `SignInView()` whenever `live` publishes. That would
+    /// hand this window a new identity mid-sign-in, which silently disables the
+    /// input lock and lets a duplicate submit start a second request. `@State`
+    /// keeps one identity for as long as this view stays on screen.
+    @State private var windowID = UUID()
     @State private var origin = "http://127.0.0.1:8799"
     @State private var email = ""
     @State private var password = ""
     @State private var createAccount = false
-    @State private var busy = false
-    @State private var error: String?
     @FocusState private var focused: Field?
 
     enum Field { case origin, email, password }
+
+    /// Busy only while *this* window owns the pending attempt, so a stale
+    /// response cannot spin a window that has already moved on.
+    private var busy: Bool { signIn.isPending(window: windowID) }
+    private var error: String? { signIn.errorMessage }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -98,23 +123,31 @@ struct SignInView: View {
                     }
                 }
                 Form {
+                    // Inputs are locked while this window's attempt is in
+                    // flight: the coordinator snapshotted them at submit, so
+                    // editing them mid-flight could only desynchronise the UI
+                    // from the request that is actually running.
                     TextField("Server", text: $origin)
                         .textFieldStyle(.roundedBorder)
                         .focused($focused, equals: .origin)
+                        .disabled(busy)
                     TextField("Email", text: $email)
                         .textFieldStyle(.roundedBorder)
                         .textContentType(.emailAddress)
                         .focused($focused, equals: .email)
+                        .disabled(busy)
                     SecureField("Password", text: $password)
                         .textFieldStyle(.roundedBorder)
-                        .onSubmit(signIn)
+                        .onSubmit(submitSignIn)
                         .focused($focused, equals: .password)
+                        .disabled(busy)
                     Toggle("Create a new account", isOn: $createAccount)
+                        .disabled(busy)
                     if let error {
                         Text(error).font(.callout).foregroundStyle(.red)
                     }
                     Button(busy ? "Connecting…" : (createAccount ? "Create & connect" : "Connect")) {
-                        signIn()
+                        submitSignIn()
                     }
                     .keyboardShortcut(.defaultAction)
                     .disabled(busy || email.isEmpty || password.isEmpty || origin.isEmpty)
@@ -126,43 +159,47 @@ struct SignInView: View {
         }
         .padding(28)
         .onAppear {
-            error = initialError
+            signIn.presentInitialError(initialError)
             focused = email.isEmpty ? .email : .password
         }
-    }
-
-    private func signIn() {
-        guard !busy else { return }
-        busy = true
-        error = nil
-        let originText = origin.trimmingCharacters(in: .whitespaces)
-        let mode: MusterTransport.SignInMode = createAccount ? .signUp : .signIn
-        Task {
-            do {
-                let account = try await MusterTransport.signIn(originText: originText, email: email, password: password, mode: mode)
-                try SessionKeychain.save(account)
-                live.connect(account: account)
-            } catch let storageError as SessionKeychainError {
-                error = storageError.localizedDescription
-            } catch let transportError as MusterTransportError {
-                error = describe(transportError)
-            } catch {
-                self.error = "Could not reach the server."
-            }
-            busy = false
+        .onChange(of: origin) { _, _ in reportInputEdits() }
+        .onChange(of: email) { _, _ in reportInputEdits() }
+        .onChange(of: password) { _, _ in reportInputEdits() }
+        .onChange(of: createAccount) { _, _ in reportInputEdits() }
+        .onDisappear {
+            // Closing the window that owns the attempt cancels it. Safe after a
+            // successful sign-in: adoption consumes the attempt first, so the
+            // navigation that replaces this view finds nothing to cancel and the
+            // user stays signed in. Closing a stale window is likewise a no-op,
+            // which is what keeps a newer window's attempt alive.
+            signIn.cancelAttempt(window: windowID)
         }
     }
 
-    private func describe(_ transportError: MusterTransportError) -> String {
-        switch transportError {
-        case .badOrigin: return "That server address doesn't look right."
-        case .noSession: return "Sign-in returned no session — check the password and try again."
-        case .signInFailed: return "Sign-in failed."
-        case .server(401, _): return "Email or password is incorrect."
-        case let .server(code, message): return message ?? "The server answered with an error (\(code))."
-        case .redirectRefused: return "The server redirected sign-in — refusing for safety."
-        case .unreadable: return "The server sent something this app couldn't read."
-        }
+    /// Backstop for the locked-inputs policy. The fields above are disabled while
+    /// this window owns an attempt, so this only fires if something changes them
+    /// anyway — in which case this window's own pending attempt is cancelled
+    /// rather than allowed to activate a superseded identity.
+    private func reportInputEdits() {
+        signIn.inputsEdited(in: windowID, to: currentInputs())
+    }
+
+    private func currentInputs() -> NativeSignInCoordinator.SignInInputs {
+        NativeSignInCoordinator.SignInInputs(
+            origin: origin,
+            email: email,
+            password: password,
+            mode: createAccount ? .signUp : .signIn
+        )
+    }
+
+    private func submitSignIn() {
+        // The coordinator refuses a duplicate submit from this window and
+        // supersedes any attempt from another window. Inputs are snapshotted
+        // here and locked until the attempt settles, so a response can never
+        // activate a superseded account, origin or mode.
+        let inputs = currentInputs()
+        signIn.beginAttempt(window: windowID, inputs: inputs)
     }
 }
 
@@ -208,6 +245,7 @@ struct LiveShellView: View {
 
 struct FleetSidebar: View {
     @EnvironmentObject private var live: LiveSessionModel
+    @EnvironmentObject private var signIn: NativeSignInCoordinator
     @State private var query = ""
     @State private var signOutError: String?
 
@@ -300,6 +338,15 @@ struct FleetSidebar: View {
     }
 
     private func signOut() {
+        // Fence any sign-in still in flight FIRST, unconditionally.
+        //
+        // `live.disconnect()` below also fences it, via
+        // `onSessionWillChangeExternally` — but only on the success path. If the
+        // Keychain clear is rejected we deliberately stay connected and report
+        // the failure, so the hook never fires and a pending attempt would
+        // survive to re-save and re-connect moments after the user asked to sign
+        // out. Invalidate before touching storage so both paths are covered.
+        signIn.invalidateForSignOut()
         do {
             try SessionKeychain.clear()
             signOutError = nil
