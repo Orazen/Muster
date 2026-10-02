@@ -21,8 +21,11 @@ if (armFile) {
   };
   const { DatabaseSync } = await import("node:sqlite");
   const originalPrepare = DatabaseSync.prototype.prepare;
-  DatabaseSync.prototype.prepare = function (sql, ...rest) {
-    const statement = Reflect.apply(originalPrepare, this, [sql, ...rest]);
+
+  /** Named seam between the real driver and the breaker so the patched
+   * prototype entry stays a typed function call, not dynamic dispatch. */
+  function prepareMaybeBreaking(db, sql, ...rest) {
+    const statement = originalPrepare.call(db, sql, ...rest);
     if (!pattern.test(sql)) return statement;
     // A plain delegation object, NOT a prototype-chain wrapper: node:sqlite's
     // native methods reject any receiver that is not the real statement
@@ -46,5 +49,9 @@ if (armFile) {
       },
     };
     return failing;
+  }
+
+  DatabaseSync.prototype.prepare = function (sql, ...rest) {
+    return prepareMaybeBreaking(this, sql, ...rest);
   };
 }
