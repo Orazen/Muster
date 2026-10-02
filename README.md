@@ -3,9 +3,9 @@
 
 # Muster
 
-**A local-first workspace for your roster of named AI teammates — the decisions stay human.**
+**A managed workspace for your AI teammates, with desktop tools and human approval.**
 
-[Open Muster](https://muster.orazen.online/app) · [Desktop downloads](https://muster.orazen.online/download.html) · [Product docs](https://muster.orazen.online/docs)
+[Open Muster](https://muster.today/app) · [Desktop downloads](https://muster.today/download.html) · [Product docs](https://muster.today/docs)
 
 <img src="docs/screenshots/readme-workspace.png" alt="Muster workspace: a named AI teammate mid-turn, Stop control live, streaming its reply" width="820">
 
@@ -13,9 +13,9 @@
 
 Muster brings named AI teammates, conversations, tools and human decisions into one workspace.
 Hand a teammate a task from the desktop or web interface, follow its reply as it streams, and answer when a supported engine asks for a decision — allow once, always allow, or deny.
-The roster, threads and history live with your own copy of the server, so the team is yours to run.
+Muster hosts the web workspace; the desktop app provides supported tools on your computer. You do not need to deploy your own server. The app is free to use with your own AI provider key; provider usage is billed separately.
 
-This is Muster's **private product repository**, maintained by Tharun Ramagiri at Orazen.
+This is Muster's **product source repository**, maintained by Tharun Ramagiri at Orazen.
 It contains the desktop application, server, web interface, CLI and companion clients.
 Repository access is for authorized development and operation of Muster.
 

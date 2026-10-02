@@ -1,4 +1,4 @@
-// Self-hosted docs at pretty URLs, end to end: boots the real server with a
+// Product docs at pretty URLs, end to end: boots the real server with a
 // throwaway marketing dir and asserts the /docs contract — the hub resolves
 // from docs/index.html, content pages resolve with or without their .html
 // suffix, docs.css serves as a static asset, an unknown docs path gets the
@@ -53,6 +53,7 @@ posixOnly("docs pretty-URL serving", () => {
     writeFileSync(join(www, "index.html"), "<!doctype html><html><body>landing</body></html>");
     writeFileSync(join(www, "docs", "index.html"), "<!doctype html><html><body>docs hub</body></html>");
     writeFileSync(join(www, "docs", "quick-start.html"), "<!doctype html><html><body>quick start</body></html>");
+    writeFileSync(join(www, "docs", "setup.html"), "<!doctype html><html><body>managed setup</body></html>");
     writeFileSync(join(www, "docs", "docs.css"), "body{color:#fff}");
     mkdirSync(join(www, "downloads"), { recursive: true });
     writeFileSync(join(www, "downloads", "Muster-owned.zip"), UPDATE_ZIP);
@@ -128,6 +129,23 @@ posixOnly("docs pretty-URL serving", () => {
     expect(res.type).toContain("text/css");
     expect(res.text).toContain("body{color:#fff}");
   });
+
+  it.each(["/docs/self-host", "/docs/self-host/", "/docs/self-host.html"])(
+    "redirects the retired setup bookmark %s to the managed guide",
+    async (path) => {
+      for (const method of ["GET", "HEAD"]) {
+        const response = await fetch(`${BASE}${path}`, { method, redirect: "manual" });
+        expect(response.status).toBe(308);
+        expect(response.headers.get("location")).toBe("/docs/setup");
+        expect(response.headers.get("cache-control")).toBe("no-cache");
+        expect(await response.text()).toBe("");
+      }
+      const destination = await get(path);
+      expect(destination.status).toBe(200);
+      expect(destination.text).toContain("managed setup");
+      expect(destination.text).not.toContain("owned app shell");
+    },
+  );
 
   it("404s unknown docs paths with the docs 404, not the app SPA", async () => {
     const res = await get("/docs/no-such-page");

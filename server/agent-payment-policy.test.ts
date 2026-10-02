@@ -1387,7 +1387,9 @@ describe("the C0 module performs no effects and is wired to nothing", () => {
   });
 
   it("is imported by no other server or web source file", () => {
-    const offenders = sourceFilesUnder(join(here, ".."))
+    // Check the application roots, not private verification trees or native
+    // build caches elsewhere in the checkout. `here` is already server/.
+    const offenders = sourceFilesUnder(here)
       .concat(sourceFilesUnder(join(here, "..", "src")))
       .filter((file) => !file.endsWith("agent-payment-policy.test.ts"))
       .filter((file) => readFileSync(file, "utf8").includes("agent-payment-policy"));

@@ -32,7 +32,7 @@
       <a href="/docs">Overview</a>
       <a href="/docs/quick-start">Quick start</a>
       <a href="/docs/install" aria-current="page">Install &amp; apps</a>
-      <a href="/docs/self-host">Self-hosting</a>
+      <a href="/docs/setup">Account &amp; device setup</a>
     </div>
     <div class="docs-sidebar__group">
       <p class="docs-sidebar__label">Operate</p>
@@ -50,78 +50,50 @@
 
   <main class="docs-content">
 
-    <h1>Install &amp; apps</h1>
-    <p class="lead">Muster runs as a desktop app on macOS, Windows, and Linux, as a web app in any browser, and as thin companions on your phone. Every desktop build embeds the harness server — there is no separate server setup.</p>
-
+<h1>Install &amp; apps</h1>
+    <p class="lead">Start in the managed web app. Use a desktop app for supported device capabilities and a companion app for supported mobile actions. Each installed version has its own connection and permission steps.</p>
     <div class="pill-row">
-      <span class="pill">Current: v1.10.4</span>
-      <span class="pill">macOS · Windows · Linux</span>
       <span class="pill">Web app</span>
-      <span class="pill">iOS / Android companions</span>
+      <span class="pill">macOS · Windows · Linux</span>
+      <span class="pill">Phone &amp; Watch companions</span>
     </div>
-
-    <h2>Desktop downloads</h2>
-    <p>Five artifacts, all on the <a href="/download.html">download page</a>. The download page detects your platform and moves the matching card to the top.</p>
-    <div class="table-scroll" role="region" tabindex="0" aria-label="Desktop downloads table">
-<table>
-      <tr><th>Platform</th><th>Artifact</th><th>Install</th></tr>
-      <tr><td>macOS — Apple Silicon</td><td><a href="https://muster.today/downloads/Muster.dmg"><code>Muster.dmg</code></a></td><td>Drag to Applications.</td></tr>
-      <tr><td>macOS — Intel</td><td><a href="https://muster.today/downloads/Muster-intel.dmg"><code>Muster-intel.dmg</code></a></td><td>Same as above.</td></tr>
-      <tr><td>Windows (x64)</td><td><a href="https://muster.today/downloads/Muster-setup.exe"><code>Muster-setup.exe</code></a></td><td>One-click, per-user, no admin rights.</td></tr>
-      <tr><td>Ubuntu / Debian (x64)</td><td><a href="https://muster.today/downloads/Muster.deb"><code>Muster.deb</code></a></td><td><code>sudo dpkg -i Muster.deb</code></td></tr>
-      <tr><td>Linux — any distro (x64)</td><td><a href="https://muster.today/downloads/Muster.AppImage"><code>Muster.AppImage</code></a></td><td><code>chmod +x Muster.AppImage &amp;&amp; ./Muster.AppImage</code></td></tr>
-    </table>
-    </div>
-    <div class="callout">
-      <span class="callout__mark">Homebrew</span>
-      <span>On Apple Silicon Macs, <code>brew tap orazen/muster &amp;&amp; brew install --cask muster</code> installs Muster and clears the quarantine flag automatically — no Gatekeeper prompt.</span>
-    </div>
-
-    <h2>The Muster CLI</h2>
-    <p>One file, zero dependencies, ~40 KB. It boots the whole stack (<code>muster up</code>), prints the phone-pairing QR, and drives the roster from any terminal — including a VPS over SSH. Works against your local harness or Muster Cloud.</p>
-    <pre><code>curl -fsSL https://muster.today/downloads/muster-cli.mjs -o muster
-chmod +x muster
-./muster help</code></pre>
-    <p>Requires Node 22+. Every command works the same as from a checkout (<code>node cli/muster.mjs</code>) — <code>up · setup · stop · logs · pair · bots · send · approve · status · receipts · sessions</code>.</p>
-
-    <h2>First launch on each platform</h2>
-    <p>The desktop builds are unsigned while proper signing and notarization are tracked. Each platform has a one-time first-open step, not a block:</p>
-    <ul>
-      <li><strong>macOS</strong> — if Gatekeeper calls the app <em>damaged</em>, run <code>xattr -cr /Applications/Muster.app</code> then open it. Or right-click the app → Open.</li>
-      <li><strong>Windows</strong> — if SmartScreen appears, choose <strong>More info → Run anyway</strong>. The installer is per-user; nothing needs admin.</li>
-      <li><strong>Ubuntu</strong> — install the <code>.deb</code> with APT (<code>sudo apt install ./Muster.deb</code>) so desktop dependencies resolve, then launch Muster from the GNOME application launcher. The AppImage uses a static runtime and doesn't need <code>libfuse2</code>.</li>
-    </ul>
-
-    <h2>Auto-updates</h2>
-    <p>Packaged desktop apps keep themselves current. On launch the app checks the update feed automatically (first check shortly after startup, then hourly — failures stay silent), and when a new build is found you get an in-app banner. Downloading is one click, and the update installs when you choose <strong>Restart to update</strong>. Nothing installs without your say-so.</p>
-    <p>Check the current version on the <a href="/download.html">download page</a> anytime; SHA-256 checksums for every artifact are listed there.</p>
 
     <h2>The web app</h2>
-    <p>Nothing to install at all: open <a href="/app">/app</a> in any browser and sign up free. It's the same chat UI and roster against a hosted harness — useful from a machine you don't want to install on. For the full stack on your own server instead, see <a href="/docs/self-host">Self-hosting</a>.</p>
+    <p>Open <a href="https://muster.today/app">Muster</a> in your browser and complete the sign-in and setup steps shown. Muster is a free app; bring your own provider API key and pay the provider for usage. You do not need a separate server deployment. See <a href="/docs/setup">Account &amp; device setup</a>.</p>
 
-    <h2>Mobile companions</h2>
-    <p>iOS and Android companions are built (store listings are pending developer accounts). They're thin clients: the phone owns nothing — your computer stays the source of truth for transcripts, keys, and events, and the phone streams approvals, replies, and messages over a paired connection.</p>
-    <p>Pairing uses the same claim flow as the web console: start the server, scan the QR code it prints (or open the <code>/claim#…</code> link), and the phone is in as your device. Claim codes are single-use and expire after 5 minutes. Every sign-in is a tracked session — <code>muster sessions</code> lists them, <code>muster sessions --revoke other</code> kills every device but the one you're on.</p>
-
-    <h2>System requirements</h2>
-    <div class="table-scroll" role="region" tabindex="0" aria-label="System requirements table">
-<table>
-      <tr><th>Platform</th><th>Requirement</th><th>Notes</th></tr>
-      <tr><td>macOS</td><td>Apple Silicon or Intel Mac</td><td>Full capability set, including on-device dictation and local screen control.</td></tr>
-      <tr><td>Windows</td><td>64-bit Windows</td><td>Per-user install, no admin.</td></tr>
-      <tr><td>Linux</td><td>Ubuntu 24.04 x64</td><td>Beta: chat, engines, approvals, cloud computers work; local screen preview, dictation, and Wayland capture are not claimed yet and fail closed without blocking anything else.</td></tr>
-      <tr><td>CLI (<code>muster</code> — the single-file script above, or <code>node cli/muster.mjs</code> from a checkout)</td><td>Node 22+</td><td>Any machine with Node — including a VPS over SSH.</td></tr>
-      <tr><td>Engines</td><td>At least one agent CLI logged in, or one API provider key</td><td>Engines appear in the picker automatically; a free-tier provider key costs nothing.</td></tr>
-    </table>
+    <h2>Desktop downloads</h2>
+    <p>Use the <a href="/download.html">download page</a> for the current version, available platforms and release-specific installation information. Keep your existing workspace data when upgrading.</p>
+    <div class="table-scroll" role="region" tabindex="0" aria-label="Desktop downloads table">
+      <table>
+        <tr><th>Platform</th><th>Package</th><th>First step</th></tr>
+        <tr><td>macOS — Apple Silicon</td><td><a href="/download.html">Apple Silicon download</a></td><td>Install the package intended for your Mac.</td></tr>
+        <tr><td>macOS — Intel</td><td><a href="/download.html">Intel download</a></td><td>Check architecture and release availability.</td></tr>
+        <tr><td>Windows (x64)</td><td><a href="/download.html">Windows installer</a></td><td>Review the installer and publisher information.</td></tr>
+        <tr><td>Ubuntu / Debian (x64)</td><td><a href="/download.html">Debian package</a></td><td>Install the package and its required desktop dependencies.</td></tr>
+        <tr><td>Linux (x64)</td><td><a href="/download.html">AppImage</a></td><td>Use the supported runtime and architecture shown for that release.</td></tr>
+      </table>
     </div>
+
+    <h2>First launch and updates</h2>
+    <p>Open the installed app and follow its account, provider and permission steps. Signing, notarization and operating-system compatibility are specific to each package. If a package fails a platform check, confirm the download and release instructions before proceeding.</p>
+    <p>Where the installed version offers an update, review its in-app controls and restart when you are ready. Updating the website does not update an installed desktop or companion app.</p>
+
+    <h2>Device capabilities</h2>
+    <p>Supported desktop versions can use local agent CLIs, local models, files and computer controls. Those features run where the device tools are available, with the permissions you grant. A web sign-in alone does not make your laptop's tools available to a hosted bot.</p>
+    <p>Keep the selected computer online for work that needs it. Capabilities differ by operating system, installed version and runtime; check the available controls rather than assuming every platform offers the same tools.</p>
+
+    <h2>Phone and Watch companions</h2>
+    <p>Companion availability and distribution are separate from the desktop downloads. Use a supported build and its pairing flow to connect the intended workspace or computer. Approval delivery and replies need an available connection; an installed app alone does not establish pairing.</p>
+    <p>Companions may retain local credentials, drafts or cached content. They are not complete backups of the workspace. Confirm the correct account and destination before sending a task or answering an approval.</p>
+
+    <h2>The Muster CLI</h2>
+    <p>The distributed CLI can operate an authorized workspace through commands such as <code>pair</code>, <code>bots</code>, <code>send</code>, <code>status</code> and <code>receipts</code>. Obtain it through the official <a href="/download.html">downloads</a>, use <code>muster help</code> for that version, and read <a href="/docs/agents">For agents</a> before connecting another agent. Public npm packages with similar names are not an installation path for Muster.</p>
 
     <div class="callout callout--note">
-      <span class="callout__mark">i</span>
-      <span>Application data stays local in <code>~/.muster</code>; the desktop app keeps its browser data and window state in the standard XDG config directory on Linux (<code>~/.config/muster</code>). Remove the app and that data is untouched.</span>
+      <span class="callout__mark">Existing desktop data</span>
+      <span>Released desktop versions can keep an installation-specific workspace, commonly under <code>~/.muster</code>, along with separate app-profile data. Hosted workspace records live on the service. Matching account sign-ins do not prove that these records or provider keys have been migrated or synchronized.</span>
     </div>
-
-    <h2>Next steps</h2>
-    <p>Installed? Go make your workforce: <a href="/docs/quick-start">Quick start</a> takes you from first launch to first bot. Running on a server instead — <a href="/docs/self-host">Self-hosting</a>.</p>
+    <p>Continue with <a href="/docs/quick-start">Quick start</a> or review <a href="/docs/setup">Account &amp; device setup</a> before connecting more devices.</p>
 
   </main>
 </div>

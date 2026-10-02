@@ -1,7 +1,7 @@
 {
-  "name": "Muster+",
-  "short_name": "Muster+",
-  "description": "The world's best AI assistant",
+  "name": "Muster",
+  "short_name": "Muster",
+  "description": "Your AI workspace for everyday work.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",

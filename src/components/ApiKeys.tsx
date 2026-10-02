@@ -64,8 +64,8 @@ const CREDENTIALS = {
     placeholder: "Paste your OpenSandbox server API key",
     description:
       "Private sandbox alternative to Box. Saving a key stores it for future use — local private sandboxes are not yet available in this release.",
-    href: "/docs/self-host",
-    linkLabel: "Read the private hosting guide",
+    href: "/docs/setup",
+    linkLabel: "Read the setup guide",
     optional: true,
   },
   opencodeGo: {
@@ -89,7 +89,7 @@ const CREDENTIALS = {
     placeholder: "https://muster.today",
     description:
       "Opt in to one shared identity: sign in here and on your Muster Cloud endpoint. This bridges sign-in only — each install keeps its own bots, threads, and messages on-device.",
-    href: "/docs/self-host",
+    href: "/docs/setup",
     linkLabel: "How it works",
     optional: true,
     warning: "This install needs internet access to authenticate through the chosen cloud endpoint.",

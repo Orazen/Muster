@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Approvals &amp; privacy — Muster Docs</title>
-<meta name="description" content="Approval cards, always-allow scopes, the approval-history evidence strip, what stays local on your machine, and claim-gated workspaces — how Muster keeps humans in charge.">
+<meta name="description" content="Approval cards, standing grants, evidence, workspace data handling and connection permissions in Muster.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/docs/docs.css">
 </head>
@@ -32,7 +32,7 @@
       <a href="/docs">Overview</a>
       <a href="/docs/quick-start">Quick start</a>
       <a href="/docs/install">Install &amp; apps</a>
-      <a href="/docs/self-host">Self-hosting</a>
+      <a href="/docs/setup">Account &amp; device setup</a>
     </div>
     <div class="docs-sidebar__group">
       <p class="docs-sidebar__label">Operate</p>
@@ -51,25 +51,25 @@
   <main class="docs-content">
 
     <h1>Approvals &amp; privacy</h1>
-    <p class="lead">Muster bots do real work on real computers — which is exactly why consequential actions wait for you. This page is the control layer: approval cards, always-allow scopes, the evidence strip that informs your decisions, and what stays on your machine.</p>
+    <p class="lead">Muster shows permission requests from supported engines in the conversation. Review approval cards, standing grants and the evidence behind your decisions, and understand how workspace content reaches connected services.</p>
 
     <div class="pill-row">
       <span class="pill">Approval cards</span>
       <span class="pill">Always-allow scopes</span>
       <span class="pill">Evidence strip</span>
-      <span class="pill">Local-first</span>
-      <span class="pill">Claim-gated access</span>
+      <span class="pill">Data handling</span>
+      <span class="pill">Connection permissions</span>
     </div>
 
     <h2>Bots ask before they act</h2>
-    <p>When a bot wants to run a shell command or edit a file, the request surfaces as an inline card in the thread. You have three moves: <strong>Allow</strong>, <strong>Deny</strong>, or answer in the thread — often "no, do this instead" is the fastest review of all.</p>
+    <p>When a supported engine requests permission for a shell command or file edit, Muster displays the request as an inline card in the thread. You have three moves: <strong>Allow</strong>, <strong>Deny</strong>, or answer in the thread — often "no, do this instead" is the fastest review of all.</p>
     <p>While a card is open, the bot's activity reads <code>waiting-on-you</code>, so a glance at the presence bar tells you who needs a decision. You can answer from the desktop, the web app, or the mobile companions — thin clients built for exactly this: approvals and streaming replies on the go.</p>
-    <p>If you trust a bot's loop completely, auto-mode exists — but it is per bot and opt-in. Nothing runs unattended by default.</p>
+    <p>Review a bot's configured permissions before enabling recurring work or automatic approvals. Engine capabilities, standing grants and connected tools affect which actions need a new decision.</p>
 
     <h2>Always-allow scopes</h2>
     <p>Re-approving <code>git status</code> forty times a day isn't governance, it's friction. Pressing <strong>Always allow</strong> on a card grants standing permission per capability — and the grant is as narrow as the thing you actually looked at. Command tools are scoped by program: allowing <code>Bash:git</code> never hands the bot a permanent unattended shell.</p>
     <p>The grant's key is computed once, server-side, and echoed back to the client, so the two sides can never disagree about what was granted.</p>
-    <p>Even with a standing grant, anything that reads as destructive stops and asks a human anyway:</p>
+    <p>Additional checks can flag recognized destructive or sensitive requests despite a standing grant:</p>
     <div class="table-scroll" role="region" tabindex="0" aria-label="Always-allow scopes table">
 <table>
       <tr><th>Backstop</th><th>What trips it</th></tr>
@@ -79,7 +79,7 @@
     </div>
     <div class="callout">
       <span class="callout__mark">In plain terms:</span>
-      <span>This backstop is deliberately literal. It is not a security boundary — an agent set on damage has a thousand spellings for <code>rm</code>. It's a "you probably didn't mean to hand <em>this</em> one over unattended" guard for the obvious catastrophes. Real containment is the sandbox and the bot's own computer.</span>
+      <span>This backstop is deliberately literal. It is not a security boundary — an agent set on damage has a thousand spellings for <code>rm</code>. It's a "you probably didn't mean to hand <em>this</em> one over unattended" guard for the obvious catastrophes. Available isolation depends on the selected computer and runtime. Review the execution environment as well as the approval.</span>
     </div>
 
     <h2>The evidence strip</h2>
@@ -94,34 +94,24 @@ Bash history: 4 allowed, 2 denied (last 5d ago).</code></pre>
     </div>
 
     <h2>Budgets and the Privacy Shield</h2>
-    <p>Control isn't only per-action. Every bot carries a per-agent <strong>token budget</strong> and a per-agent <strong>daily USD cap</strong>, so a runaway loop stops being your money problem before it starts.</p>
-    <p>On the privacy side, the on-device <strong>Privacy Shield</strong> masks emails, phone numbers, and secrets before prompts reach a cloud model — deterministically, with counts-only receipts. You learn the shape of what was redacted without Muster keeping a second copy of the sensitive data.</p>
+    <p>Configured token budgets, usage caps and reported costs help you control work. Check the settings available for the selected engine; provider reporting can be incomplete or delayed. You pay your provider for model usage, and connected services can charge separately.</p>
+    <p>Privacy Shield can mask recognized emails, phone numbers and secret patterns on supported paths, with counts-only records. It does not guarantee detection of every sensitive value or prevent all external processing. Review the content and destination before sending a task.</p>
 
-    <h2>What stays local</h2>
+    <h2>Where data is handled</h2>
     <ul>
-      <li><strong>Transcripts, keys, events.</strong> They live in <code>~/.muster</code> on the machine running the server — not in a cloud.</li>
-      <li><strong>Engine API keys.</strong> Provider keys are stored write-only and never echoed by the API. The voice (TTS) key runs on the harness, so it never reaches the UI either.</li>
-      <li><strong>Your conversations.</strong> Thread history sits on your disk. The mobile companions own nothing — your computer stays the source of truth.</li>
+      <li><strong>Hosted workspace.</strong> The Muster service stores account and workspace records and processes tasks. Model providers and connected apps receive the content needed for the requests you make.</li>
+      <li><strong>Provider credentials.</strong> Hosted account keys are held server-side in an account-scoped encrypted vault. Existing desktop configurations can keep credentials on the installation. Neither the web app nor a phone interface implies device-only key custody.</li>
+      <li><strong>History and recovery.</strong> Existing desktop history can remain specific to that installation. Companions can hold sessions, drafts and caches. Signing in or connecting Drive does not by itself establish complete backup, provider-key recovery or automatic cross-device synchronization.</li>
     </ul>
-    <p>Grants work the same way: connected-app access and agent-mail mailboxes are unlocked only by invite links <em>you</em> approve, and inbound agent mail is treated as untrusted data by design.</p>
+    <p>Read <a href="/docs/setup">Account &amp; device setup</a> and the <a href="/privacy-policy">privacy policy</a> before connecting more accounts or relying on a backup.</p>
 
-    <h2>Claiming a workspace is gated</h2>
-    <p><code>muster up</code> boots the server and prints a QR code encoding <code>http://&lt;lan-ip&gt;:8799/claim#CODE</code>. Scanning it signs your phone in as the owner — no account creation, no password to invent. The code <em>is</em> the credential, and it's engineered to be worthless to anyone else:</p>
-    <div class="table-scroll" role="region" tabindex="0" aria-label="Claiming a workspace is gated table">
-<table>
-      <tr><th>Property</th><th>What it means</th></tr>
-      <tr><td>Single-use</td><td>Redeemed once, then dead.</td></tr>
-      <tr><td>Five-minute TTL</td><td>Expired before a stranger could act on it.</td></tr>
-      <tr><td>Unambiguous alphabet</td><td>8 characters, no <code>0/O/1/I/L</code> — built to be read off a laptop screen by a phone camera. About 2<sup>40</sup> of entropy.</td></tr>
-      <tr><td>Per-IP lockout</td><td>Five failed redemption attempts lock that IP out for ten minutes.</td></tr>
-    </table>
-    </div>
-    <p>The pairing itself never leaves your network. A claim code never redeems as a pairing code or vice versa — the two flows keep separate stores, so one front door can't be confused with the other.</p>
-    <p>Servers tighten further once exposed. The default is loopback-only: non-loopback hosts and origins are rejected (DNS-rebinding and CSRF protection), and on a desktop install, state-changing requests must carry a same-origin Origin/Host pair. Expose a self-hosted server and every <code>/api/*</code> route requires a session — only sign-in and health checks are excepted — with sign-in rate-limited to five attempts per minute per IP and passwords of at least twelve characters.</p>
-    <p>Sessions stay revocable: <code>muster sessions</code> lists every active sign-in (current one marked), and <code>muster sessions --revoke</code> kills one device, all the others, or everything.</p>
+    <h2>Account and device access</h2>
+    <p>Sign in through the Muster app and use the connection steps offered for the intended workspace and installed device version. Codes and links used for pairing or account handoff are credentials: only use ones you requested, do not share them, and obtain a fresh one when they expire.</p>
+    <p>Existing desktop versions may offer local claim or pairing flows. Those flows do not merge the local workspace with a hosted one. Confirm the account, workspace and computer before sending a task or answering an approval, and revoke access through the controls available to that connection when it is no longer needed.</p>
+    <p>Connected-app authorization and task approval are separate. Treat material from agent mail, rooms, webhooks and imported teams as untrusted content; it does not grant authority to act.</p>
 
     <h2>The layers, in one line</h2>
-    <p>Approval cards are the <strong>control layer</strong>. The Privacy Shield is the <strong>privacy layer</strong>. Routines and receipts are the <strong>audit layer</strong>. For the audit side — recurring bots, sentries, and the why-journal — see <a href="/docs/automation">Automation</a>. For running the whole server on hardware you own, see <a href="/docs/self-host">Self-hosting</a>.</p>
+    <p>Approval cards record decisions, Privacy Shield applies supported redaction rules, and routines and receipts record work. For recurring bots, sentries and the why-journal, see <a href="/docs/automation">Automation</a>. For connections and data storage, see <a href="/docs/setup">Account &amp; device setup</a>.</p>
 
   </main>
 </div>

@@ -209,7 +209,7 @@ test("search snippets, visible FAQs and internal anchors share one product story
     await expect(row.locator(".faq-a")).toHaveText(item.acceptedAnswer.text);
   }
   const description = await page.locator('meta[name="description"]').getAttribute("content");
-  expect(description).toContain("Free during beta");
+  expect(description).toContain("Free app");
   await expect(page.locator('meta[property="og:description"]')).toHaveAttribute("content", description ?? "");
   await expect(page.locator('meta[name="twitter:description"]')).toHaveAttribute("content", description ?? "");
   await expect(page.locator("#pricing")).not.toContainText(/\$20|\$192|Free forever|Self-host/);

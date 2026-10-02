@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Quick start — Muster Docs</title>
-<meta name="description" content="From zero to a working Muster workforce: install the app, start the local server, claim your workspace from your phone, add an engine, and brief your first bot.">
+<meta name="description" content="Open Muster, connect your provider API key, choose a model and give your first bot a task.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/docs/docs.css">
 </head>
@@ -32,7 +32,7 @@
       <a href="/docs">Overview</a>
       <a href="/docs/quick-start" aria-current="page">Quick start</a>
       <a href="/docs/install">Install &amp; apps</a>
-      <a href="/docs/self-host">Self-hosting</a>
+      <a href="/docs/setup">Account &amp; device setup</a>
     </div>
     <div class="docs-sidebar__group">
       <p class="docs-sidebar__label">Operate</p>
@@ -50,100 +50,39 @@
 
   <main class="docs-content">
 
-    <h1>Quick start</h1>
-    <p class="lead">From zero to a working workforce in about ten minutes: install Muster, start the local server, claim the workspace from your phone, give a bot an engine, and send your first message. This guide covers a local server; remote engines and connected services use their own accounts and network connections.</p>
-
+<h1>Quick start</h1>
+    <p class="lead">Start with one teammate and one task. Open your workspace, connect a model provider, and review the result in the conversation.</p>
     <div class="pill-row">
-      <span class="pill">~10 minutes</span>
-      <span class="pill">macOS · Windows · Linux</span>
-      <span class="pill">Bring your own model</span>
+      <span class="pill">Web workspace</span>
+      <span class="pill">Free Muster app</span>
+      <span class="pill">Bring your own API key</span>
     </div>
 
-    <h2>1. Install the app (or skip it)</h2>
-    <p>Grab the desktop build for your platform from the <a href="/download.html">download page</a>: a <code>.dmg</code> for macOS (Apple Silicon or Intel), an <code>.exe</code> installer for Windows, or a <code>.deb</code> / <code>.AppImage</code> for Linux. Install details, first-launch notes, and auto-update behavior live in <a href="/docs/install">Install &amp; apps</a>.</p>
-    <p>The desktop app embeds the Muster harness server, so there is no separate server setup. Prefer the terminal instead? Grab the single-file CLI — no checkout needed:</p>
-    <pre><code><span class="c"># one file, zero dependencies, ~40 KB — Node 22+ required</span>
-curl -fsSL https://muster.today/downloads/muster-cli.mjs -o muster
-chmod +x muster
+    <h2>1. Open Muster</h2>
+    <p>Open <a href="https://muster.today/app">Muster</a> in your browser, sign in using an available option, and complete the setup steps shown for your account. No server deployment is needed. The <a href="/docs/setup">account and device guide</a> explains connections, data storage and existing desktop installations.</p>
+    <p>Desktop downloads and companion availability are listed under <a href="/docs/install">Install &amp; apps</a>. You can begin in the browser before configuring device tools.</p>
 
-<span class="c"># boots the local server in the foreground (Ctrl-C stops it)</span>
-./muster up
+    <h2>2. Connect a model provider</h2>
+    <p>Bring a supported provider API key through setup or <strong>Settings → Providers</strong>. Muster is a free app; you pay your provider for model usage. A Muster sign-in and a provider subscription are separate, and a chat subscription does not necessarily include API access.</p>
+    <p>Choose an engine and model available to your workspace. Existing desktop installations can also use supported agent CLIs or local models on that computer. A local model on your laptop is not automatically reachable from the hosted web service. See <a href="/docs/engines">Engines &amp; models</a>.</p>
 
-<span class="c"># or detached: close the terminal and Muster keeps running</span>
-./muster up -d</code></pre>
-    <p>Working inside a Muster checkout already? <code>node cli/muster.mjs</code> is the same CLI.</p>
-    <div class="callout">
-      <span class="callout__mark">Note</span>
-      <span>The CLI needs Node 22 or newer. On a desktop app install you don't need Node at all — the server ships inside the app.</span>
-    </div>
+    <h2>3. Create your first bot</h2>
+    <p>Create a bot from the roster. Give it a name, a role and a short brief: what you want it to handle, how it should report back, and what it must ask before changing. Select the engine and model you connected.</p>
 
-    <h2>2. Start the local server</h2>
-    <p>In the desktop app, use the app menu: <strong>Muster ▸ Start local server</strong>. The server binds to your machine and the chat UI opens against it. In a packaged install that's the whole story — no environment to configure, nothing else to run.</p>
-    <p>If you went the CLI route, <code>./muster up</code> <em>is</em> the server. Managing it:</p>
-    <pre><code><span class="c"># end a detached server (SIGTERM, then SIGKILL after 10s)</span>
-./muster stop
+    <h2>4. Send a small first task</h2>
+    <p>Try: <strong>“Help me plan tomorrow. Ask what you need to know, then draft a short plan here.”</strong> Review its reply before adding tools or scheduling repeated work.</p>
+    <p>When a supported engine requests permission, Muster shows an approval card. Read the proposed action and destination, then allow or deny it. Task receipts record available duration, usage and cost information; reporting depends on the engine.</p>
 
-<span class="c"># tail its output (./muster logs 200 for more)</span>
-./muster logs
-
-<span class="c"># useful flags</span>
-./muster up --port 8799          <span class="c"># pick another port</span>
-./muster up --data-dir ~/muster  <span class="c"># move the data directory</span></code></pre>
-    <p>A suspended laptop stops everything — the machine the server runs on needs to stay awake.</p>
-
-    <h2>3. Claim your workspace from your phone</h2>
-    <p>When the server boots it prints a pairing QR code and link in the terminal (the desktop app shows it too):</p>
-    <pre><code><span class="c">Muster is up. Scan to open the console on your phone:</span>
-<span class="c">http://192.168.x.x:8799/claim#SEH5ZP3S</span></code></pre>
-    <p>Scan it with your phone's camera — or open the printed link — and you land in the console already signed in as the owner. No account creation, no password to invent, and the pairing never leaves your network. Claim codes are single-use and expire after 5 minutes; five failed redemption attempts lock an IP out for ten.</p>
-    <p>Prefer a guided setup on the computer itself? Run <code>./muster setup</code>: it connects to (or boots) the local server, signs you in as the owner, helps you pick an engine, and introduces your first bot. New phone later, or a second one? Run <code>muster up</code> again — it detects the running server and prints a fresh QR instead of starting a second one.</p>
-    <p>Every scan and sign-in is a tracked session. <code>./muster sessions</code> lists them (current one marked), and <code>./muster sessions --revoke &lt;prefix|other|all&gt;</code> kills one, all others, or all — useful if you lose a phone.</p>
-
-    <h2>4. Add your first engine</h2>
-    <p>An engine is what a bot thinks with. Open <strong>Settings → Providers → Add model provider</strong> and register any OpenAI- or Anthropic-compatible endpoint as a first-class engine: a name, the base URL, an optional API key, the wire format, and a model list. Local <code>127.0.0.1</code> endpoints like Ollama and LM Studio work out of the box on desktop installs.</p>
-    <p>You can also paste an API key from any of the 12 built-in providers in <strong>Settings → Providers</strong> — OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Cohere, Groq, Together AI, Fireworks AI, OpenRouter, and OpenCode Zen. Google AI Studio, Groq, OpenRouter's <code>:free</code> models (including the Nex AGI N2.5 agentic models), and OpenCode Zen all have free tiers, so your first bot can cost nothing.</p>
-    <div class="callout">
-      <span class="callout__mark">CLI route</span>
-      <span>Desktop Muster also picks up agent CLIs already installed and logged in on your machine — Claude, Codex, Grok, Gemini and friends appear in the model picker automatically, no key pasting needed.</span>
-    </div>
-    <p>Engines, health, and per-bot model picks are covered in <a href="/docs/engines">Engines &amp; models</a>.</p>
-
-    <h2>5. Hire and brief your first bot</h2>
-    <p>Hiring is one conversation. Create a bot from the roster, give it a name, a persona, and a brief — what it owns, how it should report back, what never to touch. The persona and memory persist across tasks, so a bot you briefed once keeps its brief tomorrow. Give it the engine you just added in its settings, and it's on the payroll.</p>
-    <p>Then send the first message — in the desktop app, from your phone, or straight from the terminal:</p>
-    <pre><code><span class="c"># say hello to a bot named "scout"</span>
-./muster send scout "Introduce yourself and tell me what you own."
-
-<span class="c"># watch status and receipts</span>
-./muster status
-./muster receipts</code></pre>
-    <p>When the engine requests permission, the action surfaces as an approval card you Allow or Deny. Open a task receipt to review recorded turns, duration, token usage, and cost when the engine reports it. See <a href="/docs/approvals">Approvals &amp; privacy</a>.</p>
-
-    <h2>Where your data lives</h2>
-    <p>For a local install, Muster stores transcripts, keys, events, the database, and the auth secret in <code>~/.muster</code> by default. A detached server keeps its record and log under <code>~/.muster/run/</code>. Model providers, connected apps, backups, and other online features can make external requests. Back up the server's data directory along with any working folders your bots use.</p>
+    <h2>5. Add connections as your work needs them</h2>
+    <p>Use <strong>Settings → Connections</strong> for the services your workspace supports. Complete each service's authorization separately. Device work requires an available computer and the relevant permissions; see <a href="/docs/setup">Account &amp; device setup</a>.</p>
+    <p>Follow any Drive step shown in setup and review its consent screen. Verify backup and restore results before relying on them. Google sign-in alone does not establish Drive access, automatic sync or recovery of every credential.</p>
 
     <h2>Next steps</h2>
     <div class="card-grid section-cards">
-      <a class="card" href="/docs/install">
-        <p class="card__kicker">Start</p>
-        <h3>Install &amp; apps</h3>
-        <p>All five desktop artifacts, auto-updates, the web app, and the mobile companions.</p>
-      </a>
-      <a class="card" href="/docs/engines">
-        <p class="card__kicker">Operate</p>
-        <h3>Engines &amp; models</h3>
-        <p>Connect providers, pick models per bot, swap mid-conversation, watch health.</p>
-      </a>
-      <a class="card" href="/docs/goals">
-        <p class="card__kicker">Operate</p>
-        <h3>Goals &amp; autonomy</h3>
-        <p>Give a bot an outcome instead of managing turns — with budgets and hard stops.</p>
-      </a>
-      <a class="card" href="/docs/automation">
-        <p class="card__kicker">Operate</p>
-        <h3>Automation</h3>
-        <p>Routines, sentries, and webhooks: work that keeps happening without you.</p>
-      </a>
+      <a class="card" href="/docs/setup"><p class="card__kicker">Start</p><h3>Account &amp; device setup</h3><p>Understand provider keys, connected devices, Drive consent and workspace storage.</p></a>
+      <a class="card" href="/docs/engines"><p class="card__kicker">Operate</p><h3>Engines &amp; models</h3><p>Connect providers and choose a model for each bot.</p></a>
+      <a class="card" href="/docs/approvals"><p class="card__kicker">Operate</p><h3>Approvals &amp; privacy</h3><p>Review actions, standing grants and data handling.</p></a>
+      <a class="card" href="/docs/automation"><p class="card__kicker">Operate</p><h3>Automation</h3><p>Configure recurring work after your first task succeeds.</p></a>
     </div>
 
   </main>

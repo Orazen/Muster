@@ -32,7 +32,7 @@
       <a href="/docs">Overview</a>
       <a href="/docs/quick-start">Quick start</a>
       <a href="/docs/install">Install &amp; apps</a>
-      <a href="/docs/self-host">Self-hosting</a>
+      <a href="/docs/setup">Account &amp; device setup</a>
     </div>
     <div class="docs-sidebar__group">
       <p class="docs-sidebar__label">Operate</p>
@@ -51,7 +51,7 @@
   <main class="docs-content">
 
     <h1>Engines &amp; models</h1>
-    <p class="lead">An engine is a connection to an AI model — a CLI that's already logged in on your machine, an API provider with a key, or your own OpenAI- or Anthropic-compatible endpoint. Every bot runs on one, you can swap it mid-conversation, and every reply is stamped with exactly which engine produced it.</p>
+    <p class="lead">An engine is a connection to an AI model. Connect your own provider API key in the web app, or use the engine options available in an existing desktop installation. Model availability, costs and rate limits depend on the provider and execution environment.</p>
 
     <div class="pill-row">
       <span class="pill">10+ CLI engines</span>
@@ -63,11 +63,11 @@
     <h2>What an engine is</h2>
     <p>An engine is how a bot gets a brain. Muster supports three kinds:</p>
     <ul>
-      <li><strong>CLI engines</strong> — agent CLIs installed and logged in on your machine: Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, OpenCode Go. Muster detects them on your <code>PATH</code> and they appear in the picker automatically — no key pasting.</li>
-      <li><strong>API providers</strong> — twelve built-ins (OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Cohere, Groq, Together, Fireworks, OpenRouter, OpenCode Zen) driven by an API key. No CLI required. OpenRouter carries a large <code>:free</code> catalog including the Nex AGI N2.5 agentic models (262K context, tool calling; Pro adds vision).</li>
-      <li><strong>Custom providers</strong> — any OpenAI- or Anthropic-compatible endpoint you register yourself, including Ollama and LM Studio on <code>127.0.0.1</code>.</li>
+      <li><strong>Desktop CLI engines</strong> — supported agent CLIs installed and logged in on the computer running the engine: Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, OpenCode Go. Muster detects them on your <code>PATH</code> and they appear in the picker automatically — no key pasting.</li>
+      <li><strong>API providers</strong> — twelve built-ins (OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Cohere, Groq, Together, Fireworks, OpenRouter, OpenCode Zen) driven by an API key. No CLI required. Provider catalogs, access requirements and charges can change; check the provider before choosing a model.</li>
+      <li><strong>Custom providers</strong> — supported OpenAI- or Anthropic-compatible endpoints. Local Ollama or LM Studio endpoints require a compatible desktop runtime on that computer; the hosted web service cannot reach your laptop through its own <code>127.0.0.1</code>.</li>
     </ul>
-    <p>All of them normalize to the same runtime event stream — streaming replies, tool calls, approvals — so a bot behaves identically no matter which engine sits underneath. Swapping models mid-conversation is normal practice: let the cheap one triage, the smart one write.</p>
+    <p>Muster presents replies, tool calls and supported approval requests in the conversation. Capabilities and usage reporting vary by engine, so check the selected engine before assigning a task or enabling recurring work.</p>
 
     <h2>Adding an engine in Settings</h2>
     <p>Open <strong>Settings</strong> and you'll find two relevant panels:</p>
@@ -75,7 +75,7 @@
       <li><strong>Settings → Engines</strong> — for CLI engines. Muster lists what it detected. Each engine has a <strong>Set CLI…</strong> control to override the binary path: pick from every binary the server found on your <code>PATH</code>, or enter a manual path (useful for wrappers). Saving probes the binary with a version check; if the probe fails — typically a path your terminal sees but the GUI app doesn't — Muster asks before registering it anyway.</li>
       <li><strong>Settings → Providers</strong> — for keys and custom endpoints. Paste a provider's API key into its row, or click <strong>Add model provider</strong> to register your own endpoint: a name, a base URL, an optional key, a wire format (<code>openai</code> or <code>anthropic</code>), and the model list to expose in the picker. Muster can fetch the model list from the endpoint's <code>/models</code> route automatically; if the endpoint doesn't serve one, enter the model IDs manually.</li>
     </ul>
-    <p>For the very first setup, <code>muster setup</code> walks you through connecting to the server and picking an engine before introducing your first bot — see <a href="/docs/quick-start">Quick start</a>.</p>
+    <p>For the first setup, open your workspace and follow <a href="/docs/quick-start">Quick start</a>. Muster account sign-in does not supply a provider API key or make a provider chat subscription valid for API usage.</p>
 
     <h2>Naming instances</h2>
     <p>Each engine connection is an <em>instance</em>, and you can have several per provider — that's not a workaround, it's the intended shape. Two OpenAI keys with different budgets, a personal and a work Anthropic account, one OpenRouter instance routed through a gateway and one direct: each gets its own entry, its own key, and its own display name. Bots pick an instance, not just a provider, so the assignment is exact.</p>
@@ -83,11 +83,13 @@
     <h2>Assigning engines to bots</h2>
     <p>Every bot carries its own model selection: an instance plus a model from that instance's list. Set it when you hire the bot, change it later from the bot's settings or the model picker in the chat header, and the next turn uses it — the transcript doesn't care. Two bots in the same team can run on entirely different providers, and handing one conversation from a fast model to a frontier one mid-thread takes one click.</p>
 
-    <h2>Your keys stay on your server</h2>
-    <p>Muster is bring-your-own-key by design. API keys are stored server-side in your data directory (<code>~/.muster</code> on a desktop install), never echoed back to the UI once saved — the settings panel shows a configured-or-not flag — and never sent anywhere except to the provider the key belongs to. Custom-provider keys ride the instance's own environment into the driver, not a shared process env. There is no Muster-side key escrow and no model billing through us: usage is between you and your providers.</p>
+    <h2>Provider charges and key storage</h2>
+    <p>Muster is a free app. You supply your provider API key and pay that provider for model usage. Connected tools and computer services can charge separately. This does not include an unlimited or prepaid model allowance.</p>
+    <p>Keys saved in a hosted account are stored by the service in an account-scoped encrypted vault and used server-side for provider requests. Settings shows whether a key is configured without displaying the saved value. Existing desktop configurations can store credentials on the installation instead. A key entered through the web app is not promised to remain only on your device.</p>
+    <p>Check the contents and requirements of the backup controls available in your version. Connecting Drive or signing in on another device does not by itself establish provider-key backup, recovery or automatic synchronization. See <a href="/docs/setup">Account &amp; device setup</a>.</p>
     <div class="callout callout--note">
-      <span class="callout__mark">Note</span>
-      <span>Self-hosted multi-tenant deployments block loopback and private-range custom-provider base URLs (an SSRF guard — one account must not probe the host network through a fake provider). Desktop single-user installs keep loopback allowed, which is exactly why <code>127.0.0.1</code> Ollama works out of the box there.</span>
+      <span class="callout__mark">Local models</span>
+      <span>Hosted custom-provider connections restrict private-network destinations. Existing desktop single-user runtimes can use supported local endpoints. Device access and a provider connection are separate setup steps.</span>
     </div>
 
     <h2>Health and status</h2>
@@ -102,7 +104,7 @@
     <p>Every bot reply in chat carries a small <code>via</code> chip — the model, and when it differs, the instance display name that produced it. It's low-key by default: hover the reply and the chip fades in, with the full instance name (and effort level, when set) in its tooltip. When you swap a bot's model mid-thread, the older bubbles still show what produced them, so "which brain said this?" is always answerable by looking.</p>
 
     <h2>Browsers and computers</h2>
-    <p>An engine is the thinking half of a bot; the <strong>computer</strong> is the doing half. Bots on computer-use-capable providers can drive a live browser — a session in the chat's side panel that you can watch frame-by-frame and grab control of mid-task — alongside the other computer options (cloud desktop, your own machine, a local VM, or a BYO VPS over SSH). See <a href="/docs/approvals">Approvals &amp; privacy</a> for what the bot may do on that computer without asking first.</p>
+    <p>An engine is the thinking half of a bot; the <strong>computer</strong> is the doing half. Bots on computer-use-capable providers can drive a live browser — a session in the chat's side panel that you can watch frame-by-frame and grab control of mid-task — alongside the other computer options (cloud desktop, your own machine, a local VM, or an approved remote computer where supported). See <a href="/docs/approvals">Approvals &amp; privacy</a> for what the bot may do on that computer without asking first.</p>
 
     <h2>Quick reference</h2>
     <div class="table-scroll" role="region" tabindex="0" aria-label="Quick reference table">

@@ -10917,7 +10917,15 @@ let requestUserEmail = "";
       }
     }
 
-    // self-hosted docs at pretty URLs: /docs, /docs/quick-start, /docs/security.
+    // Keep old bookmarks useful without continuing to publish deployment
+    // instructions as the product's setup path. No account/session mutation.
+    if (MARKETING_DIR && (method === "GET" || method === "HEAD") &&
+        ["/docs/self-host", "/docs/self-host/", "/docs/self-host.html"].includes(path)) {
+      res.writeHead(308, { location: "/docs/setup", "cache-control": "no-cache" });
+      return res.end();
+    }
+
+    // Product docs at pretty URLs: /docs, /docs/quick-start, /docs/security.
     // Resolves <rel>, <rel>.html, <rel>/index.html inside the marketing dir's
     // docs/ folder. Unlike the marketing handler below, a miss 404s here so
     // the app SPA fallback never swallows a broken docs link.
