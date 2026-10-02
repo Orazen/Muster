@@ -102,7 +102,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   index: number;
 }) {
   return (
-    <div className="rounded-t-2xl border-b border-hairline/50 bg-raised/40 px-4 py-3">
+    <div className="workspace-approval-panel rounded-t-2xl border-b border-hairline/50 bg-raised/40 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[11px] uppercase tracking-[0.18em] text-ink-secondary">Pending approval</span>
         {count > 1 && (
@@ -174,7 +174,7 @@ export function PendingApprovalActions({
 
   const base = "rounded-full px-3.5 py-1.5 text-[13.5px] transition-colors";
   return (
-    <div className="flex flex-col items-end gap-1 px-2 py-2">
+    <div className="workspace-approval-actions flex flex-col items-end gap-1 px-2 py-2">
       {pending.suggestions?.length ? (
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           <span className="text-[11px] uppercase tracking-[0.14em] text-ink-secondary">Grounded controls</span>

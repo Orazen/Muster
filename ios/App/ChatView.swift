@@ -195,6 +195,7 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .navigationBarTitleDisplayMode(.inline)
+        .background(MusterPalette.canvas)
         .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -230,7 +231,7 @@ struct ChatView: View {
                                 speaking: announcer.isSpeaking(threadId: current.threadId)
                             )
                             Text(current.name)
-                                .font(.system(size: 16, weight: .semibold))
+                                .font(.headline)
                                 .foregroundStyle(Color.primary)
                                 .lineLimit(1)
                         }
@@ -510,7 +511,7 @@ struct ChatView: View {
                         .foregroundStyle(dictating ? Color.white : Color.primary)
                         .frame(width: 44, height: 44)
                         .background(
-                            Circle().fill(dictating ? Color.red : Color.secondary.opacity(0.35))
+                            Circle().fill(dictating ? Color.red : MusterPalette.raised)
                         )
                 }
                 // Stopping must work even if the contract closed mid-capture.
@@ -523,10 +524,10 @@ struct ChatView: View {
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(Color(uiColor: .systemBackground))
+                        .foregroundStyle(Color.white)
                         .frame(width: 44, height: 44)
                         .background(
-                            Circle().fill(canSend ? Color.primary : Color.secondary.opacity(0.35))
+                            Circle().fill(canSend ? MusterPalette.accent : Color.secondary.opacity(0.35))
                         )
                 }
                 // A send racing the next partial would write the old draft
@@ -540,7 +541,7 @@ struct ChatView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.bar)
+        .background(MusterPalette.canvas)
         // Dictation writes through the session as the words arrive — the
         // draft has one owner, and it is not this view. Guarded to a live
         // capture so a refused or finished flow can never push its stale
@@ -724,7 +725,7 @@ struct TextBubble: View {
                 // you did: a message about `**` should show the asterisks.
                 if mine {
                     Text(message.text ?? "")
-                        .font(.system(size: 17))
+                        .font(.body)
                         .foregroundStyle(Color.primary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
@@ -738,8 +739,8 @@ struct TextBubble: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color.secondary.opacity(mine ? 0.24 : 0.13))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(mine ? MusterPalette.raised : MusterPalette.panel)
             )
             if !mine { Spacer(minLength: 44) }
         }
@@ -796,10 +797,10 @@ struct CardView: View {
         if let card = message.card {
             VStack(alignment: .leading, spacing: 12) {
                 Text(card.title)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.headline)
                     .foregroundStyle(Color.primary)
                 Text(card.subtitle)
-                    .font(.system(size: 15))
+                    .font(.subheadline)
                     .foregroundStyle(Color.secondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -860,7 +861,7 @@ struct CardView: View {
                             Text("Always allow this tool")
                                 .frame(maxWidth: .infinity, minHeight: 44)
                         }
-                        .font(.system(size: 14))
+                        .font(.subheadline)
                         .buttonStyle(.bordered)
                         .disabled(!canSubmit)
                         .accessibilityIdentifier("approval-always-allow")
@@ -872,7 +873,7 @@ struct CardView: View {
                     }
                 } else if let answered = card.answered {
                     Label(answered, systemImage: "checkmark.circle")
-                        .font(.system(size: 14))
+                        .font(.subheadline)
                         .foregroundStyle(Color.secondary)
                 }
                 if let actionState {
@@ -891,12 +892,12 @@ struct CardView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color.secondary.opacity(0.13))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(MusterPalette.panel)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder(card.isPending ? Color.accentColor : .clear, lineWidth: 1.5)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(card.isPending ? MusterPalette.accent : MusterPalette.border, lineWidth: 1)
             }
         }
     }
@@ -919,7 +920,7 @@ struct ScreenShot: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             } else {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.secondary.opacity(0.13))
+                    .fill(MusterPalette.panel)
                     .frame(height: 160)
                     .overlay { ProgressView() }
             }
@@ -969,7 +970,7 @@ struct StreamingBubble: View {
                     // wherever it lands, and rendering markdown that starts
                     // mid-syntax invents structure the model did not write.
                     Text(String(reasoning.suffix(400)))
-                        .font(.system(size: 14))
+                        .font(.subheadline)
                         .foregroundStyle(Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -988,8 +989,8 @@ struct StreamingBubble: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color.secondary.opacity(0.13))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(MusterPalette.panel)
             )
             Spacer(minLength: 44)
         }

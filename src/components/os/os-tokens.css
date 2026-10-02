@@ -26,3 +26,27 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* The OS keeps its windows and commands; presentation follows the workspace. */
+.os-desktop { background: var(--color-app); }
+.os-desktop .os-topbar, .os-desktop .os-dock, .os-desktop .os-window {
+  background: var(--color-panel); backdrop-filter: none; -webkit-backdrop-filter: none;
+  border-color: var(--color-hairline);
+}
+.os-desktop .os-mark { letter-spacing: -.02em; text-transform: none; font-size: 18px; font-weight: 600; }
+.os-desktop .os-primary-action { background: #0066cc; border-color: #0066cc; color: #fff; }
+.os-desktop .os-primary-action:hover:not(:disabled) { background: #0058b0; border-color: #0058b0; }
+.os-desktop .os-console-glow { display: none; }
+.os-desktop .os-console-trigger { background: var(--color-panel); border-radius: 18px; box-shadow: none; }
+.os-desktop .os-workspace h1 { font-size: clamp(30px, 3.5vw, 46px); letter-spacing: -.04em; }
+.os-desktop .os-workspace-heading { gap: 24px; }
+.os-desktop .os-window { border-radius: 20px; box-shadow: 0 16px 48px #0002; }
+.os-desktop .os-secondary-action { border-radius: 12px; }
+.os-desktop button:focus-visible, .os-desktop a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
+@media (max-width: 600px) {
+  .os-desktop .os-workspace-inner { padding: 28px 18px; }
+  .os-desktop input, .os-desktop textarea, .os-desktop select { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .os-desktop *, .os-desktop *::before, .os-desktop *::after { animation: none !important; transition: none !important; }
+}

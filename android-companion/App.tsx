@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { createThemedStyles, useCompanionTheme } from "./src/screens/theme";
 import { StyleSheet, Text, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -13,6 +14,8 @@ export default function App() {
 }
 
 function CompanionApp() {
+  const theme = useCompanionTheme();
+  const styles = themedStyles[theme.scheme];
   const companion = useCompanion();
   const [selection, setSelection] = useState<ChatSelection | null>(null);
   const target = currentChatTarget(selection, companion.client, companion.state);
@@ -66,7 +69,7 @@ function CompanionApp() {
 
   return (
     <View style={styles.container}>
-      <StatusBar style="light" />
+      <StatusBar style={theme.statusBar} />
       <ChatListScreen
         state={companion.state}
         bots={Object.values(companion.state.bots).filter((b) => !b.hidden)}
@@ -90,18 +93,18 @@ function CompanionApp() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0a0a0a" },
+const themedStyles = createThemedStyles((theme) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: theme.page },
   reconnectBanner: {
     position: "absolute",
     bottom: 32,
     alignSelf: "center",
-    backgroundColor: "#1c1c1e",
+    backgroundColor: theme.card,
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderWidth: 1,
-    borderColor: "#333",
+    borderColor: theme.border,
   },
-  reconnectText: { color: "#e8e8ea", fontSize: 13 },
-});
+  reconnectText: { color: theme.ink, fontSize: 13 },
+}));

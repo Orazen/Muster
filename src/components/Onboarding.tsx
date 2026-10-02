@@ -1338,6 +1338,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               {/* The guide's face: the shared bot-avatars adapter reading the
                   honest per-step state — no pokes, no antics. */}
               <AgentBotAvatar
+                type="flower"
                 color={botColor}
                 size={112}
                 state={micTesting ? "dictating" : setupError ? "thinking" : creating ? "working" : (GUIDE_BEATS[step]?.state ?? "idle")}

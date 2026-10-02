@@ -1171,7 +1171,7 @@ export function SettingsModal() {
     <div
       // Above the onboarding wizard (z-50): the wizard's "Add a provider key"
       // shortcut opens this modal mid-onboarding.
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-3 sm:p-6"
+      className="workspace-settings-overlay fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-3 sm:p-6"
       onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "toggleAppSettings", open: false })}
     >
       <div
@@ -1183,11 +1183,11 @@ export function SettingsModal() {
         className="settings-dialog flex h-[min(760px,calc(100dvh-24px))] w-full max-w-[920px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none sm:h-[min(680px,calc(100dvh-48px))] sm:flex-row"
       >
         {/* section nav */}
-        <nav aria-label="Settings sections" className="hidden min-h-0 w-[200px] shrink-0 flex-col gap-0.5 border-r border-hairline/40 p-3 sm:flex">
+        <nav aria-label="Settings sections" className="workspace-settings-nav hidden min-h-0 w-[200px] shrink-0 flex-col gap-0.5 border-r border-hairline/40 p-3 sm:flex">
           <div className="px-2 pb-2 pt-1 text-[15px] font-semibold text-ink">
             Settings
           </div>
-          <div className="mb-1.5 flex shrink-0 items-center gap-2 rounded-lg bg-control/70 px-2.5 py-1.5">
+          <div className="workspace-settings-search mb-1.5 flex shrink-0 items-center gap-2 rounded-lg bg-control/70 px-2.5 py-1.5">
             <Search size={14} className="shrink-0 text-ink-secondary" />
             <input
               value={query}
@@ -1225,7 +1225,7 @@ export function SettingsModal() {
         </nav>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center justify-between border-b border-hairline/40 px-4 py-3 sm:px-5">
+          <div className="workspace-settings-header flex shrink-0 items-center justify-between border-b border-hairline/40 px-4 py-3 sm:px-5">
             <span className="text-base font-semibold text-ink sm:hidden">Settings</span>
             <span className="hidden text-base font-semibold text-ink sm:block">
               {sections.find((s) => s.id === section)?.label}

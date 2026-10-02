@@ -45,7 +45,7 @@ export function WorkspaceHome({ bots, connected, hydrated, onOpenBot, onOpenChat
           </div>
           <div className="os-workspace-mascot">
             <span className="os-mascot-orbit" aria-hidden="true" />
-            <MusterBloom size={144} mood={mood} animated={connected && hydrated} />
+            <MusterBloom size={144} mood={mood} variant="workspace" animated={connected && hydrated} />
             <span className="os-mascot-caption">A little company for big ideas.</span>
           </div>
         </div>

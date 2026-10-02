@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createThemedStyles, useCompanionTheme } from "./theme";
 import {
   ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, ScrollView,
   StatusBar as RNStatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View,
@@ -15,6 +16,8 @@ interface PairingScreenProps {
 }
 
 export function PairingScreen({ pairing, error, onPair }: PairingScreenProps) {
+  const theme = useCompanionTheme();
+  const styles = themedStyles[theme.scheme];
   const insets = useSafeAreaInsets();
   const [address, setAddress] = useState("");
   const [code, setCode] = useState("");
@@ -132,7 +135,7 @@ export function PairingScreen({ pairing, error, onPair }: PairingScreenProps) {
       style={[styles.container, { paddingTop: insets.top }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <RNStatusBar barStyle="light-content" backgroundColor="#0a0a0a" />
+      <RNStatusBar barStyle={theme.scheme === "dark" ? "light-content" : "dark-content"} backgroundColor={theme.page} />
       <ScrollView
         contentContainerStyle={[styles.scrollContent, {
           paddingLeft: Math.max(insets.left, 24), paddingRight: Math.max(insets.right, 24),
@@ -160,7 +163,7 @@ export function PairingScreen({ pairing, error, onPair }: PairingScreenProps) {
             accessibilityLabel="Pairing link or computer address"
             style={styles.input}
             placeholder="Paste a link, or enter an address"
-            placeholderTextColor="#838388"
+            placeholderTextColor={theme.secondary} selectionColor={theme.accent}
             value={address}
             onChangeText={editAddress}
             onBlur={validate}
@@ -182,7 +185,7 @@ export function PairingScreen({ pairing, error, onPair }: PairingScreenProps) {
                 accessibilityLabel="6-digit pairing code"
                 style={[styles.input, styles.codeInput]}
                 placeholder="000000"
-                placeholderTextColor="#838388"
+                placeholderTextColor={theme.secondary} selectionColor={theme.accent}
                 value={code}
                 onChangeText={editCode}
                 onBlur={validate}
@@ -219,7 +222,7 @@ export function PairingScreen({ pairing, error, onPair }: PairingScreenProps) {
             onPress={() => { void submit(); }}
             disabled={!resolution.ok || busy}
           >
-            {busy ? <ActivityIndicator color="#201207" style={styles.spinner} /> : null}
+            {busy ? <ActivityIndicator color={theme.primaryInk} style={styles.spinner} /> : null}
             <Text style={styles.buttonText}>{busy ? "Connecting…" : "Pair with computer"}</Text>
           </TouchableOpacity>
           <Text style={styles.hint}>Links and codes expire quickly. Open a fresh pairing window on your computer if needed.</Text>
@@ -232,40 +235,40 @@ export function PairingScreen({ pairing, error, onPair }: PairingScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0a0a0a" },
+const themedStyles = createThemedStyles((theme) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: theme.page },
   scrollContent: { flexGrow: 1, justifyContent: "center", paddingTop: 28 },
   content: { width: "100%", maxWidth: 440, alignSelf: "center" },
   brand: { flexDirection: "row", alignItems: "center", marginBottom: 24 },
   mascot: { width: 56, height: 56, marginRight: 12 },
-  brandName: { fontSize: 16, fontWeight: "700", letterSpacing: 2, lineHeight: 23, color: "#f6f1e8" },
-  brandDetail: { fontSize: 10, fontWeight: "500", letterSpacing: 2, color: "#aaa59d" },
-  title: { fontSize: 36, fontWeight: "700", lineHeight: 40, letterSpacing: -1, color: "#f6f1e8", marginBottom: 12 },
-  subtitle: { fontSize: 16, color: "#b2ada5", lineHeight: 23, marginBottom: 24 },
-  setup: { borderLeftWidth: 2, borderLeftColor: "#f28a1d", paddingLeft: 14, marginBottom: 28 },
-  setupTitle: { fontSize: 14, fontWeight: "600", color: "#f6f1e8", marginBottom: 5 },
-  setupText: { fontSize: 14, lineHeight: 20, color: "#b2ada5" },
-  label: { fontSize: 14, fontWeight: "600", color: "#e8e2d9", marginBottom: 9 },
-  input: { backgroundColor: "#151515", borderRadius: 12, padding: 16, minHeight: 54, fontSize: 16, color: "#f6f6f7", borderWidth: 1, borderColor: "#393631" },
+  brandName: { fontSize: 16, fontWeight: "700", letterSpacing: 2, lineHeight: 23, color: theme.ink },
+  brandDetail: { fontSize: 10, fontWeight: "500", letterSpacing: 2, color: theme.secondary },
+  title: { fontSize: 36, fontWeight: "600", lineHeight: 40, letterSpacing: -1, color: theme.ink, marginBottom: 12 },
+  subtitle: { fontSize: 16, color: theme.secondary, lineHeight: 23, marginBottom: 24 },
+  setup: { borderLeftWidth: 2, borderLeftColor: theme.accent, paddingLeft: 14, marginBottom: 28 },
+  setupTitle: { fontSize: 14, fontWeight: "600", color: theme.ink, marginBottom: 5 },
+  setupText: { fontSize: 14, lineHeight: 20, color: theme.secondary },
+  label: { fontSize: 14, fontWeight: "600", color: theme.ink, marginBottom: 9 },
+  input: { backgroundColor: theme.panel, borderRadius: 12, padding: 16, minHeight: 54, fontSize: 16, color: theme.ink, borderWidth: 1, borderColor: theme.border },
   codeInput: { letterSpacing: 5, fontSize: 20 },
-  fieldHint: { fontSize: 12, lineHeight: 18, color: "#aaa59d", marginTop: 8, marginBottom: 20 },
-  ready: { fontSize: 13, lineHeight: 19, color: "#dcb884", marginTop: 10 },
-  errorBox: { backgroundColor: "#2a1714", borderRadius: 10, padding: 12, marginTop: 16 },
-  error: { color: "#ffc6b8", fontSize: 14, lineHeight: 20 },
-  button: { backgroundColor: "#f28a1d", borderRadius: 12, minHeight: 54, padding: 16, marginTop: 20, flexDirection: "row", justifyContent: "center", alignItems: "center" },
+  fieldHint: { fontSize: 12, lineHeight: 18, color: theme.secondary, marginTop: 8, marginBottom: 20 },
+  ready: { fontSize: 13, lineHeight: 19, color: theme.warning, marginTop: 10 },
+  errorBox: { backgroundColor: theme.dangerSurface, borderRadius: 10, padding: 12, marginTop: 16 },
+  error: { color: theme.danger, fontSize: 14, lineHeight: 20 },
+  button: { backgroundColor: theme.primary, borderRadius: 12, minHeight: 54, padding: 16, marginTop: 20, flexDirection: "row", justifyContent: "center", alignItems: "center" },
   buttonDisabled: { opacity: 0.45 },
-  buttonText: { color: "#201207", fontSize: 16, fontWeight: "700", flexShrink: 1, textAlign: "center" },
+  buttonText: { color: theme.primaryInk, fontSize: 16, fontWeight: "700", flexShrink: 1, textAlign: "center" },
   spinner: { marginRight: 10 },
-  hint: { color: "#aaa59d", fontSize: 12, lineHeight: 18, marginTop: 18, marginBottom: 8 },
+  hint: { color: theme.secondary, fontSize: 12, lineHeight: 18, marginTop: 18, marginBottom: 8 },
   scanButton: {
     alignSelf: "flex-start",
-    backgroundColor: "#151515",
+    backgroundColor: theme.panel,
     borderWidth: 1,
-    borderColor: "#393631",
+    borderColor: theme.border,
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 11,
     marginTop: 2,
   },
-  scanButtonText: { color: "#e8e2d9", fontSize: 14, fontWeight: "600" },
-});
+  scanButtonText: { color: theme.ink, fontSize: 14, fontWeight: "600" },
+}));

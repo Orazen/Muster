@@ -19,6 +19,8 @@ struct CompanionApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .tint(MusterPalette.accent)
+                .background(MusterPalette.canvas)
                 .environmentObject(session)
                 .environmentObject(announcer)
                 .onAppear {

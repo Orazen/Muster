@@ -1,6 +1,8 @@
 import React from "react";
+import { createThemedStyles, useCompanionTheme } from "./theme";
 import {
   FlatList,
+  Image,
   RefreshControl,
   StyleSheet,
   Text,
@@ -71,6 +73,8 @@ export function ChatListScreen({
   onRefresh,
   onUnpair,
 }: ChatListScreenProps) {
+  const theme = useCompanionTheme();
+  const styles = themedStyles[theme.scheme];
   const time = (ms: number) =>
     ms > 0
       ? new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -101,10 +105,13 @@ export function ChatListScreen({
 
   return (
     <View style={styles.container}>
-      <StatusBar style="light" />
+      <StatusBar style={theme.statusBar} />
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>Muster</Text>
+          <View style={styles.brand}>
+            <Image source={require("../../assets/icon.png")} style={styles.mascot} accessible={false} />
+            <Text style={styles.title}>Muster</Text>
+          </View>
           <Text style={styles.status}>
             {connected ? "Connected" : "Reconnecting…"}
             {pendingCount > 0 ? `  ·  ${pendingCount} waiting for you` : ""}
@@ -166,7 +173,7 @@ export function ChatListScreen({
           );
         }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#f0460e" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.accent} colors={[theme.accent]} progressBackgroundColor={theme.panel} />
         }
         ListEmptyComponent={
           <View style={styles.empty}>
@@ -181,8 +188,8 @@ export function ChatListScreen({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0a0a0a" },
+const themedStyles = createThemedStyles((theme) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: theme.page },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -191,11 +198,13 @@ const styles = StyleSheet.create({
     paddingTop: 56,
     paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#222",
+    borderBottomColor: theme.border,
   },
-  title: { fontSize: 24, fontWeight: "700", color: "#f6f6f7" },
-  status: { fontSize: 12, color: "#8a8a8e", marginTop: 2 },
-  unpair: { color: "#f0460e", fontSize: 14, fontWeight: "600" },
+  brand: { flexDirection: "row", alignItems: "center", gap: 8 },
+  mascot: { width: 32, height: 32 },
+  title: { fontSize: 24, fontWeight: "600", color: theme.ink },
+  status: { fontSize: 12, color: theme.secondary, marginTop: 2 },
+  unpair: { color: theme.accent, fontSize: 14, fontWeight: "600" },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -210,36 +219,36 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 14,
   },
-  avatarText: { color: "#fff", fontSize: 18, fontWeight: "700" },
-  rowBody: { flex: 1 },
+  avatarText: { color: theme.primaryInk, fontSize: 18, fontWeight: "700" },
+  rowBody: { flex: 1, minWidth: 0 },
   rowTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
-  rowName: { color: "#f6f6f7", fontSize: 16, fontWeight: "600", flexShrink: 1 },
-  rowTime: { color: "#6a6a6e", fontSize: 12, marginLeft: 8 },
+  rowName: { color: theme.ink, fontSize: 16, fontWeight: "600", flexShrink: 1 },
+  rowTime: { color: theme.secondary, fontSize: 12, marginLeft: 8 },
   rowBottom: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginTop: 2,
   },
-  rowPreview: { color: "#8a8a8e", fontSize: 14, flexShrink: 1 },
+  rowPreview: { color: theme.secondary, fontSize: 14, flexShrink: 1 },
   badge: {
-    backgroundColor: "#f0460e",
+    backgroundColor: theme.primary,
     borderRadius: 10,
     minWidth: 20,
-    height: 20,
+    minHeight: 20,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 6,
     marginLeft: 8,
   },
-  badgeText: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  badgeText: { color: theme.primaryInk, fontSize: 12, fontWeight: "700" },
   empty: { alignItems: "center", marginTop: 96, paddingHorizontal: 40 },
-  emptyTitle: { color: "#f6f6f7", fontSize: 18, fontWeight: "600" },
+  emptyTitle: { color: theme.ink, fontSize: 18, fontWeight: "600" },
   emptyHint: {
-    color: "#8a8a8e",
+    color: theme.secondary,
     fontSize: 14,
     textAlign: "center",
     marginTop: 8,
     lineHeight: 20,
   },
-});
+}));

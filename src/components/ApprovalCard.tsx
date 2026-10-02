@@ -46,11 +46,11 @@ export function ApprovalCard({
   return (
     <div
       className={cn(
-        "min-w-0 w-full max-w-[840px] rounded-2xl border bg-card p-4",
+        "workspace-approval-card min-w-0 w-full max-w-[840px] rounded-2xl border bg-card p-4",
         settled ? "border-hairline/30" : "border-accent/40",
       )}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
+      <div className="workspace-approval-heading flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
         <div className="min-w-0 text-[15px] font-semibold text-ink">
           {bot ? `${bot.name} wants to ` : "Wants to "}
           {toolLabel(card.tool)}
@@ -84,7 +84,7 @@ export function ApprovalCard({
 
       {/* The decision lives in the composer (one place to answer, and it
           can't be scrolled past); here we only record what happened. */}
-      <div className="mt-3 flex items-center gap-1.5 text-[13px] text-ink-secondary">
+      <div className="workspace-approval-status mt-3 flex items-center gap-1.5 text-[13px] text-ink-secondary">
         {settled === "allow" ? (
           <>
             <Check size={14} className="text-success" /> Allowed

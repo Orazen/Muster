@@ -2,13 +2,12 @@
 // like: a swatch of its own palette drawn from literal hexes in skins.ts,
 // next to the radio that selects it. The list is a real radiogroup — one
 // active theme, keyboard-navigable like any other radio set.
-import { useState } from "react";
+import { useId, useState } from "react";
 import { THEMES, applyTheme, readTheme, type ThemeSwatch } from "@/lib/skins";
 import { cn } from "@/lib/cn";
 
 /** Three overlapping paint dots: surface behind, panel mid, accent front —
- * enough to tell "dark cool", "paper warm", "brass dark", "porcelain teal"
- * apart at a glance. */
+ * enough to distinguish each palette at a glance. */
 function Swatch({ swatch }: { swatch: ThemeSwatch }) {
   return (
     <span aria-hidden="true" className="flex shrink-0 items-center -space-x-1.5">
@@ -24,28 +23,33 @@ export function SkinPicker() {
   // already stamped it before first paint, so both agree, and readTheme()
   // stays correct even if boot restore was skipped some other way.
   const [active, setActive] = useState(() => readTheme());
+  const groupName = useId();
 
   return (
-    <div role="radiogroup" aria-label="Theme" className="flex flex-col gap-2">
+    <div role="radiogroup" aria-label="Theme" className="workspace-skin-picker flex flex-col gap-2">
       {THEMES.map((theme) => {
         const selected = theme.id === active;
         return (
-          <button
+          <label
             key={theme.id}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            onClick={() => {
-              applyTheme(theme.id);
-              setActive(theme.id);
-            }}
             className={cn(
-              "flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
+              "workspace-skin-option relative flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus",
               selected
                 ? "border-accent-border bg-raised/50"
                 : "border-hairline/40 hover:border-hairline hover:bg-raised/30",
             )}
           >
+            <input
+              type="radio"
+              name={groupName}
+              value={theme.id}
+              checked={selected}
+              onChange={() => {
+                applyTheme(theme.id);
+                setActive(theme.id);
+              }}
+              className="absolute inset-0 size-full cursor-pointer opacity-0"
+            />
             <Swatch swatch={theme.swatch} />
             <span className="min-w-0 flex-1">
               <span className="block text-[14px] font-medium text-ink">{theme.label}</span>
@@ -63,7 +67,7 @@ export function SkinPicker() {
             >
               {selected && <span className="size-2 rounded-full bg-accent" />}
             </span>
-          </button>
+          </label>
         );
       })}
     </div>

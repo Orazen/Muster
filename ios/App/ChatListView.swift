@@ -135,6 +135,7 @@ struct ChatListView: View {
             }
             // top-aligned: the roster fills downward from the header
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(MusterPalette.canvas)
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Chat.self) { ChatView(chat: $0) }
             .task(id: query) {
@@ -196,13 +197,12 @@ struct ChatListView: View {
             .buttonStyle(.plain)
 
             // Search, Walkie and New bot sit shoulder to shoulder, so they
-            // share one glass cluster: inside it their surfaces merge into a
-            // single object instead of meeting edge against edge.
+            // retain a shared layout with independent solid surfaces and hit targets.
             GlassCluster(spacing: 12) {
                 HStack(spacing: 12) {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Color.secondary)
 
                         TextField("Search chats", text: $query)
@@ -226,14 +226,14 @@ struct ChatListView: View {
 
                     // The radio. Walkie is the fastest way to put something into a
                     // bot on a phone, so it sits beside the roster's own search —
-                    // same size, same glass, same corner of the screen.
+                    // same size, same surface, same corner of the screen.
                     Button {
                         showingWalkie = true
                     } label: {
                         Image(systemName: "mic.fill")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Color.primary)
-                            .frame(width: 34, height: 34)
+                            .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.plain)
                     .glassSurface(in: Circle())
@@ -247,9 +247,9 @@ struct ChatListView: View {
                         }
                     } label: {
                         Image(systemName: "plus")
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.headline)
                             .foregroundStyle(Color.primary)
-                            .frame(width: 34, height: 34)
+                            .frame(width: 44, height: 44)
                     }
                     .buttonStyle(.plain)
                     .glassSurface(in: Circle())
@@ -307,7 +307,7 @@ struct SearchHitRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(hit.name).font(.system(size: 15, weight: .semibold))
+                    Text(hit.name).font(.subheadline.weight(.semibold))
                     if let task = hit.task, !task.isEmpty {
                         Text(task).font(.system(size: 12)).foregroundStyle(Color.secondary)
                     }
@@ -317,7 +317,7 @@ struct SearchHitRow: View {
                         .foregroundStyle(Color.secondary)
                 }
                 Text(hit.snippet)
-                    .font(.system(size: 14))
+                    .font(.subheadline)
                     .foregroundStyle(Color.secondary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
@@ -349,7 +349,7 @@ struct ChatRow: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
                     Text(chat.name)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.headline)
                         .foregroundStyle(Color.primary)
                         .lineLimit(1)
                         .layoutPriority(1)
@@ -357,7 +357,7 @@ struct ChatRow: View {
                     // the bot's job, the way the desktop shows it
                     if !chat.subtitle.isEmpty {
                         Text(chat.subtitle)
-                            .font(.system(size: 13))
+                            .font(.caption)
                             .foregroundStyle(Color.secondary)
                             .lineLimit(1)
                             .padding(.horizontal, 8)
@@ -368,14 +368,14 @@ struct ChatRow: View {
                     Spacer(minLength: 4)
 
                     Text(RelativeStamp.list(at))
-                        .font(.system(size: 14))
+                        .font(.subheadline)
                         .foregroundStyle(Color.secondary)
                         .fixedSize()
                 }
 
                 HStack(alignment: .top, spacing: 8) {
                     Text(preview.isEmpty ? " " : preview)
-                        .font(.system(size: 15))
+                        .font(.subheadline)
                         .foregroundStyle(Color.secondary)
                         .lineLimit(1)
 
@@ -392,7 +392,10 @@ struct ChatRow: View {
                 }
             }
         }
-        .padding(.vertical, 14)
+        .padding(14)
+        .background(MusterPalette.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(MusterPalette.border))
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
 }
@@ -416,10 +419,10 @@ struct WaitingRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Label("\(chat.name) is waiting on you", systemImage: "hand.raised.fill")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.primary)
                 Text(card?.subtitle ?? "")
-                    .font(.system(size: 14))
+                    .font(.subheadline)
                     .foregroundStyle(Color.secondary)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
@@ -429,9 +432,10 @@ struct WaitingRow: View {
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.accentColor.opacity(0.14))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(MusterPalette.panel)
         )
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(MusterPalette.accent.opacity(0.65)))
         .padding(.vertical, 6)
         .contentShape(Rectangle())
     }
@@ -463,7 +467,7 @@ struct StatusBanner: View {
             .foregroundStyle(tint)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(.regularMaterial, in: Capsule())
+            .glassCapsule()
             .padding(.top, 4)
     }
 }

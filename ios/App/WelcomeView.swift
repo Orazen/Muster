@@ -6,9 +6,9 @@
 // step is where data starts moving; sign-in is identity, and the screen
 // never pretends otherwise.
 //
-// The look adapts GAIA's welcome grammar — dark canvas, one glowing hero,
-// generous spacing, a single primary action per step — rendered with the
-// app's own materials: Glass surfaces, the flower mascot, the brand orange.
+// The approved native presentation uses solid adaptive surfaces, restrained
+// blue controls and the orange Flower. System text sizes and scrolling keep
+// sign-in and pairing available at accessibility text sizes.
 //
 // Routing contract: RootView shows this only when unpaired AND
 // `session.welcomeSeen` is false; a pairing deep link (muster://pair…)
@@ -23,17 +23,12 @@ struct WelcomeView: View {
     @ObservedObject private var cloud = CloudAuth.shared
 
     var body: some View {
-        ZStack {
-            // The dark canvas GAIA's welcome sits on, warmed toward Muster.
-            LinearGradient(
-                colors: [Color(red: 0.09, green: 0.08, blue: 0.07), Color(red: 0.14, green: 0.10, blue: 0.06)],
-                startPoint: .top, endPoint: .bottom
-            )
-            .ignoresSafeArea()
-
-            hero
+        GeometryReader { geometry in
+            ScrollView {
+                hero.frame(minHeight: geometry.size.height)
+            }
+            .background(MusterPalette.canvas.ignoresSafeArea())
         }
-        .preferredColorScheme(.dark)
         // A pairing invite can arrive while the hero is up (deep link at
         // launch, or the desktop re-sent an invite). Intent beats onboarding:
         // flipping welcomeSeen lets RootView route to PairingView.
@@ -52,12 +47,12 @@ struct WelcomeView: View {
                 .accessibilityHidden(true)
 
             Text("Muster")
-                .font(.system(size: 42, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .font(.largeTitle.weight(.semibold))
+                .foregroundStyle(.primary)
                 .accessibilityIdentifier("welcome-title")
-            Text("Your AI workforce, right in your pocket.")
-                .font(.system(size: 17, weight: .light))
-                .foregroundStyle(.white.opacity(0.65))
+            Text("Your assistant, wherever you are.")
+                .font(.body)
+                .foregroundStyle(MusterPalette.secondaryInk)
                 .padding(.top, 6)
                 .multilineTextAlignment(.center)
 
@@ -75,10 +70,11 @@ struct WelcomeView: View {
                 } label: {
                     Text("Skip for now")
                         .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(MusterPalette.secondaryInk)
                         .padding(.vertical, 8)
                         .padding(.horizontal, 16)
                 }
+                .buttonStyle(.plain)
                 .accessibilityIdentifier("welcome-skip")
             }
             .padding(.horizontal, 24)
@@ -86,7 +82,7 @@ struct WelcomeView: View {
             if let error = cloud.error {
                 Text(error)
                     .font(.footnote)
-                    .foregroundStyle(Color(red: 1.0, green: 0.62, blue: 0.45))
+                    .foregroundStyle(MusterPalette.errorInk)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 28)
                     .padding(.top, 12)
@@ -103,19 +99,20 @@ struct WelcomeView: View {
         } label: {
             HStack(spacing: 10) {
                 if cloud.signingIn {
-                    ProgressView().tint(.black)
+                    ProgressView().tint(MusterPalette.accent)
                 } else {
                     GoogleGlyph()
                         .frame(width: 18, height: 18)
                 }
                 Text(cloud.signingIn ? "Signing in…" : "Continue with Google")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.black)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .background(Color.white, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .frame(minHeight: 52)
+            .glassSheet(cornerRadius: 14)
         }
+        .buttonStyle(.plain)
         .disabled(cloud.signingIn)
         .accessibilityIdentifier("welcome-google")
     }
@@ -127,10 +124,10 @@ struct WelcomeView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Signed in")
                     .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(MusterPalette.secondaryInk)
                 Text(cloud.identity?.email ?? "")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -138,7 +135,7 @@ struct WelcomeView: View {
         }
         .padding(.horizontal, 18)
         .frame(maxWidth: .infinity, minHeight: 52)
-        .glassSheet(cornerRadius: 26)
+        .glassSheet(cornerRadius: 14)
         .accessibilityIdentifier("welcome-signed-in")
     }
 
@@ -149,14 +146,14 @@ struct WelcomeView: View {
             HStack(spacing: 10) {
                 Image(systemName: "rectangle.landscape.rotate")
                 Text("Pair with your computer")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.headline)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 52)
+            .frame(minHeight: 52)
             .foregroundStyle(.white)
             .background(
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .fill(Color(red: 0.906, green: 0.522, blue: 0.192)) // brand orange #E78531
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(MusterPalette.accent)
             )
         }
         .accessibilityIdentifier("welcome-pair")

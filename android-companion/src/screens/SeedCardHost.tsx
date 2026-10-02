@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { BackHandler, StyleSheet, View } from "react-native";
+import { useCompanionTheme } from "./theme";
 import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 
 interface EditorPresentation {
@@ -54,6 +55,7 @@ function SeedViewport({ host, children }: { host: SeedPresentations; children: R
 }
 
 function SeedEditorLayer({ presentation }: { presentation: HostedEditor }) {
+  const theme = useCompanionTheme();
   const insets = useContext(SafeAreaInsetsContext);
   const latest = useRef(presentation);
   useLayoutEffect(() => { latest.current = presentation; });
@@ -63,7 +65,7 @@ function SeedEditorLayer({ presentation }: { presentation: HostedEditor }) {
     return () => back.remove();
   }, []);
   return <View style={[StyleSheet.absoluteFill, { paddingTop: insets?.top ?? 0, paddingBottom: insets?.bottom ?? 0,
-    paddingLeft: insets?.left ?? 0, paddingRight: insets?.right ?? 0, backgroundColor: "#0a0a0a" }]}
+    paddingLeft: insets?.left ?? 0, paddingRight: insets?.right ?? 0, backgroundColor: theme.page }]}
     testID="seed-editor-overlay" accessibilityViewIsModal>
     {presentation.node}
   </View>;

@@ -1,4 +1,5 @@
 // The QR scanner the pairing screen opens on request — and only on request.
+import { createThemedStyles, useCompanionTheme } from "./theme";
 //
 // The system permission prompt fires from this component's mount, so the
 // pairing screen never asks for a camera it is not showing. Scanning
@@ -17,6 +18,8 @@ export interface PairQrScannerProps {
 }
 
 export function PairQrScanner({ onScan, onCancel }: PairQrScannerProps) {
+  const theme = useCompanionTheme();
+  const styles = themedStyles[theme.scheme];
   const [permission, requestPermission] = useCameraPermissions();
   const delivered = useRef(false);
 
@@ -87,6 +90,8 @@ export function PairQrScanner({ onScan, onCancel }: PairQrScannerProps) {
 }
 
 function CancelButton({ onPress }: { onPress: () => void }) {
+  const theme = useCompanionTheme();
+  const styles = themedStyles[theme.scheme];
   return (
     <TouchableOpacity
       accessibilityRole="button"
@@ -99,22 +104,22 @@ function CancelButton({ onPress }: { onPress: () => void }) {
   );
 }
 
-const styles = StyleSheet.create({
+const themedStyles = createThemedStyles((theme) => StyleSheet.create({
   container: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#0a0a0a",
+    backgroundColor: theme.page,
     alignItems: "center",
     justifyContent: "center",
     padding: 24,
     zIndex: 10,
   },
-  message: { color: "#b2ada5", fontSize: 15, lineHeight: 21, textAlign: "center", marginBottom: 20 },
-  overlay: { position: "absolute", left: 0, right: 0, bottom: 48, alignItems: "center", paddingHorizontal: 24 },
-  hint: { color: "#f6f1e8", fontSize: 14, textAlign: "center", marginBottom: 16 },
+  message: { color: theme.secondary, fontSize: 15, lineHeight: 21, textAlign: "center", marginBottom: 20 },
+  overlay: { position: "absolute", left: 16, right: 16, bottom: 48, alignItems: "center", padding: 16, borderRadius: 14, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border },
+  hint: { color: theme.ink, fontSize: 14, textAlign: "center", marginBottom: 16 },
   button: {
-    backgroundColor: "#151515",
+    backgroundColor: theme.panel,
     borderWidth: 1,
-    borderColor: "#393631",
+    borderColor: theme.border,
     borderRadius: 10,
     minHeight: 44,
     paddingHorizontal: 20,
@@ -123,5 +128,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: 8,
   },
-  buttonText: { color: "#f6f1e8", fontSize: 15, fontWeight: "600" },
-});
+  buttonText: { color: theme.ink, fontSize: 15, fontWeight: "600" },
+}));

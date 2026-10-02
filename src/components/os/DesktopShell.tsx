@@ -10,7 +10,7 @@ import { ArrowUpRight, LayoutGrid } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useStore, type Bot } from "@/state/store";
 import { AgentAvatar } from "@/components/Avatar";
-import { MusterbotMark } from "@/components/MusterbotMark";
+import { WorkspaceBrandMark } from "@/components/WorkspaceBrandMark";
 import { WorkspaceHome } from "./WorkspaceHome";
 import { operationalAvatarState } from "./workspace-state";
 import { revealWindow, type WindowTarget, type OpenWindow } from "./window-stack";
@@ -97,7 +97,7 @@ export function DesktopShell() {
     <div className="os-desktop">
       <header className="os-topbar">
         <button type="button" className="os-mark" onClick={showWorkspace} aria-label="Show workspace overview">
-          <MusterbotMark size={20} />
+          <WorkspaceBrandMark size={26} />
           Muster <span>OS</span>
         </button>
         <button

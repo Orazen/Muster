@@ -12,6 +12,9 @@ import WatchKit
 /// src/lib/mascot.ts — AGENT_COLORS, the same map AgentPalette carries on
 /// the phone. A bot you know by its colour should be that colour here too.
 enum WatchPalette {
+    static let accent = Color(hex: "#0070e0")
+    static let panel = Color(hex: "#191919")
+    static let focused = Color(hex: "#153857")
     private static let hex: [String: String] = [
         "green": "#009957",
         "blue": "#377FE6",
@@ -73,14 +76,17 @@ struct RootView: View {
     @EnvironmentObject private var session: WatchSession
 
     var body: some View {
-        switch session.status {
-        case .unpaired:
-            PairingView()
-        case .unauthorized:
-            UnauthorizedView()
-        case .connecting, .live, .offline:
-            FleetView()
+        Group {
+            switch session.status {
+            case .unpaired:
+                PairingView()
+            case .unauthorized:
+                UnauthorizedView()
+            case .connecting, .live, .offline:
+                FleetView()
+            }
         }
+        .tint(WatchPalette.accent)
     }
 }
 
@@ -225,7 +231,7 @@ struct FleetView: View {
     /// The focused row gets a visible tint so the crown's position is shown,
     /// not just felt. Rows that are not focused are untouched.
     private func focusHighlight(_ row: FleetFocusRow) -> Color {
-        focusedRow == row ? Color.accentColor.opacity(0.22) : .clear
+        focusedRow == row ? WatchPalette.focused : WatchPalette.panel
     }
 
     private var approvals: [PendingApproval] {
@@ -423,7 +429,7 @@ private struct BotRow: View {
             }
             Spacer()
             if bot.unread {
-                Circle().fill(.blue).frame(width: 7, height: 7)
+                Circle().fill(WatchPalette.accent).frame(width: 7, height: 7)
             }
         }
     }
@@ -435,11 +441,11 @@ private struct RoomRow: View {
     var body: some View {
         HStack {
             Image(systemName: "bubble.left.and.bubble.right")
-                .foregroundStyle(.blue)
+                .foregroundStyle(WatchPalette.accent)
             Text(room.name).lineLimit(1)
             Spacer()
             if room.unread {
-                Circle().fill(.blue).frame(width: 7, height: 7)
+                Circle().fill(WatchPalette.accent).frame(width: 7, height: 7)
             }
         }
     }

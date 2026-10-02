@@ -1,4 +1,5 @@
 import React, { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createThemedStyles, useCompanionTheme } from "./theme";
 import {
   ActivityIndicator,
   FlatList,
@@ -45,6 +46,8 @@ function Bubble({
   message: Message;
   color: string;
 }) {
+  const theme = useCompanionTheme();
+  const styles = themedStyles[theme.scheme];
   const isUser = message.role === "user";
 
   if (message.kind === "activity" && message.tool) {
@@ -65,7 +68,10 @@ function Bubble({
   return (
     <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleBot]}>
       {!isUser && message.from?.name ? (
-        <Text style={[styles.sender, { color }]}>{message.from.name}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <View accessible={false} style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
+          <Text style={styles.sender}>{message.from.name}</Text>
+        </View>
       ) : null}
       {message.comm ? (
         <Text style={styles.comm}>↔ {message.comm.withName ?? "room"}</Text>
@@ -80,6 +86,8 @@ interface ChatComposerProps {
   onSend: (text: string) => Promise<boolean>;
 }
 function ChatComposer({ title, onSend }: ChatComposerProps) {
+  const theme = useCompanionTheme();
+  const styles = themedStyles[theme.scheme];
   const sendRef = useRef(onSend);
   useLayoutEffect(() => { sendRef.current = onSend; }, [onSend]);
   const [composer] = useState(() => new ComposerDraft((text) => sendRef.current(text)));
@@ -94,7 +102,8 @@ function ChatComposer({ title, onSend }: ChatComposerProps) {
           style={styles.input}
           accessibilityLabel="Message draft"
           placeholder={`Message ${title}…`}
-          placeholderTextColor="#666"
+          placeholderTextColor={theme.secondary}
+          selectionColor={theme.accent}
           value={draft}
           onChangeText={composer.edit}
           multiline
@@ -107,7 +116,7 @@ function ChatComposer({ title, onSend }: ChatComposerProps) {
           accessibilityLabel="Send message"
           accessibilityState={{ disabled, busy: pending }}
         >
-          {pending ? <ActivityIndicator color="#fff" /> : <Text style={styles.sendText}>↑</Text>}
+          {pending ? <ActivityIndicator color={theme.primaryInk} /> : <Text style={styles.sendText}>↑</Text>}
         </TouchableOpacity>
       </View>
     </View>
@@ -132,6 +141,8 @@ export function ChatViewScreen({
   readError,
   onRetryRead,
 }: ChatViewScreenProps) {
+  const theme = useCompanionTheme();
+  const styles = themedStyles[theme.scheme];
   const listRef = useRef<FlatList<Message | null>>(null);
   const threadId = target.threadId;
 
@@ -164,7 +175,7 @@ export function ChatViewScreen({
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
     >
-      <StatusBar style="light" />
+      <StatusBar style={theme.statusBar} />
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="Back to chats">
           <Text style={styles.back}>‹</Text>
@@ -184,7 +195,7 @@ export function ChatViewScreen({
         keyExtractor={(item, i) => item?.id ?? `stream-${i}`}
         onEndReached={() => hasMore && onLoadOlder()}
         onEndReachedThreshold={0.4}
-        ListFooterComponent={hasMore ? <ActivityIndicator color="#555" style={styles.more} /> : null}
+        ListFooterComponent={hasMore ? <ActivityIndicator color={theme.secondary} style={styles.more} /> : null}
         renderItem={({ item }) => {
           if (item === null) {
             const text = streams?.text ? streams.text : streams?.reasoning ?? "";
@@ -238,8 +249,8 @@ export function ChatViewScreen({
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0a0a0a" },
+const themedStyles = createThemedStyles((theme) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: theme.page },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -247,51 +258,51 @@ const styles = StyleSheet.create({
     paddingTop: 52,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#222",
+    borderBottomColor: theme.border,
   },
-  back: { color: "#f0460e", fontSize: 30, lineHeight: 34, width: 32 },
+  back: { color: theme.accent, fontSize: 30, lineHeight: 34, width: 32 },
   headerTitle: { flex: 1, alignItems: "center" },
-  title: { color: "#f6f6f7", fontSize: 16, fontWeight: "600" },
-  busy: { color: "#f0460e", fontSize: 11, marginTop: 1 },
+  title: { color: theme.ink, fontSize: 16, fontWeight: "600" },
+  busy: { color: theme.accent, fontSize: 11, marginTop: 1 },
   list: { flex: 1 },
   more: { marginVertical: 8 },
   userRow: { alignItems: "flex-end" },
   activityOuter: { alignItems: "flex-start" },
   bubble: {
     maxWidth: "82%",
-    borderRadius: 16,
+    borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 9,
     marginHorizontal: 14,
     marginVertical: 4,
   },
-  bubbleBot: { backgroundColor: "#1a1a1c", alignSelf: "flex-start" },
-  bubbleUser: { backgroundColor: "#f0460e", alignSelf: "flex-end" },
-  sender: { fontSize: 12, fontWeight: "700", marginBottom: 2 },
-  comm: { color: "#8a8a8e", fontSize: 11, marginBottom: 2 },
-  bubbleText: { color: "#e8e8ea", fontSize: 15, lineHeight: 21 },
-  bubbleTextUser: { color: "#fff", fontSize: 15, lineHeight: 21 },
-  reasoning: { color: "#6a6a6e", fontSize: 12, fontStyle: "italic" },
-  caret: { color: "#f0460e", fontSize: 14 },
+  bubbleBot: { backgroundColor: "transparent", alignSelf: "flex-start", maxWidth: "92%" },
+  bubbleUser: { backgroundColor: theme.userBubble, alignSelf: "flex-end" },
+  sender: { color: theme.ink, fontSize: 12, fontWeight: "700", marginBottom: 2 },
+  comm: { color: theme.secondary, fontSize: 11, marginBottom: 2 },
+  bubbleText: { color: theme.ink, fontSize: 15, lineHeight: 21 },
+  bubbleTextUser: { color: theme.ink, fontSize: 15, lineHeight: 21 },
+  reasoning: { color: theme.secondary, fontSize: 12, fontStyle: "italic" },
+  caret: { color: theme.accent, fontSize: 14 },
   activityRow: {
     alignSelf: "flex-start",
-    backgroundColor: "#141416",
+    backgroundColor: theme.panel,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 5,
     marginHorizontal: 14,
     marginVertical: 2,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#26262a",
+    borderColor: theme.border,
   },
   activityRowUser: { alignSelf: "flex-end" },
-  activityText: { color: "#9a9a9e", fontSize: 12, fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }) },
-  readStatus: { paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#222" },
-  readError: { color: "#ff8a80", fontSize: 13, lineHeight: 18 },
+  activityText: { color: theme.secondary, fontSize: 12, fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }) },
+  readStatus: { paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
+  readError: { color: theme.danger, fontSize: 13, lineHeight: 18 },
   readRetry: { alignSelf: "flex-start", paddingVertical: 10, marginTop: 2 },
-  readRetryText: { color: "#f6f6f7", fontSize: 13, fontWeight: "600" },
-  composerSection: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#222" },
-  sendError: { color: "#ff8a80", paddingHorizontal: 16, paddingTop: 10, fontSize: 13, lineHeight: 18 },
+  readRetryText: { color: theme.ink, fontSize: 13, fontWeight: "600" },
+  composerSection: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
+  sendError: { color: theme.danger, paddingHorizontal: 16, paddingTop: 10, fontSize: 13, lineHeight: 18 },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -300,24 +311,27 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    backgroundColor: "#1a1a1c",
-    borderRadius: 20,
+    backgroundColor: theme.raised,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: theme.border,
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 10,
-    color: "#f6f6f7",
-    fontSize: 15,
+    color: theme.ink,
+    fontSize: 16,
+    minHeight: 48,
     maxHeight: 120,
     marginRight: 8,
   },
   send: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#f0460e",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: theme.primary,
     alignItems: "center",
     justifyContent: "center",
   },
   sendDisabled: { opacity: 0.35 },
-  sendText: { color: "#fff", fontSize: 20, fontWeight: "700" },
-});
+  sendText: { color: theme.primaryInk, fontSize: 20, fontWeight: "700" },
+}));

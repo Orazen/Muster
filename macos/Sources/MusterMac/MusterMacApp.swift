@@ -26,6 +26,8 @@ struct MusterMacApp: App {
                 .environmentObject(demo)
                 .frame(minWidth: 1040, minHeight: 640)
                 .preferredColorScheme(live.appearance.colorScheme)
+                .tint(MusterAppearance.accent)
+                .background(MusterAppearance.canvas)
                 .task {
                     guard live.state == .signedOut else { return }
                     if let saved = SessionKeychain.load() {
@@ -249,6 +251,8 @@ struct FleetSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(MusterAppearance.sidebar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack(spacing: 8) {
                 Circle().fill(connectionColor).frame(width: 7, height: 7)
@@ -267,7 +271,7 @@ struct FleetSidebar: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(.bar)
+            .background(MusterAppearance.sidebar)
         }
         .searchable(text: $query, placement: .sidebar, prompt: "Search fleet")
     }
@@ -326,12 +330,13 @@ struct LiveConversationView: View {
                 }
             }
             Spacer()
-            Text("Muster 1.23.0")
+            Text("Muster")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 16)
-        .frame(height: 46)
+        .frame(minHeight: 56)
+        .background(MusterAppearance.canvas)
     }
 }
 
@@ -427,9 +432,9 @@ struct LiveApprovalCard: View {
                 Spacer()
             }
         }
-        .padding(12)
-        .background(.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.orange.opacity(0.5)))
+        .padding(16)
+        .background(MusterAppearance.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(MusterAppearance.accent.opacity(0.65)))
     }
 }
 
@@ -445,19 +450,27 @@ struct LiveComposer: View {
                 .lineLimit(1...5)
                 .focused($focused)
                 .onSubmit { Task { await live.sendDraft() } }
-                .padding(8)
-                .background(.quinary, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
             Button {
                 Task { await live.sendDraft() }
             } label: {
-                Image(systemName: "arrow.up.circle.fill").font(.title3)
+                Image(systemName: "arrow.up")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(MusterAppearance.accent, in: RoundedRectangle(cornerRadius: 10))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Send message")
             .disabled(live.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.bar)
+        .padding(6)
+        .background(MusterAppearance.panel, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(MusterAppearance.border))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(MusterAppearance.canvas)
         .onAppear { focused = true }
     }
 }

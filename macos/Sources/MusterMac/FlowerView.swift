@@ -15,42 +15,40 @@ struct FlowerView: View {
     private let eyeTilt: Double = -4
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: busy ? 1.0 / 12.0 : nil)) { timeline in
-            Canvas { context, size in
-                let scale = min(size.width, size.height) / 240.0
-                var body = context
-                body.translateBy(x: size.width / 2, y: size.height / 2)
-                body.scaleBy(x: scale, y: scale)
-                // The artwork's viewBox is 200x200 centered on the origin.
-                let petal = Path { path in
-                    for command in FlowerArtwork.body {
-                        switch command {
-                        case let .move(x, y): path.move(to: CGPoint(x: x, y: y))
-                        case let .curve(c1x, c1y, c2x, c2y, x, y):
-                            path.addCurve(
-                                to: CGPoint(x: x, y: y),
-                                control1: CGPoint(x: c1x, y: c1y),
-                                control2: CGPoint(x: c2x, y: c2y)
-                            )
-                        case .close: path.closeSubpath()
-                        }
+        Canvas { context, size in
+            let scale = min(size.width, size.height) / 224.0
+            var body = context
+            body.translateBy(x: size.width / 2, y: size.height / 2)
+            body.scaleBy(x: scale, y: scale)
+            // The artwork's viewBox is 200x200 centered on the origin.
+            let petal = Path { path in
+                for command in FlowerArtwork.body {
+                    switch command {
+                    case let .move(x, y): path.move(to: CGPoint(x: x, y: y))
+                    case let .curve(c1x, c1y, c2x, c2y, x, y):
+                        path.addCurve(
+                            to: CGPoint(x: x, y: y),
+                            control1: CGPoint(x: c1x, y: c1y),
+                            control2: CGPoint(x: c2x, y: c2y)
+                        )
+                    case .close: path.closeSubpath()
                     }
                 }
-                let tint = Color(hex: FlowerArtwork.agentColorHex(colorName ?? ""))
-                body.fill(petal, with: .color(tint))
-                body.stroke(petal, with: .color(tint.opacity(0.85)), lineWidth: 2)
-
-                // Eyes: small discs at the anchors, tilted as authored.
-                for eye in FlowerArtwork.eyes {
-                    var eyeContext = body
-                    eyeContext.translateBy(x: eye.x, y: eye.y)
-                    eyeContext.rotate(by: .degrees(eyeTilt))
-                    let disc = Path(ellipseIn: CGRect(x: -5, y: -7, width: 10, height: 14))
-                    eyeContext.fill(disc, with: .color(.black.opacity(0.82)))
-                }
             }
-            .opacity(busy ? 1 : 0.94)
+            let tint = Color(hex: FlowerArtwork.agentColorHex(colorName ?? ""))
+            body.fill(petal, with: .color(tint))
+            body.stroke(petal, with: .color(tint.opacity(0.85)), lineWidth: 2)
+
+            // The same off-white eye capsules and tilt as phone and Watch.
+            for eye in FlowerArtwork.eyes {
+                var eyeContext = body
+                eyeContext.translateBy(x: eye.x, y: eye.y)
+                eyeContext.rotate(by: .degrees(eyeTilt))
+                let disc = Path(roundedRect: CGRect(x: -10.5, y: -22, width: 21, height: 44), cornerRadius: 10.5)
+                eyeContext.fill(disc, with: .color(Color(hex: "#f9f9f9")))
+            }
         }
+        .opacity(busy ? 1 : 0.94)
         .accessibilityLabel("Muster Flower mascot")
     }
 }

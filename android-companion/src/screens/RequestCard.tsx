@@ -1,4 +1,5 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
+import { createThemedStyles, useCompanionTheme } from "./theme";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import {
   cardActionKey, cardReference, outcomeMessage,
@@ -34,6 +35,8 @@ export function RequestCard(props: RequestCardProps) {
 function CardContent({
   message, target, bot, reference, cardActions, onCardAction, onRefreshCards,
 }: RequestCardProps & { reference: CardReference | null }) {
+  const theme = useCompanionTheme();
+  const styles = themedStyles[theme.scheme];
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -108,7 +111,7 @@ function CardContent({
       accessibilityState={{ disabled: busy, busy }} disabled={busy}
       style={[styles.button, primary && styles.primary, busy && styles.disabled]}
       onPress={() => { void submit(action); }}>
-      <Text style={styles.buttonText}>{label}</Text>
+      <Text style={[styles.buttonText, primary && styles.primaryText]}>{label}</Text>
     </TouchableOpacity>
   );
 
@@ -145,13 +148,13 @@ function CardContent({
       ) : (
         <View style={styles.choices}>
           <TextInput accessibilityLabel="Your answer" placeholder="Type your own answer"
-            placeholderTextColor="#8a8a8e" value={draft} onChangeText={setDraft}
+            placeholderTextColor={theme.secondary} selectionColor={theme.accent} value={draft} onChangeText={setDraft}
             multiline style={styles.input} />
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Send answer"
             accessibilityState={{ disabled: busy || !draft.trim(), busy }} disabled={busy || !draft.trim()}
             style={[styles.button, styles.primary, (busy || !draft.trim()) && styles.disabled]}
             onPress={() => { if (draft.trim()) void submit({ kind: "answer", text: draft }); }}>
-            <Text style={styles.buttonText}>Send answer</Text>
+            <Text style={[styles.buttonText, styles.primaryText]}>Send answer</Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -176,22 +179,23 @@ function CardContent({
   );
 }
 
-const styles = StyleSheet.create({
-  card: { marginHorizontal: 14, marginVertical: 6, padding: 14, borderRadius: 16, backgroundColor: "#1c1c1e", borderWidth: 1, borderColor: "#3a3a3e" },
-  kind: { color: "#b5b5bb", fontSize: 11, fontWeight: "600", marginBottom: 6 },
-  title: { color: "#f6f6f7", fontSize: 16, fontWeight: "600", lineHeight: 22 },
-  subtitle: { color: "#b5b5bb", fontSize: 14, marginTop: 5, lineHeight: 20 },
-  tool: { color: "#d4d4d8", fontSize: 12, marginTop: 8 },
-  held: { color: "#ffbf80", fontSize: 13, lineHeight: 19, marginTop: 10 },
+const themedStyles = createThemedStyles((theme) => StyleSheet.create({
+  card: { marginHorizontal: 14, marginVertical: 6, padding: 16, borderRadius: 14, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border },
+  kind: { color: theme.secondary, fontSize: 11, fontWeight: "600", marginBottom: 6 },
+  title: { color: theme.ink, fontSize: 16, fontWeight: "600", lineHeight: 22 },
+  subtitle: { color: theme.secondary, fontSize: 14, marginTop: 5, lineHeight: 20 },
+  tool: { color: theme.ink, fontSize: 12, marginTop: 8 },
+  held: { color: theme.warning, fontSize: 13, lineHeight: 19, marginTop: 10 },
   choices: { marginTop: 12, gap: 8 },
-  choiceText: { color: "#d4d4d8", fontSize: 14, lineHeight: 20, paddingVertical: 6 },
-  button: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, backgroundColor: "#2a2a2e", justifyContent: "center" },
-  primary: { backgroundColor: "#c63d0a" },
-  buttonText: { color: "#fff", fontSize: 14, lineHeight: 20, fontWeight: "600", flexShrink: 1 },
+  choiceText: { color: theme.ink, fontSize: 14, lineHeight: 20, paddingVertical: 6 },
+  button: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, backgroundColor: theme.raised, justifyContent: "center" },
+  primary: { backgroundColor: theme.primary },
+  buttonText: { color: theme.ink, fontSize: 14, lineHeight: 20, fontWeight: "600", flexShrink: 1 },
+  primaryText: { color: theme.primaryInk },
   disabled: { opacity: 0.5 },
-  input: { color: "#f6f6f7", backgroundColor: "#111113", borderRadius: 10, padding: 12, minHeight: 48, maxHeight: 120, fontSize: 15, textAlignVertical: "top" },
-  note: { color: "#b5b5bb", fontSize: 12, lineHeight: 18, marginTop: 8 },
-  status: { color: "#d4d4d8", fontSize: 14, lineHeight: 20, marginTop: 12 },
-  error: { color: "#ff8a80", fontSize: 13, lineHeight: 19, marginTop: 12 },
+  input: { color: theme.ink, backgroundColor: theme.inset, borderRadius: 10, padding: 12, minHeight: 48, maxHeight: 120, fontSize: 15, textAlignVertical: "top" },
+  note: { color: theme.secondary, fontSize: 12, lineHeight: 18, marginTop: 8 },
+  status: { color: theme.ink, fontSize: 14, lineHeight: 20, marginTop: 12 },
+  error: { color: theme.danger, fontSize: 13, lineHeight: 19, marginTop: 12 },
   check: { marginTop: 10 },
-});
+}));

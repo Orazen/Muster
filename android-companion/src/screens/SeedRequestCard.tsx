@@ -1,4 +1,5 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
+import { createThemedStyles, useCompanionTheme } from "./theme";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import type { CompanionState } from "../core/store";
 import { seedCardSignature, seedCardWriteBlocker } from "../core/seed-card";
@@ -39,6 +40,8 @@ export function SeedCardOwner(props: SeedRequestCardProps) {
 }
 
 function SeedContent({ state, message, target, seedActions, onSeedAction }: SeedRequestCardProps) {
+  const theme = useCompanionTheme();
+  const styles = themedStyles[theme.scheme];
   const [draft, setDraft] = useState("");
   const [lastAnswer, setLastAnswer] = useState<string | undefined>();
   const [pending, setPending] = useState<SeedAction["kind"] | null>(null);
@@ -111,7 +114,7 @@ function SeedContent({ state, message, target, seedActions, onSeedAction }: Seed
       accessibilityState={{ disabled, busy }} disabled={disabled}
       style={[styles.button, primary && styles.primary, disabled && styles.disabled]}
       onPress={() => { if (inEditor ? currentEditor() : !editor.current) void submit(next); }}>
-      <Text style={styles.buttonText}>{label}</Text>
+      <Text style={[styles.buttonText, primary && styles.primaryText]}>{label}</Text>
     </TouchableOpacity>
   );
 
@@ -168,7 +171,7 @@ function SeedContent({ state, message, target, seedActions, onSeedAction }: Seed
         </View>
         <ScrollView style={styles.editorScroll} contentContainerStyle={styles.editorContent} keyboardShouldPersistTaps="handled">
           <TextInput ref={answerInput} accessibilityLabel="Your own answer" placeholder="Type your own answer"
-            placeholderTextColor="#8a8a8e" value={draft} onChangeText={(text) => {
+            placeholderTextColor={theme.secondary} selectionColor={theme.accent} value={draft} onChangeText={(text) => {
               if (currentEditor() && current.current.canAnswer) setDraft(text);
             }} multiline maxLength={4000} style={styles.input} />
           {feedback}
@@ -184,25 +187,26 @@ function SeedContent({ state, message, target, seedActions, onSeedAction }: Seed
   } : null} />;
 }
 
-const styles = StyleSheet.create({
-  card: { marginHorizontal: 14, marginVertical: CARD_MARGIN, padding: 14, borderRadius: 16, backgroundColor: "#1c1c1e", borderWidth: 1, borderColor: "#3a3a3e" },
-  kind: { color: "#b5b5bb", fontSize: 11, fontWeight: "600", marginBottom: 6 },
-  title: { color: "#f6f6f7", fontSize: 16, fontWeight: "600", lineHeight: 22 },
-  subtitle: { color: "#b5b5bb", fontSize: 14, marginTop: 5, lineHeight: 20 },
+const themedStyles = createThemedStyles((theme) => StyleSheet.create({
+  card: { marginHorizontal: 14, marginVertical: CARD_MARGIN, padding: 16, borderRadius: 14, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border },
+  kind: { color: theme.secondary, fontSize: 11, fontWeight: "600", marginBottom: 6 },
+  title: { color: theme.ink, fontSize: 16, fontWeight: "600", lineHeight: 22 },
+  subtitle: { color: theme.secondary, fontSize: 14, marginTop: 5, lineHeight: 20 },
   choices: { marginTop: 12, gap: 8 },
-  choice: { color: "#d4d4d8", fontSize: 14, lineHeight: 20, paddingVertical: 6 },
-  button: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, backgroundColor: "#2a2a2e", justifyContent: "center" },
-  primary: { backgroundColor: "#c63d0a" },
-  buttonText: { color: "#fff", fontSize: 14, lineHeight: 20, fontWeight: "600", flexShrink: 1 },
+  choice: { color: theme.ink, fontSize: 14, lineHeight: 20, paddingVertical: 6 },
+  button: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, backgroundColor: theme.raised, justifyContent: "center" },
+  primary: { backgroundColor: theme.primary },
+  buttonText: { color: theme.ink, fontSize: 14, lineHeight: 20, fontWeight: "600", flexShrink: 1 },
+  primaryText: { color: theme.primaryInk },
   disabled: { opacity: 0.5 },
-  editor: { flex: 1, backgroundColor: "#0a0a0a" },
-  editorHeader: { flexDirection: "row", alignItems: "center", gap: 12, padding: 12, borderBottomWidth: 1, borderBottomColor: "#3a3a3e" },
-  editorTitle: { flex: 1, color: "#f6f6f7", fontSize: 18, lineHeight: 24, fontWeight: "600" },
+  editor: { flex: 1, backgroundColor: theme.page },
+  editorHeader: { flexDirection: "row", alignItems: "center", gap: 12, padding: 12, borderBottomWidth: 1, borderBottomColor: theme.border },
+  editorTitle: { flex: 1, color: theme.ink, fontSize: 18, lineHeight: 24, fontWeight: "600" },
   editorScroll: { flex: 1 },
   editorContent: { padding: 16 },
-  editorFooter: { padding: 12, borderTopWidth: 1, borderTopColor: "#3a3a3e" },
-  input: { color: "#f6f6f7", backgroundColor: "#111113", borderRadius: 10, padding: 12, minHeight: 84, maxHeight: 160, fontSize: 15, textAlignVertical: "top" },
-  saved: { color: "#e8e8ea", fontSize: 14, lineHeight: 20, marginTop: 12 },
-  note: { color: "#b5b5bb", fontSize: 13, lineHeight: 19, marginTop: 8 },
-  error: { color: "#ff8a80", fontSize: 13, lineHeight: 19, marginTop: 12 },
-});
+  editorFooter: { padding: 12, borderTopWidth: 1, borderTopColor: theme.border },
+  input: { color: theme.ink, backgroundColor: theme.inset, borderRadius: 10, padding: 12, minHeight: 84, maxHeight: 160, fontSize: 15, textAlignVertical: "top" },
+  saved: { color: theme.ink, fontSize: 14, lineHeight: 20, marginTop: 12 },
+  note: { color: theme.secondary, fontSize: 13, lineHeight: 19, marginTop: 8 },
+  error: { color: theme.danger, fontSize: 13, lineHeight: 19, marginTop: 12 },
+}));

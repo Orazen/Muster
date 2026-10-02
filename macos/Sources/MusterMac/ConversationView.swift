@@ -100,7 +100,7 @@ struct MessageRow: View {
                         .textSelection(.enabled)
                 }
                 .padding(10)
-                .background(message.role == .user ? Color.accentColor.opacity(0.14) : Color(nsColor: .controlBackgroundColor),
+                .background(message.role == .user ? MusterAppearance.raised : MusterAppearance.panel,
                             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             if message.role == .bot { Spacer(minLength: 48) }

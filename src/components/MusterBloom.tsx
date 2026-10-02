@@ -4,6 +4,7 @@
 // Orazen/musterbot repo).
 import { forwardRef, useState } from "react";
 import { MusterBotMark, MUSTERBOT_ORANGE } from "@/lib/musterbot";
+import { WorkspaceBrandMark } from "./WorkspaceBrandMark";
 import "./muster-mascot.css";
 
 export type BloomMood = "idle" | "working" | "thinking" | "happy";
@@ -18,15 +19,21 @@ export const MusterBloom = forwardRef<
     interactive?: boolean;
     /** Ambient motion; defaults to the interactive setting. */
     animated?: boolean;
+    /** Approved flat presentation; preserves the same keyboard greeting. */
+    variant?: "original" | "workspace";
     className?: string;
   }
 >(function MusterBloom(
-  { size = 250, wordmark = false, mood = "idle", interactive = true, animated = interactive, className },
+  { size = 250, wordmark = false, mood = "idle", interactive = true, animated = interactive, variant = "original", className },
   ref,
 ) {
   const [wave, setWave] = useState(0);
   const eyes = wave || mood === "happy" ? "happy" : "open";
-  const mascot = (
+  const mascot = variant === "workspace" ? (
+    <span key={wave} className={wave ? "muster-bloom__wave" : undefined}>
+      <WorkspaceBrandMark size={size} happy={eyes === "happy"} label={interactive ? undefined : "Muster teammate"} />
+    </span>
+  ) : (
     <MusterBotMark
       size={size}
       eyes={eyes}

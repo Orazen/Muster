@@ -60,6 +60,26 @@
 .workspace-today .wt-context-section > p { font-size: 14px; color: var(--color-ink-secondary); line-height: 1.8; }
 .workspace-today .wt-text-button { display: inline-flex; align-items: center; justify-content: flex-start; gap: 6px; min-height: 42px; font-size: 12px; color: var(--color-accent-border); }
 .workspace-today .wt-context-section .wt-small-note { font-size: 12px; margin-top: 5px; }
+.workspace-today .wt-agenda { min-width: 0; font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.workspace-today .wt-agenda-status { color: var(--color-ink); font-weight: 500; }
+.workspace-today .wt-agenda-copy { color: var(--color-ink-secondary); margin-top: 8px; }
+.workspace-today .wt-agenda-recheck { display: flex; min-height: 34px; text-align: left; }
+.workspace-today .wt-agenda-button { min-height: 40px; font-size: 13px; }
+.workspace-today .wt-agenda-fields label { font-size: 12px; }
+.workspace-today .wt-agenda input, .workspace-today .wt-agenda select { width: 100%; max-width: 100%; min-width: 0; min-height: 40px; font-size: 14px; }
+.workspace-today .wt-agenda-day { border-top: 1px solid var(--color-hairline); padding-top: 18px; }
+.workspace-today .wt-agenda-day h3 { font-size: 14px; font-weight: 550; margin-bottom: 4px; }
+.workspace-today .wt-agenda-read-at { font-size: 12px; color: var(--color-ink-secondary); margin-top: 6px; }
+.workspace-today .wt-agenda-events { margin-top: 18px; }
+.workspace-today .wt-agenda-events li { border-left: 2px solid var(--color-accent); padding: 2px 0 2px 12px; }
+.workspace-today .wt-agenda-events li > p:first-child { font-size: 14px; font-weight: 500; line-height: 1.5; }
+.workspace-today .wt-agenda-events li > p + p { margin-top: 5px; font-size: 12px; }
+.workspace-today .wt-agenda-planning { margin-top: 20px; border-top: 1px solid var(--color-hairline); }
+.workspace-today .wt-agenda-planning > summary { cursor: pointer; min-height: 44px; padding: 12px 0; color: var(--color-accent-border); font-size: 13px; }
+.workspace-today .wt-calendar-planner { margin-top: 0; border-top: 0; padding-top: 0; }
+.workspace-today .wt-calendar-planner button { min-height: 40px; font-size: 13px; }
+.workspace-today .wt-planning-prepare { width: 100%; background: var(--workspace-send, var(--color-accent)); color: var(--workspace-send-ink, #fff); }
+.workspace-today .wt-agenda input:focus-visible, .workspace-today .wt-agenda summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
 .workspace-today .wt-connection { display: flex; align-items: baseline; gap: 7px; margin-top: auto; font-size: 12px; line-height: 1.7; color: var(--color-ink-secondary); }
 .workspace-today .wt-connection-dot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--color-ink-secondary); }
 .workspace-today .wt-connected { background: var(--color-success); }
@@ -88,6 +108,7 @@
   .workspace-today .wt-recipient { flex-basis: 100%; }
   .workspace-today select { max-width: none; font-size: 16px; }
   .workspace-today textarea { font-size: 16px; }
+  .workspace-today .wt-agenda input, .workspace-today .wt-agenda select { font-size: 16px; }
   .workspace-today .wt-primary { width: 100%; }
   .workspace-today .wt-recent-list button { padding: 12px 10px; gap: 8px; }
   .workspace-today .wt-conversation strong { font-size: 12px; }

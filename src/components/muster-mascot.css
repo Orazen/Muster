@@ -28,8 +28,16 @@
   outline-offset: 4px;
 }
 
+.muster-bloom__wave { display: inline-flex; animation: muster-greeting 420ms ease-out 1; }
+@keyframes muster-greeting {
+  0%, 100% { transform: rotate(0); }
+  35% { transform: rotate(-10deg); }
+  70% { transform: rotate(8deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .muster-bloom,
+  .muster-bloom__wave,
   .muster-bloom__button {
     animation: none !important;
     transition: none !important;

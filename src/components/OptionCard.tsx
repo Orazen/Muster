@@ -70,7 +70,7 @@ function LiveOptionCard({
   if (!card || card.dismissed) return null;
 
   return (
-    <div className="w-full max-w-[840px] rounded-2xl border border-hairline/50 bg-card p-4">
+    <div className="workspace-option-card w-full max-w-[840px] rounded-2xl border border-hairline/50 bg-card p-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[16px] font-semibold text-ink">{card.title}</div>

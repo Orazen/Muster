@@ -5,7 +5,7 @@
 // "open X" raises windows instead of prompting a model. Everything rides
 // the same store dispatch the chat composer uses, so turns stream, show
 // approval cards, and land receipts exactly like a typed message.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/state/store";
 import { AgentAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
@@ -58,16 +58,19 @@ export function CommandBar({ open, onClose, onOpenRooms }: { open: boolean; onCl
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const bots = state.bots.filter((b) => !b.hidden);
 
-  useEffect(() => {
-    if (open) {
-      setDraft("");
-      setError(null);
-      // focus after mount so the transition doesn't eat the caret
-      window.setTimeout(() => inputRef.current?.focus(), 30);
-    }
+  useLayoutEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setDraft("");
+    setError(null);
+    inputRef.current?.focus();
+    return () => {
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
   }, [open]);
 
   const parsed = useMemo(() => parseCommand(draft, bots), [draft, bots]);
@@ -103,10 +106,41 @@ export function CommandBar({ open, onClose, onOpenRooms }: { open: boolean; onCl
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-[14vh]" onPointerDown={onClose}>
       <div
+        ref={dialogRef}
         className="glass-console w-[min(560px,92vw)] rounded-2xl p-2"
         role="dialog"
+        aria-modal="true"
         aria-label="Command console"
+        tabIndex={-1}
         onPointerDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.defaultPrevented) return;
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            onClose();
+            return;
+          }
+          const dialog = dialogRef.current;
+          if (e.key !== "Tab" || !dialog) return;
+          const controls = Array.from(dialog.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          )).filter((element) => element.getClientRects().length > 0 && element.tabIndex >= 0);
+          const first = controls[0], last = controls.at(-1);
+          if (!first || !last) {
+            e.preventDefault();
+            dialog.focus();
+            return;
+          }
+          const active = document.activeElement;
+          if (e.shiftKey && (active === first || active === dialog || !dialog.contains(active))) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && (active === last || active === dialog || !dialog.contains(active))) {
+            e.preventDefault();
+            first.focus();
+          }
+        }}
       >
         <div className="flex items-center gap-2.5 px-2 py-1.5">
           <span className="os-console-glow" aria-hidden="true" />
@@ -119,7 +153,6 @@ export function CommandBar({ open, onClose, onOpenRooms }: { open: boolean; onCl
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") run();
-              if (e.key === "Escape") onClose();
             }}
             placeholder={COMMAND_HELP}
             aria-label="Command"

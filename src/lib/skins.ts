@@ -4,7 +4,7 @@
 // paint — that split keeps the two halves from drifting, and adding a skin is
 // one CSS block plus one entry in THEMES.
 
-export const THEME_IDS = ["midnight", "atelier", "foundry", "lagoon"] as const;
+export const THEME_IDS = ["midnight", "atelier", "foundry", "lagoon", "light"] as const;
 export type ThemeId = (typeof THEME_IDS)[number];
 
 /** Three dots shown next to each option in the picker: background, panel,
@@ -57,6 +57,13 @@ export const THEMES: readonly Theme[] = [
     description: "Cool daylight. Porcelain and deep teal.",
     swatch: { surface: "#edf2f3", panel: "#e2eaec", accent: "#0e6e80" },
     overlay: { color: "#edf2f3", symbolColor: "#476b74" },
+  },
+  {
+    id: "light",
+    label: "Light",
+    description: "Neutral daylight. Clear surfaces and blue details.",
+    swatch: { surface: "#ffffff", panel: "#fafafa", accent: "#0066cc" },
+    overlay: { color: "#ffffff", symbolColor: "#626262" },
   },
 ];
 

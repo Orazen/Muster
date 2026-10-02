@@ -51,6 +51,8 @@ struct PairingView: View {
                     discoverySection
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(MusterPalette.canvas)
             .navigationTitle("Pair with a computer")
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {

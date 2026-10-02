@@ -15,8 +15,8 @@ export function Card({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl bg-card p-4">
-      {title && <div className="text-[15px] font-medium text-ink">{title}</div>}
+    <div className="workspace-settings-card rounded-xl bg-card p-4">
+      {title && <div className="workspace-settings-card-title text-[15px] font-medium text-ink">{title}</div>}
       {subtitle && <div className={title ? "mt-0.5 text-[13px] leading-relaxed text-ink-secondary" : "text-[13px] leading-relaxed text-ink-secondary"}>{subtitle}</div>}
       {children && <div className={title || subtitle ? "mt-4" : undefined}>{children}</div>}
     </div>
@@ -81,7 +81,7 @@ export function SettingRow({
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-4 rounded-xl bg-card px-4 py-3.5",
+        "workspace-setting-row flex items-center justify-between gap-4 rounded-xl bg-card px-4 py-3.5",
         disabled && "opacity-50",
       )}
     >

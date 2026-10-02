@@ -5,6 +5,7 @@ import { appendDraft, useDraft } from "@/lib/drafts";
 import { WorkspaceBrandMark } from "./WorkspaceBrandMark";
 import { useStore, visibleMessages, type Bot, type Message } from "@/state/store";
 import { AgentAvatar } from "./Avatar";
+import { CalendarAgenda } from "./CalendarAgenda";
 import "./workspace-today.css";
 
 interface WorkspaceTodayProps {
@@ -142,10 +143,10 @@ export function WorkspaceToday({ onOpenCalendar, onOpenDevices }: WorkspaceToday
 
         <aside className="wt-context" aria-label="Workspace context">
           <section className="wt-context-section">
-            <div className="wt-context-title"><CalendarDays size={16} aria-hidden="true" /><h2>Make room for your day</h2></div>
-            <p>Open your Calendar connection to review the day and prepare a planning draft.</p>
-            <button type="button" className="wt-text-button" onClick={onOpenCalendar}>Open Calendar <ArrowUpRight size={14} aria-hidden="true" /></button>
-            <p className="wt-small-note">Calendar access is checked there. No events change when you prepare a draft.</p>
+            <div className="wt-context-title"><CalendarDays size={16} aria-hidden="true" /><h2>Your day at a glance</h2></div>
+            {/* Closing connection settings starts a fresh status check. A
+                disconnect there must not leave yesterday's grant on Today. */}
+            {!state.pluginsOpen && <CalendarAgenda variant="today" onOpenConnection={onOpenCalendar} />}
           </section>
           <section className="wt-context-section">
             <div className="wt-context-title"><Monitor size={16} aria-hidden="true" /><h2>Your workspace</h2></div>

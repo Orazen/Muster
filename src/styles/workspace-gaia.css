@@ -150,6 +150,50 @@
   font-weight: 500;
 }
 
+.muster-workspace .conversation-primary :is(.model-picker, .task-picker) > button {
+  border-radius: 8px;
+  border-color: var(--color-hairline);
+  background: var(--color-panel);
+  font-size: 12px;
+}
+
+.muster-workspace .model-picker > button:hover {
+  background: var(--color-raised);
+}
+
+/* The header already anchors its picker within the conversation. */
+.muster-workspace .model-picker [data-model-picker-content] {
+  max-width: min(380px, calc(100vw - 32px));
+  border-color: var(--color-hairline);
+  border-radius: 14px;
+  background: var(--color-card);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.14);
+}
+
+/* Bot settings has 20px body and 16px card padding on each side. Size its
+ * right-aligned popup to that panel's content, including on narrow screens. */
+.muster-workspace aside[aria-label="Bot settings"] {
+  container-type: inline-size;
+}
+
+.muster-workspace aside[aria-label="Bot settings"] .model-picker [data-model-picker-content] {
+  width: min(380px, calc(100cqw - 72px));
+}
+
+.muster-workspace [data-model-picker-content] > div:first-child {
+  border-color: var(--color-hairline);
+  background: var(--color-panel);
+}
+
+.muster-workspace [data-model-picker-content] button {
+  min-height: 36px;
+}
+
+.muster-workspace [data-model-picker-content] input {
+  min-width: 0;
+  min-height: 28px;
+}
+
 .muster-workspace .workspace-chat-log {
   min-width: 0;
   gap: 16px;
@@ -160,6 +204,146 @@
 .muster-workspace .workspace-chat-log .muster-bubble {
   line-height: 1.7;
   box-shadow: none;
+}
+
+/* The approved conversation reads as an assistant document, with a quiet
+ * surface reserved for the human's messages and bounded review cards. */
+.muster-workspace .workspace-chat-log .muster-bubble.muster-from-bot {
+  max-width: 100%;
+  border-color: transparent;
+  background: transparent;
+}
+
+.muster-workspace .workspace-chat-log .muster-bubble.muster-tail::before,
+.muster-workspace .workspace-chat-log .muster-bubble.muster-tail::after {
+  display: none;
+}
+
+.muster-workspace :is(.workspace-approval-card, .workspace-option-card) {
+  min-width: 0;
+  border-radius: 14px;
+  background: var(--color-card);
+  padding: 20px;
+  overflow-wrap: anywhere;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.04);
+}
+
+.muster-workspace .workspace-approval-heading {
+  gap: 6px 12px;
+}
+
+.muster-workspace .workspace-approval-heading > div {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.muster-workspace :is(.workspace-approval-card, .workspace-approval-panel) pre {
+  min-width: 0;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: var(--color-inset);
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.muster-workspace .workspace-approval-status {
+  border-top: 1px solid var(--color-hairline);
+  padding-top: 12px;
+  line-height: 1.6;
+}
+
+.muster-workspace .workspace-approval-panel {
+  min-width: 0;
+  border-color: var(--color-hairline);
+  border-radius: 20px 20px 0 0;
+  background: var(--color-card);
+  padding: 16px;
+  overflow-wrap: anywhere;
+}
+
+.muster-workspace .workspace-approval-actions {
+  padding: 10px;
+  gap: 8px;
+}
+
+.muster-workspace .workspace-approval-actions button {
+  min-height: 40px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.muster-workspace .workspace-option-card > div:first-child > div {
+  min-width: 0;
+}
+
+.muster-workspace .workspace-option-card button {
+  min-height: 36px;
+}
+
+.muster-workspace .workspace-option-card button > span {
+  flex-shrink: 0;
+}
+
+.muster-workspace .workspace-settings-overlay {
+  background: rgb(0 0 0 / 0.38);
+}
+
+.muster-workspace .settings-dialog {
+  border-color: var(--color-hairline);
+  border-radius: 16px;
+  background: var(--color-app);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.18);
+}
+
+.muster-workspace .workspace-settings-nav {
+  border-color: var(--color-hairline);
+  background: var(--color-panel);
+}
+
+.muster-workspace .workspace-settings-nav button {
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.muster-workspace .workspace-settings-search {
+  min-height: 36px;
+  border: 1px solid var(--color-hairline);
+  background: var(--color-inset);
+}
+
+.muster-workspace .workspace-settings-header {
+  min-height: 64px;
+  border-color: var(--color-hairline);
+}
+
+.muster-workspace :is(.workspace-settings-card, .workspace-setting-row) {
+  min-width: 0;
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  background: var(--color-card);
+}
+
+.muster-workspace .workspace-settings-card-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.muster-workspace .workspace-skin-option {
+  min-height: 64px;
+  border-radius: 10px;
+  background: var(--color-panel);
+}
+
+.muster-workspace .workspace-skin-option:has(input:checked) {
+  border-color: var(--color-accent-border);
+  background: var(--color-raised);
+}
+
+.muster-workspace .workspace-skin-option:has(input:focus-visible) {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
 }
 
 .muster-workspace .workspace-composer {
@@ -217,10 +401,41 @@
     font-size: 16px;
   }
 
+  .muster-workspace [data-model-picker-content] input,
+  .muster-workspace .workspace-option-card input {
+    font-size: 16px;
+  }
+
+  .muster-workspace :is(.workspace-approval-card, .workspace-option-card) {
+    padding: 14px;
+  }
+
+  .muster-workspace .workspace-approval-panel {
+    padding: 12px;
+  }
+
   .muster-workspace .workspace-chat-log {
     gap: 14px;
     padding-top: 18px;
     padding-bottom: 18px;
+  }
+}
+
+@media (max-width: 479px) {
+  .muster-workspace .workspace-setting-row {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .muster-workspace .workspace-setting-row > :last-child {
+    min-width: 0;
+    max-width: 100%;
+    flex-shrink: 1;
+    margin-left: auto;
+  }
+
+  .muster-workspace .workspace-skin-option {
+    gap: 10px;
   }
 }
 

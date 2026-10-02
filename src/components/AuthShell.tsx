@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { ArrowUpRight } from "lucide-react";
-import { MusterbotMark } from "./MusterbotMark";
+import { WorkspaceBrandMark } from "./WorkspaceBrandMark";
 import { MusterBloom } from "./MusterBloom";
 import "./auth.css";
 import "./AuthShell.css";
@@ -14,19 +14,17 @@ export function AuthShell({ title, subtitle, children, footer }: {
       <a className="auth-skip" href="#auth-form">Skip to form</a>
       <header className="auth-header">
         <a href="/" aria-label="Muster home" className="auth-brand">
-          <MusterbotMark size={38} /><span>Muster</span>
+          <WorkspaceBrandMark size={30} /><span>Muster</span>
         </a>
         <a className="auth-help" href="/docs">Need a hand? <ArrowUpRight size={15} aria-hidden="true" /></a>
       </header>
       <main className="auth-layout">
         <div className="auth-welcome-mascot">
-          <span className="auth-welcome-orbit" aria-hidden="true" />
-          <MusterBloom size={128} />
-          <span className="auth-welcome-note" aria-hidden="true">A little company.</span>
+          <MusterBloom size={72} variant="workspace" animated={false} />
         </div>
         <section id="auth-form" className="auth-form-panel" aria-labelledby="auth-title" tabIndex={-1}>
           <div className="auth-form-content">
-            <span className="auth-eyebrow">Your personal AI team</span>
+            <span className="auth-eyebrow">Your personal workspace</span>
             <h1 id="auth-title">{title}</h1><p className="auth-subtitle">{subtitle}</p>
             <div className="auth-fields">{children}</div>
             {footer && <div className="auth-footer">{footer}</div>}
