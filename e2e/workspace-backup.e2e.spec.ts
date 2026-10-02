@@ -341,6 +341,41 @@ async function capture(page: Page, testInfo: TestInfo, label: string, target: Lo
 
 test.describe("hosted workspace capability", () => {
   test.use({ deployment: "hosted" });
+  test("Backups explains hosted limits instead of rendering an empty section", async ({ fixture, guarded }, testInfo) => {
+    const { page } = guarded;
+    await signIn(page, fixture);
+    await page.getByRole("button", { name: "App settings", exact: true }).click();
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+    await settings.getByRole("button", { name: "Backups", exact: true }).click();
+    await expect(backup(page)).toBeVisible();
+    await expect(backup(page)).toContainText(hostedReason);
+    await expect(backup(page).getByRole("button", { name: "Refresh backup status", exact: true })).toBeEnabled();
+    await allWritesDisabled(page);
+    await expect(page.getByRole("region", { name: "Full portable backup", exact: true })).toHaveCount(0);
+    await capture(page, testInfo, "hosted-backups-explanation", backup(page).getByText(hostedReason, { exact: true }));
+    expect(guarded.writes).toEqual([]);
+    expect(fixture.drive.entries()).toEqual([]);
+  });
+  test("Backups reports a capability error and retries without enabling hosted writes", async ({ fixture, guarded }) => {
+    const { page } = guarded;
+    await signIn(page, fixture);
+    await page.getByRole("button", { name: "App settings", exact: true }).click();
+    // All three cards query availability independently. Fail their initial
+    // reads so this exercises the actual error state, not a fabricated grant.
+    guarded.statusSeam("error");
+    guarded.statusSeam("error");
+    guarded.statusSeam("error");
+    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+    await settings.getByRole("button", { name: "Backups", exact: true }).click();
+    await expect(backup(page).getByRole("alert")).toContainText("Backup availability could not be confirmed");
+    await allWritesDisabled(page);
+    await backup(page).getByRole("button", { name: "Retry backup status", exact: true }).click();
+    await expect(backup(page)).toContainText(hostedReason);
+    await expect(backup(page).getByRole("alert")).toHaveCount(0);
+    await allWritesDisabled(page);
+    expect(guarded.writes).toEqual([]);
+    expect(fixture.drive.entries()).toEqual([]);
+  });
   test("fresh Drive consent explains actual storage behavior and stays usable at 320px", async ({ fixture, guarded }, testInfo) => {
     const { page } = guarded;
     await signIn(page, fixture);

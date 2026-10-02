@@ -1464,6 +1464,7 @@ export function SettingsModal() {
             {section === "activity" && <ActivitySection />}
             {section === "backups" && (
               <>
+                <WorkspaceSyncCard />
                 <SnapshotsCard />
                 <PortableBackupCard />
               </>
