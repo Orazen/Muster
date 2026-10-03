@@ -230,6 +230,39 @@ final class LiveTransportSecurityTests: XCTestCase {
                        "roster(messages: 0) must still send the parameter rather than falling back to the unpaginated shape")
     }
 
+    /// The point of `?messages=n` is the slim shape: a screen capture arrives as a
+    /// `hasImage` flag instead of an inline base64 `png`. Prove the client can consume
+    /// that shape, so the roster fix is wiring and not a request the model cannot
+    /// satisfy. Bot fields mirror the shape Fixtures.fleetJSON documents as the live
+    /// `/api/bots?messages=0` wire.
+    func testSlimTranscriptShapeDecodesWithoutInlineImageBytes() async throws {
+        let slim = """
+        {"bots":[{"id":"bot-1","threadId":"t-1","name":"Scout","title":"Scout",
+          "description":"Research","notifications":true,"unread":false,"color":"blue",
+          "modelSelection":{"instanceId":"ghost","model":"sonnet"},
+          "createdAt":1723000000000,"busy":false,
+          "messages":[{"id":"m-1","role":"user","kind":"text","at":1724000000000,
+                       "text":"capture please","hasImage":true},
+                      {"id":"m-2","role":"bot","kind":"text","at":1724000005000,
+                       "text":"done"}],
+          "hasMore":true}],"groups":[]}
+        """.replacingOccurrences(of: "\n", with: "")
+        let source = try await origin { _ in .reply(200, [:], Data(slim.utf8)) }
+        let roster = try await transport(source).roster(messages: 50)
+
+        let bot = try XCTUnwrap(roster.bots.first, "slim roster decoded no bots")
+        XCTAssertEqual(bot.id, "bot-1")
+        let messages = try XCTUnwrap(bot.messages, "slim roster decoded no messages")
+        XCTAssertEqual(messages.count, 2)
+
+        let flagged = try XCTUnwrap(messages.first { $0.hasImage == true })
+        XCTAssertNil(flagged.png, "the slim shape must not carry inline image bytes")
+        XCTAssertNil(flagged.mime, "the slim shape must not carry an inline mime type")
+        XCTAssertEqual(flagged.text, "capture please", "slim messages keep their text")
+        XCTAssertNil(messages.last?.hasImage, "a message with no image carries no flag")
+        XCTAssertEqual(bot.hasMore, true, "the slim shape reports further pages")
+    }
+
     func testUnprotected307ControlForwardsPasswordAndCookieAcrossOrigins() async throws {
         let target = try await origin { _ in .reply(200, [:], Data("{}".utf8)) }
         let location = "http://localhost:\(target.port)/capture"
