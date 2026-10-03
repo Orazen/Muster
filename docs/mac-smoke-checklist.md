@@ -108,13 +108,18 @@ Observations are **not** passes: `A1.8` (ZIP channel carries no stapled ticket) 
 
 | Environment | NOT RUN tests |
 |---|---|
-| Already executed — Target A `A1` | 12 executed |
+| Any Mac, read-only mount, no account — `A2.1` | 1 |
 | Any Mac with Xcode, no account — `B1` | 4 |
 | Disposable macOS user, non-destructive | 27 |
 | Disposable macOS user + explicit old→new artifacts | 4 |
 | Disposable macOS user + isolated Drive backend | 3 |
 | **Disposable VM — UNAUTHORISED** | **5** |
-| **Total rows** | **56** |
+| **NOT RUN total** | **44** |
+| Total rows | 56 |
+
+The NOT RUN buckets are counted from the environment column of the table above: 1 + 4 + 27 + 4 + 3 = **44**.
+
+Target A executed rows: **10 PASS + 2 observations**. Observations are recorded findings, not successes.
 
 Superseded figures, for the record: an earlier revision said "37 remaining", which excluded `A2.1`–`A2.3` and the four `B1` rows. The derived NOT RUN count is **44**.
 
