@@ -87,6 +87,12 @@ must be rebuilt or that its acceptance gates have passed.
 
 ## 3. Check claims and submit one bounded task
 
+Start at the [canonical live claims register](https://github.com/Orazen/Muster/pull/38#issuecomment-5969823410)
+or its [repository pointer](../plans/agent-claims/INDEX.md). There is one status
+table, maintained by Astra. Before the protocol PR merges, the PR description
+and relevant task discussions provide discovery; unchanged main does not yet
+contain these links.
+
 Review available GitHub issues, open PR descriptions, changed files, comments
 and reviews. Inspect relevant repository claim records and known local handoffs
 as well. For example:
@@ -108,15 +114,24 @@ protocol, including exact owned paths and exclusions.
 
 Use the relevant existing PR discussion first. If no relevant PR exists and
 issues are disabled, record a scoped claim under `docs/plans/agent-claims/` on
-the task branch and publish a draft task PR before implementation. Never post
+the task branch and publish a claim-only draft task PR before implementation. Never post
 claims to an unrelated PR. If publication is unavailable, leave an explicit
 owner/coordinator handoff with delivery marked pending; do not treat it as an
 acknowledged reservation or start overlapping edits. Only publish task-safe
 information. Credentials, private receipts and user data stay out of GitHub.
 
+Publication is not acceptance. The coordinator checks current claims and records
+the accepted scope version, literal paths and disposition link in the register
+before implementation starts. Revised paths need revised acceptance. Preserve
+existing reservations even when their owner is idle. For Astra's own shared
+protocol work, record coordination with the other affected documentation owner.
+
 On overlap, send **CONFLICT REPORT** and pause the affected edits. Preserve both
 agents' work. Continue only a separately authorized, disjoint task while the
-conflict is resolved. Silence does not count as agreement.
+conflict is resolved. Silence does not count as agreement. The coordinator
+records the scope split, sequence or transfer with both owners; a transfer needs
+release and recipient acceptance. PR closure, merge and deadlines do not release
+ownership. Completion and release are separate states.
 
 ## 4. Execute, verify and hand off
 

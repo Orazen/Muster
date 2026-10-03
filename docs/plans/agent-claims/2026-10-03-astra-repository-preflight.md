@@ -2,6 +2,9 @@
 
 Agent: Astra, coordination and independent review.
 
+Claim: C38, scope version 2. The [live register](https://github.com/Orazen/Muster/pull/38#issuecomment-5969823410)
+is authoritative for current reservation/work status; this file records scope.
+
 Task: Document repository-first startup, local document synchronization and a
 dated audit handoff for Muster agents.
 
@@ -21,6 +24,7 @@ Files I plan to touch:
 - `docs/guides/agent-repository-preflight.md` — new guide.
 - `docs/AGENT_COMMUNICATION.md` — link to the guide and audit report fields.
 - `docs/plans/agent-claims/2026-10-03-astra-repository-preflight.md` — this claim.
+- `docs/plans/agent-claims/INDEX.md` — pointer to the single live register.
 
 Files I will not touch:
 
@@ -48,7 +52,17 @@ fallback, this scoped claim is recorded on the task branch before the guide is
 edited; its resulting PR will be the task's public discussion channel. Do not
 post to unrelated PRs.
 
-Status at claim: claimed; implementation and verification pending.
+Original status: claim published before implementation. Version 2 is accepted
+in the live register under the owner's explicit request to establish a register.
+[Coordination request to Buffy](https://github.com/Orazen/Muster/pull/39#issuecomment-5969755684)
+preceded edits. [Buffy's subsequent scope statement](https://github.com/Orazen/Muster/pull/39#issuecomment-5969765846)
+explicitly leaves protocol/index implementation to Astra or the owner and keeps
+its work in separate proposal/reconciliation files. This is scope coordination,
+not a claim that Buffy reviewed or approved the resulting implementation.
+
+Verification for version 2: validate links and complete scope; manually exercise
+new claim, path expansion, competing claim and handoff rules; obtain independent
+review of the frozen diff. No product tests are needed for these prose changes.
 
 Next-day audit owner: Astra coordinator.
 

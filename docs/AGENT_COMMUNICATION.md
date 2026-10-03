@@ -4,6 +4,11 @@ Date: 2026-10-03
 
 This document defines how Muster agents communicate so they do not duplicate work or edit each other's files.
 
+**Before claiming work, open the [canonical live claims register](https://github.com/Orazen/Muster/pull/38#issuecomment-5969823410).**
+It is maintained by Astra and records exact paths, branch/PR, reservation status,
+work status, acceptance evidence and handoff. The [repository index](plans/agent-claims/INDEX.md)
+points to that same register; it is not a second task board.
+
 Before choosing work, follow the [repository-first startup guide](guides/agent-repository-preflight.md).
 Verify the remote, fetch current main, preserve local changes, read the required
 documents and inspect GitHub claims. Include the reviewed revision in your claim.
@@ -30,6 +35,18 @@ Use this order when possible:
 
 If GitHub Issues or PR comments are unavailable, use the report format in this document.
 
+Publish a versioned claim in the relevant task PR, then wait for the coordinator's
+linked acceptance in the register before editing its implementation paths.
+A branch-local claim or published PR is a proposal, not an accepted reservation.
+If no task PR exists, a claim-only draft PR may be created first; no product or
+shared-protocol implementation belongs in that bootstrap commit.
+
+Only Astra edits the live register. Agents post updates in their own task
+discussions. Reservation states are `PROPOSED`, `ACCEPTED`, `CONFLICT`, `RELEASED`
+and `WITHDRAWN`; work states are `not-started`, `working`, `blocked`,
+`ready-for-review` and `completed`. Do not infer live activity from a posted
+handoff. Changing a claim's paths requires a new scope version and acceptance.
+
 ## 3. Agent Claim Format
 
 Before starting, every agent should write:
@@ -38,6 +55,7 @@ Before starting, every agent should write:
 AGENT CLAIM
 
 Agent:
+Claim ID and scope version:
 Task:
 Goal:
 Repository and checkout:
@@ -56,15 +74,17 @@ Verification planned:
 - ...
 
 Status:
-Claimed / In progress
+Reservation state / work state:
+Register acceptance or pending handoff:
 ```
 
-Example:
+Illustrative proposal, not an actual reservation:
 
 ```txt
 AGENT CLAIM
 
 Agent: Agent 2 - Drive Storage
+Claim ID and scope version: EXAMPLE / 1
 Task: Google Drive storage architecture
 Goal: Define folder structure, JSON schemas, sync rules, and restore flow.
 Files I plan to touch:
@@ -84,8 +104,8 @@ Verification planned:
 - Check JSON schema examples
 - Check no secrets included
 
-Status:
-Claimed
+Reservation state / work state: PROPOSED / not-started
+Register acceptance or pending handoff: pending coordinator acceptance
 ```
 
 ## 4. Work Update Format
@@ -177,12 +197,16 @@ Next-day audit:
 
 ## 7. Conflict Rules
 
-If two agents touch the same file:
+If proposed or actual scopes overlap, pause edits on the intersecting paths and
+publish a CONFLICT REPORT linking both scope versions. Preserve both versions;
+unaffected accepted work may continue. Astra marks the conflict in the register
+and resolves it with the affected owners by narrowing, sequencing or explicitly
+transferring the reservation. Record the disposition permalink before resuming.
 
-1. Stop.
-2. Report the conflict.
-3. Do not overwrite the other agent's work.
-4. Ask CTO review to decide ownership.
+A transfer needs the releasing owner's acknowledgement and the recipient's
+acceptance. Silence, elapsed time, green CI, PR closure and merge never release
+paths automatically. A stale claim stays reserved until explicitly resolved.
+Escalate unresolved scope decisions to the owner; do not invent authority.
 
 Conflict report:
 
