@@ -4,6 +4,11 @@ Date: 2026-10-03 · Author: Agent 4 (native Mac) · Status: **documentation only
 
 **Companion:** [`docs/mac-smoke-checklist.md`](./mac-smoke-checklist.md) — install/upgrade execution record.
 
+> **Integration dependency.** The two companion links (`mac-release.md` ↔ `mac-smoke-checklist.md`) are
+> **relative links that do not resolve inside either PR's own tree.** Each target arrives with the other
+> PR. They resolve only once #40 and #42 are both present on `main`, so **land them together or accept a
+> transient broken link** — and do not treat a broken link in either single-PR tree as a defect.
+
 ## Scope, and what this document is not
 
 This runbook **describes** how a macOS release candidate is built, signed, notarized, verified and published in this repository. It **does not perform any of those actions**.
@@ -61,7 +66,7 @@ This runbook **describes** how a macOS release candidate is built, signed, notar
 
 | Artifact | arm64 (Apple silicon) | x64 (Intel) |
 |---|---|---|
-| **A — Electron** | **Built, signed, notarized and shipped by CI** [VERIFIED, `release.yml` job *"macOS arm64 (sign, notarize, staple)"*] | **Also built, signed, notarized and shipped by CI** [VERIFIED, `release.yml` job *"macOS x64 / Intel"* on `macos-15-intel`, with its own `release-native-smoke.mjs --platform darwin --arch x64` gate] |
+| **A — Electron** | **Built and shipped by CI** [VERIFIED, `release.yml` job *"macOS arm64 (sign, notarize, staple)"*]. **Signed, hardened-runtime and notarized only when the Apple secrets are present** — those gates are credential-conditioned (`if: env.APPLE_CERTIFICATE != ''`), so "signed and notarized" is a conditional, not an unconditional property of a CI run | **Also built, signed, notarized and shipped by CI** [VERIFIED, `release.yml` job *"macOS x64 / Intel"* on `macos-15-intel`, with its own `release-native-smoke.mjs --platform darwin --arch x64` gate] |
 | **B — Swift** | Builds for the host/CI architecture (`macos-15` = arm64) [VERIFIED] | Not produced; no universal binary configured |
 
 **[VERIFIED]** `electron-builder.yml`'s `mac:` block deliberately sets **no `arch`**, so the CLI flag (`--arm64` / `--x64`) is the only architecture source. The file comments that an explicit arch list previously caused both architectures to build and land on the **same** `Muster-${version}.dmg` filename, with the second silently overwriting the first. Any change here must preserve that property.
@@ -184,7 +189,25 @@ swift test  --package-path ios
 
 **[VERIFIED]** `release.yml` job `prepare` ("Pin the release commit") produces a `sha` output; every platform job checks out `ref: ${{ needs.prepare.outputs.sha }}` with `persist-credentials: false`. That is the source-to-release link: platforms build the **same pinned commit**, not "whatever main was when the job started."
 
-**[VERIFIED]** `dry_run` defaults to **ticked**, exercising the whole pipeline — every build and every gate — without release uploads or notarization submissions. It is unticked to release an existing version tag matching the selected commit. **Notarization is additionally gated on `dry_run == 'false'`.**
+**[VERIFIED]** `dry_run` defaults to **ticked**, exercising the build pipeline without release uploads
+or notarization submissions. **A green rehearsal is not every gate passing.** These steps do **not** run
+when `dry_run` is ticked:
+
+| Step skipped in a rehearsal | Line | How it is excluded |
+|---|---|---|
+| Gate: notarytool credentials must authenticate (arm64) | `release.yml:289` | **directly** — `dry_run == 'false'` |
+| Notarize and staple (arm64) | `release.yml:303` | **directly** — `dry_run == 'false'` |
+| Gate: notarized app passes Gatekeeper (arm64) | `release.yml:339` | **transitively** — conditioned on `steps.notarize.outcome == 'success'`, and notarize never runs |
+| Gate: signature must verify BEFORE notarization (**Intel**) | `release.yml:502` | **directly** — `dry_run == 'false'` |
+| Notarize and staple (Intel) | `release.yml:511` | **directly** — `dry_run == 'false'` |
+| Attach assets to draft release (all platforms) | `:397` `:421` `:553` `:648` `:722` | **directly** — `dry_run == 'false'` |
+| Verify feeds and publish the release | `release.yml:738` | **directly** — `dry_run == 'false'` |
+| Deploy downloads to VPS (the mirror) | `release.yml:816` | **directly** — `dry_run == 'false'` |
+
+**Dry-run asymmetry worth knowing:** the **arm64** signature gate (`:251`) is conditioned **only** on
+`env.APPLE_CERTIFICATE != ''`, so with credentials present it **does** run during a rehearsal. The
+**Intel** signature gate (`:502`) is additionally conditioned on `dry_run == 'false'`, so it does
+**not**. The two architectures are therefore not checked symmetrically in a rehearsal. It is unticked to release an existing version tag matching the selected commit. **Notarization is additionally gated on `dry_run == 'false'`.**
 
 **[VERIFIED]** Concurrency group `muster-release` with `cancel-in-progress: false`, so a release run is not cancelled mid-flight.
 
@@ -222,11 +245,21 @@ The version number has not been advanced despite 78 commits of source change, so
 | Staple valid | `xcrun stapler validate <app>` | `release.yml` [VERIFIED] |
 | Gatekeeper accepts | `spctl --assess --type exec -vv <app>` | `release.yml` [VERIFIED] |
 | Auto-update feed integrity | `latest-mac.yml` `sha512` must match shipped ZIP bytes | `release.yml` [VERIFIED] |
-| Update feed refresh | `node scripts/refresh-mac-feed.mjs` (post-staple) | `release.yml` [VERIFIED] |
+| Update feed refresh | `node scripts/refresh-mac-feed.mjs` (post-staple) — **requires `ASSETS_DIR` (default `release`), an exact `RELEASE_VERSION`, and `ALLOW_DMG_CHANGE` set to exactly `true` or `false`**; it throws otherwise | `release.yml` [VERIFIED] |
 
 ### 6.1 [GAP] No installed-app or upgrade smoke test exists
 
-**[VERIFIED]** Every check above is either a build-artifact check or a static verification. **None installs the app on a Mac, launches it, signs in, or exercises an in-place upgrade.** The auto-update path is verified by comparing feed hashes, not by performing an update.
+**[VERIFIED]** The checks above are of **three** kinds, not two:
+
+1. **Build-artifact and static checks** — digests, `lipo`, `codesign --verify`, `spctl`, `stapler validate`,
+   feed-hash comparison.
+2. **Packaged-runtime execution** — `scripts/smoke-packaged-server.mjs` **runs the packaged Electron
+   binary** with `ELECTRON_RUN_AS_NODE=1`, spawning it against a database probe and asserting 7 proxy
+   paths. This is real execution of packaged code, **not** a static inspection, and it is the check my
+   earlier revision mislabelled as static.
+3. **Nothing desktop-facing.** **No check installs the app on a Mac, opens a window, signs in, or
+   exercises an in-place upgrade.** Kind 2 runs a packaged binary headlessly in Node mode; it never
+   exercises the Electron UI, the permission prompts, the login flow or the updater. The auto-update path is verified by comparing feed hashes, not by performing an update.
 
 **[GAP]** Consequently these remain unproven by any automated check in this repository:
 - clean install on a real Mac, on both architectures;
@@ -243,7 +276,7 @@ A release candidate should be considered **not** fully verified until someone ru
 **[VERIFIED]** What the pipeline actually provides:
 
 - **Partial platform set publishes as a DRAFT**, never silently. A human reviews before it goes live.
-- **`dry_run` ticked** exercises the entire pipeline with no uploads and no notarization submissions — the safe way to rehearse a release.
+- **`dry_run` ticked** is the safe way to rehearse: no uploads, no notarization submissions. It also means **eight categories of gate never ran** — notarization, the arm64 Gatekeeper assessment, Intel signature verification, asset attachment, publication and mirror deployment. See §5 for the exact list. A green rehearsal is not a green release.
 - **Temporary keychain is deleted in an `always()` step**, so a failed run does not leave signing material behind on the runner.
 - **Concurrency group with `cancel-in-progress: false`** prevents a half-cancelled release.
 - **The macOS ZIP is immutable post-build** (§4.1), so a bad ZIP cannot be silently replaced under a shipped feed hash.
@@ -283,14 +316,21 @@ A release candidate should be considered **not** fully verified until someone ru
 |---|---|---|
 | 1 | **Swift native app is not a distributable artifact** — no `.app`, no signing, no notarization, no packaging job | `ci.yml` builds/tests it; 0 packaging hits across all 5 workflows [VERIFIED] |
 | 2 | **Swift app has no `Info.plist` or entitlements** — no privacy usage strings | Only `electron/resources/speech-helper-Info.plist` and `ios/**` plists exist [VERIFIED] |
-| 3 | **Signing is optional and its absence fails no gate** — if the Apple secrets are unset, the *entire* Developer ID signature and hardened-runtime gate is skipped (`if: env.APPLE_CERTIFICATE != ''`) and an unsigned, un-notarized macOS build can publish silently | [VERIFIED, `release.yml`] |
+| 3 | **Signing is optional and its absence fails no gate** — if the Apple secrets are unset, the Developer ID signature and hardened-runtime gates are skipped (`if: env.APPLE_CERTIFICATE != ''`) and **an unsigned, un-notarized macOS build can reach a published release** | [VERIFIED, `release.yml`] |
 | 4 | **Released v1.23.3 does not contain current source** | 78 commits since tag; version not bumped [VERIFIED] |
-| 5 | **No installed-app or upgrade smoke test** | All checks are artifact/static [VERIFIED] |
+| 5 | **No installed-app or upgrade smoke test** | Checks are artifact/static **plus** a headless packaged-runtime probe (`smoke-packaged-server.mjs`, `ELECTRON_RUN_AS_NODE=1`); **no** check opens a window, signs in, or upgrades [VERIFIED] |
 | 6 | **No documented rollback procedure** | Absent from `release.yml` [VERIFIED] |
 
 **On the original gap 3 (Intel):** withdrawn as factually wrong — see the correction note in §1.2. The x64 job exists and ships. The DMG-name collision the config warns about is real but is avoided today by the `-c.dmg.artifactName` override on the x64 build command, not by the missing job.
 
-**Replacement concern, and it is the more interesting one:** macOS signing is *optional* and degrades silently, while `electron-builder.yml` documents a matching hazard for Windows — *"Do NOT set publisherName without actually signing, or every update is rejected as untrusted."* The Windows job at least gates that inconsistency in both directions. No equivalent gate exists for Apple secrets.
+**Replacement concern, and it is the more interesting one:** macOS signing is *optional* and its absence is
+**logged rather than enforced**, while `electron-builder.yml` documents a matching hazard for Windows — *"Do NOT set publisherName without actually signing, or every update is rejected as untrusted."* The Windows job at least gates that inconsistency in both directions. No equivalent gate exists for Apple secrets.
+
+**Stated precisely, because the wording matters.** Skipped Actions steps **remain visible** in the run
+summary, ad-hoc signing is **logged**, and a *configured but failing* credential fails the run. So the
+accurate claim is: **this is an available source path by which an unsigned artifact could be
+published — it is not evidence that any published artifact is unsigned.** The signed status of a given
+release must be read from that release's own artifacts, not inferred from this configuration.
 
 ---
 
