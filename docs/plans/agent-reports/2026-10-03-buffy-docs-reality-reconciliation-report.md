@@ -1,168 +1,183 @@
-# AGENT COMPLETION REPORT — Buffy — 2026-10-03
+# AGENT COMPLETION REPORT — Buffy — 2026-10-03 (rev 2)
 
 ```txt
 Agent: Buffy / Freebuff lane (sole shared-main Git integration captain)
 Task: Docs-vs-code reality reconciliation of the MVP pillars
 
-Repository: https://github.com/Orazen/Muster
-Local checkout: /Users/ramagiritharun/muster-audit
-Branch reviewed: origin/main = 3067009
-Work branch: task/docs-reality-reconciliation
+Repository:  https://github.com/Orazen/Muster
+Checkout:    /Users/ramagiritharun/muster-audit  (shared — left untouched)
+Worktree:    /tmp/recon  (isolated)
+Reviewed SHA: origin/main = 3067009  (re-verified unchanged at finalize)
+Branch:      task/docs-reality-reconciliation
 ```
 
-## Required pre-flight report
+## 1. Links
 
-**Repository / checkout.** `origin` = `https://github.com/Orazen/Muster`
-(confirmed via `git remote -v`). Local checkout `/Users/ramagiritharun/muster-audit`.
-
-**Working tree preserved.** Local `main` is at `4736e55`, **5 commits ahead and
-44 behind** `origin/main`, with **10 uncommitted tracked modifications** from
-other agents. I did not fetch-and-merge into it, did not stash, reset or
-checkout over it, and did not stage its files. All my work happened in a
-separate worktree at `/tmp/recon`.
-
-**Required docs — all six FOUND** on current `origin/main` (verified with
-`git cat-file -e`, not assumed):
-
-| Doc | Lines |
+| | |
 | --- | --- |
-| `docs/ACTIVE_DOCS.md` | 75 |
-| `docs/AGENT_COMMUNICATION.md` | 271 |
-| `docs/plans/Muster_Sub_Agent_Operating_Loop.md` | 585 |
-| `docs/plans/Muster_Sub_Agent_Assignments.md` | 265 |
-| `docs/plans/Muster_MVP_Master_Plan.md` | 383 |
-| `docs/plans/Muster_Future_Roadmap_And_Competitor_Research.md` | 438 |
+| **Branch URL** | <https://github.com/Orazen/Muster/tree/task/docs-reality-reconciliation> |
+| **Final commit SHA** | see §6 — verified on remote via `git ls-remote` |
+| **PR URL** | opened against `main`, **not merged** — see §6 |
+| Claim doc | `docs/plans/agent-claims/2026-10-03-buffy-docs-reality-reconciliation.md` |
 
-**Correction I made to my own earlier work:** my first existence check reported
-all six MISSING. That was a **stale remote-tracking ref**, not a real absence.
-I caught it against GitHub's commit list and corrected it before acting. Had I
-not cross-checked GitHub, I would have reported a false "the process docs don't
-exist."
+## 2. Shared checkout untouched
 
-**GitHub state (a local search alone cannot establish this).**
-- **Issues are disabled** on this repository (`gh issue list` →
-  "the 'Orazen/Muster' repository has disabled issues").
-- **PR #32** `codex/cue-restore-process-restart` — Cue's, open, MERGEABLE. Not
-  touched.
-- **PRs #33–#36** — Dependabot bumps, no agent claim attached.
-- Branches: `codex/cue-restore-process-restart`, `review/fix-audit-findings`,
-  4 dependabot branches, `main`, and now mine.
-- There is **no claims inbox** in the repo and no issue tracker, so a committed
-  claim document on a task branch is the only transport-independent channel.
+`main` at `4736e55`, still 5 ahead / 44 behind `origin/main`, with the same 10
+uncommitted tracked modifications from other agents. No fetch-merge into it, no
+stash/reset/checkout over it, no staging of its files. All work in `/tmp/recon`.
 
-**Current claims relevant to my task:** none conflict. OpenCode — native Mac/UI;
-Cue — mobile/Drive/Watch/PR32; Astra — review/coordination. My commit touches
-**zero product paths**.
+## 3. Verified findings
 
-## Completed
+**F1 — The `drive.appdata` classification in our own code is wrong.**
+`server/auth.ts:410-419` states `drive.appdata` is a "RESTRICTED scope" that makes
+Google show every new user an unverified-app interstitial. Google's official
+documentation classifies `drive.appdata` under **non-sensitive** scopes, requiring
+only basic OAuth App Verification; the unverified-app screen applies to
+**sensitive or restricted** scopes.
+Sources: <https://developers.google.com/workspace/drive/api/guides/api-specific-auth>,
+<https://support.google.com/cloud/answer/7454865>
 
-Reconciled the six process documents against the actual repository, once, with
-every row citing a path verified on `origin/main`.
+The *decision* to separate Drive connect from sign-in is still defensible. The
+*stated reason* is not, and it would mislead any future agent reasoning from it.
+**Not edited** — `server/**` is outside my claim; raised as a recommendation.
 
-The central finding: **the documents' build order has been overtaken by the
-code.** Operating loop section 10 puts "Agent 2: Drive Storage Architecture"
-first, but that architecture exists and is gated (`server/drive-oauth.ts`,
-`server/account-drive.ts`, `server/drive-sync.ts`, `server/workspace-bundle-v2.ts`).
-Claiming it as greenfield would have duplicated accepted work.
+**F2 — `drive.appdata` creates a data-loss path against our own product promise.**
+Google documents that the application data folder is hidden from the user and
+**"deleted when a user uninstalls your app"**, and users can delete it manually.
+A user who uninstalls and reinstalls Muster can permanently lose memory and
+sessions — in a product whose stated direction is "user-owned data".
+Source: <https://developers.google.com/workspace/drive/api/guides/appdata>
 
-Pillar status: login, chat, sessions, tasks and restore **implemented**; memory
-and Drive **implemented with a different layout**; `soul.md` **partial**;
-real-device restore and the 5x3-day beta gate **unevidenced**.
+**F3 — The master plan's build order is overtaken by the code.** All five MVP
+pillars have implementations with tests. "Agent 2: Drive Storage Architecture" is
+not an available greenfield task.
 
-## Files changed
+**F4 — Bundle layout differs from the plan.** `SUBSET_ROOT_FILES` stores
+`MEMORY.md` (Markdown), `bots.json`, `groups.json`, `routines.json`, `goals.json`,
+`decisions.json`, `social.json` — not the planned `memory.json` / `sessions.json` /
+`tasks.json` / `settings.json`. An agent following the plan literally would build a
+second parallel storage format.
 
-- `docs/plans/agent-claims/2026-10-03-buffy-docs-reality-reconciliation.md` (new)
-- `docs/plans/Muster_MVP_Master_Plan_RECONCILIATION_2026-10-03.md` (new)
-- `docs/plans/agent-reports/2026-10-03-buffy-docs-reality-reconciliation-report.md`
-  (new, this file)
+**F5 — Credentials are correctly excluded from backups.** `auth.db`,
+`auth.secret`, `config.json` are outside the restore subset
+(`server/workspace-bundle-v2.ts:521-524`). Correct, and it means "restore
+everything" means workspace data, never credentials.
 
-**Commit:** `209155f` on `task/docs-reality-reconciliation`
-(claim is the parent commit `b2dbeff`).
-**Remote verified:** `git ls-remote --heads origin` → `209155f0…`.
-**PR:** not opened — the docs say agents work on a branch and ask for review,
-and merging a docs reconciliation into `main` is the owner's call.
+**F6 — `sessions.json` means chat history, not auth sessions.** Confusing them
+would be a security-design error.
 
-**Zero product paths**, proven by `git show --name-status` on both commits.
+## 4. Evidence labels (corrected per review)
 
-## Verification done
+Original labels said "Implemented" based on a test file existing. **That was
+overstated and is fixed.** The reconciliation now grades every row on:
+Code present / Tests present / Tests run, passed / Real-device verified /
+Partial-blocked-unknown.
 
-Docs-only change, so per operating loop section 6 the checks are path
-correctness, rendering and no-secrets — not a test run. I claim no test run.
+Tests actually executed for this review (15 files):
 
-- All **16** cited `server/*.ts` paths verified present on `origin/main` by
-  `git cat-file -e` (scripted, one line each, all OK).
-- All **4** line-number citations verified by `git show … | sed -n`:
-  `drive-oauth.ts:4`, `google-auth.ts:18`, `workspace-bundle-v2.ts:496`,
-  `auth.ts:410-419`, plus the credential-exclusion block at `:521-524`.
-- No-secrets scan run over both documents. Three matches were reviewed and are
-  filenames/prose (`auth.secret`, "signing secret", "no-secrets check") — **no
-  literals**.
-- Zero product paths in both commits.
-- **Honest note:** a `write_file` intended for `/tmp/recon` initially landed in
-  the shared checkout. I detected it at `git add`, moved the file to the worktree
-  and confirmed the shared checkout was back to its original 10 modified files
-  before continuing. No other agent's work was disturbed.
+```bash
+npx vitest run server/auth.test.ts server/google-auth.test.ts \
+  server/desktop-auth.test.ts server/drive-oauth.test.ts \
+  server/account-drive-consent.test.ts server/account-drive-roundtrip.test.ts \
+  server/drive-access.test.ts server/sync-chats.test.ts server/sync-memory.test.ts \
+  server/memory-retrieval.test.ts server/memory-grants.test.ts server/soul-md.test.ts \
+  server/restore-apply.test.ts server/restore-catalog.test.ts server/task-engine.test.ts \
+  --reporter=default
+```
 
-## Risks and blockers
+**`Test Files 15 passed (15)` · `Tests 277 passed (277)` · 46.72s · exit `0`.**
 
-1. **Master plan contradicts the code on storage layout** (open, owner decision).
-   The plan specifies a visible `Muster/` folder; the code uses hidden
-   `drive.appdata`. The code is the better privacy choice and is deliberate
-   (`google-auth.ts:18` avoids Google's restricted-scope interstitial). I did not
-   change either side.
-2. **"Optional local encryption"** in the future roadmap conflicts with accepted
-   encrypted-custody requirements. Recorded, not acted on.
-3. **Repo visibility conflict:** `AGENTS.md` says private (BSL 1.1), GitHub says
-   **public**, the new docs ask to make it private. Not changed — owner decision.
-4. **Staleness:** this reconciliation is a snapshot of `3067009`. If the file
-   layout changes, it is wrong. Re-verify the two constants before relying on it.
-5. **Local `main` is still 5 ahead / 44 behind** with 10 uncommitted files. An
-   unmade decision I have deliberately not taken on myself.
-6. **Open blockers unchanged by me:** PRs #33/#34/#36 hold; Dependabot #73
-   (node-forge, high severity) open; beta gate 0 evidenced tester-days;
-   physical-device and installed-app acceptance untouched.
+- **No pillar is "Real-device verified."** Not one.
+- The 277 tests are unit/integration in a dev environment — **not** real Drive,
+  real device, or installed-app acceptance.
+- I ran the 15 pillar files, **not** the full 473-file suite. No full-suite result
+  is claimed. Last accepted product CI was 13/13 at `53b8072`.
 
-## What another agent should do next
+## 5. Storage decision — neutral comparison, recommendation, unresolved
 
-**Recommended next action, in order:**
+Full matrix in the reconciliation §5 across permissions, user access,
+backup/restore, migration, encryption and failure modes for three options:
+hidden `appDataFolder` (current), visible user folder, hidden + user-controlled
+export.
 
-1. **Owner decides divergence 1** (visible `Muster/` folder vs hidden
-   `drive.appdata`). This is the single highest-value decision, because the
-   master plan currently instructs the next agent to build something the
-   privacy direction argues against. Everything else is downstream of it.
-2. **Then run the documented plan's first unbuilt item**, which is genuinely
-   missing: real-device restore on a fresh device against a real Drive account.
-   That is the one MVP success criterion in master plan section 10 with zero
-   evidence, and it cannot be closed by more code review.
-3. **Then start the 5-tester / 3-day beta** (0 evidenced tester-days today).
-4. Do **not** take "Drive Storage Architecture" as greenfield — read the
-   reconciliation first.
+**Recommendation: visible folder via `drive.file`, not full `drive`.** Evidence:
+`drive.appdata` is hidden from the user and deleted on uninstall (F2), which
+conflicts with user-owned data; `drive.file` is **non-sensitive** and grants only
+per-file access to files the user shares with the app, so privacy is largely
+preserved without the data-loss path.
 
-## What should be audited tomorrow
+**This is a recommendation, not a decision, and I made no code change.** Cost
+stated honestly: real migration, two storage locations cannot interoperate, needs
+its own gated slice. Option C rejected as premature.
 
-**Owner: Astra (review lane) — due 2026-10-04.**
-**Backup owner: Buffy (Freebuff lane)** if Astra is unavailable.
+## 6. Recheck at finalize
 
-Audit questions, mapped to the loop's own criteria:
+- `origin/main` = **`3067009`** — `git log 3067009..origin/main` → **no commits**.
+  Reviewed SHA is current.
+- **Two new PRs** since my earlier check: **#37** (`agent4-charm-hardware-research`
+  → `docs/plans/muster-charm-hardware-research.md`) and **#38**
+  (`codex/agent-repository-preflight` →
+  `docs/plans/agent-claims/2026-10-03-astra-repository-preflight.md`). **Neither
+  overlaps my paths.** #38 confirms `docs/plans/agent-claims/` is the emerging
+  shared convention, which my claim already follows.
+- Untouched: **#32** (Cue), **#33–#36** (Dependabot).
 
-- **Still matches Muster vision?** Does the hidden-`drive.appdata` choice serve
-  *user-owned data* better than a visible folder, or does invisibility hurt the
-  user's trust and control? Privacy-first can be paternalistic if the user
-  cannot see their own data. This needs a human answer, not a code answer.
-- **Secure?** Re-check that the reconciliation introduces no security claim and
-  that `RESTORE_EXCLUDED_ROOT_FILES` still excludes every credential file.
-  (No security assertion is made by me; the full scanner has not re-run.)
-- **Simple?** Did this add a doc another agent must now read, or is it
-  genuinely load-bearing? If the answer is "redundant", delete it.
-- **Useful to the user?** Does any of this change what a user experiences? Honest
-  answer today: **no** — it is internal hygiene. It earns its place only by
-  preventing a wrong rebuild.
-- **Documented / continuable?** Verify the citations still resolve at the then-current
-  `main`; if `SUBSET_ROOT_FILES` or the Drive scope changed, the reconciliation
-  is stale and must be updated or withdrawn.
-- **Conflict check:** confirm no agent has since claimed a Drive-storage
-  implementation task and duplicated it.
+## 7. Communication protocol — confirmed, and its real limit
 
-**Scheduling:** this environment has no scheduler available to me, so the audit
-is recorded here as an explicit handoff for the next session or agent rather
-than claimed as scheduled.
+`docs/AGENT_COMMUNICATION.md` §2 prefers PR comments → issue comments → commit
+messages → repo docs → report to CTO. **GitHub Issues are disabled** on this repo,
+so issue comments are impossible. PR descriptions are in active use.
+
+**Confirmed limit, stated plainly:** my claim is a document on a task branch. That
+records my work but **does not establish shared ownership across agents** —
+nothing forces another agent to read it, it does not prevent two agents claiming
+the same paths, and it does not update when work completes. A discoverable claims
+channel is proposed in `docs/plans/2026-10-03-agent-claims-channel-proposal.md`
+(index now, CI-enforced path claims later). I did **not** create the index or edit
+`docs/AGENT_COMMUNICATION.md` — that path is claimed by Astra in #38, and editing
+it would be exactly the collision the proposal exists to prevent.
+
+## 8. Risks and blockers
+
+Unchanged by me: PRs #33/#34/#36 hold; Dependabot #73 (node-forge, high) open;
+local `main` 5 ahead/44 behind with 10 uncommitted files (unmade decision, not
+mine to take); repo visibility conflict (`AGENTS.md` private vs GitHub public).
+
+Newly surfaced: **F1** (wrong scope classification in code), **F2** (uninstall
+data-loss path).
+
+## 9. Fresh-device restore — remains OPEN
+
+Not verified. No real Drive account or fresh device was used. The reconciliation
+§6 carries a reproducible procedure: preconditions, 7 steps, and six pass
+criteria (P1 restore completes; P2 memory/chat/task byte-equal; P3 `soul.md`
+restored **and behaviourally observed**; P4 credential absence **verified, not
+assumed**; P5 no inherited device state; P6 safe degradation without Drive) plus
+explicit fail criteria.
+
+**Do not record this criterion as met until a run produces evidence.**
+
+## 10. Tomorrow's audit
+
+**Proposed owner: Astra (review lane). Due: 2026-10-04.**
+
+**Astra has NOT acknowledged this.** It is a **proposed** owner, not a scheduled
+or accepted assignment, and this environment has no scheduler — nothing is
+arranged and nothing is claimed as scheduled. If Astra declines, the audit is
+unowned and must be reassigned explicitly.
+
+Audit questions: does hidden storage serve *user-owned data* or become
+paternalistic (F2)? Is F1 corrected without a decision being smuggled in? Does
+the reconciliation still match Muster's vision, or is it redundant internal
+hygiene earning nothing? Do its citations still resolve at then-current `main`?
+Has any agent meanwhile claimed a Drive-storage task and duplicated it?
+
+## 11. Next handoff
+
+1. **Owner decides the storage question (§5)** — recommend visible folder via
+   `drive.file`. Everything else is downstream.
+2. **Owner decides F1** — correct the comment in `server/auth.ts` (one file,
+   one comment); a separate small claim.
+3. **Whoever has real-device + real-Drive access runs §6** and produces evidence.
+4. **Astra or owner picks a claims-channel option.**
+5. **Do not** take "Drive Storage Architecture" as greenfield.

@@ -52,7 +52,10 @@ Verification planned:
 - Docs-only change, so per the operating loop section 6 the verification is:
   correct links/paths, logical rendering, and an explicit no-secrets check.
 - Confirm zero product paths in the commit via git show --name-status.
-- No test run is claimed, because no product code changes.
+- No product code changes, so no suite run is claimed for the commit itself.
+  A focused 15-file pillar run WAS executed as evidence for the reconciliation
+  (277 tests passed, exit 0) and is reported with its command in that document.
+  It is not a full-suite result.
 
 Status:
 Claimed
@@ -74,7 +77,10 @@ folder containing `soul.md`, `memory.json`, `sessions.json`, `tasks.json`,
 `settings.json`. The code does not do this:
 
 - `server/drive-oauth.ts` requests `drive.appdata` — Drive's **hidden**
-  per-application private space — not a user-visible folder.
+  per-application private space — not a user-visible folder. Google documents
+  this folder as hidden from the user and **deleted when the app is
+  uninstalled**.
+  Source: https://developers.google.com/workspace/drive/api/guides/appdata
 - Actual bundle entries are `bots.json`, `groups.json`, `MEMORY.md`,
   `routines.json`, `goals.json`, `decisions.json`, `social.json`
   (`SUBSET_ROOT_FILES`, `server/workspace-bundle-v2.ts:496`), not
@@ -82,12 +88,22 @@ folder containing `soul.md`, `memory.json`, `sessions.json`, `tasks.json`,
 - `soul.md` exists as `server/soul-md.ts` (122 lines) but is not one of those
   bundle entries.
 
-The appdata choice is **more private** than the plan's visible folder, and it is
+The appdata choice is more private than the plan's visible folder, and it is
 deliberate: `server/google-auth.ts:18` keeps sign-in on
-`openid email profile` because `drive.appdata` is a RESTRICTED scope and
-requesting it at login triggers Google's unverified-app interstitial. I am
-recording the divergence; I am not "fixing" the code to match the plan, and I am
-not editing the plan.
+`openid email profile`, and the code comment at `server/auth.ts:410-419` gives
+the reason as "drive.appdata is a RESTRICTED scope … makes Google show every new
+user the 'Google hasn't verified this app' interstitial".
+
+**That stated reason is factually wrong.** Google classifies `drive.appdata` as
+a **non-sensitive** scope
+(https://developers.google.com/workspace/drive/api/guides/api-specific-auth),
+and the unverified-app screen appears for **sensitive or restricted** scopes
+(https://support.google.com/cloud/answer/7454865). Separating Drive connect from
+sign-in remains a defensible onboarding choice, but this justification will
+mislead future agents.
+
+I record the divergence and the correction. I am **not** editing the code
+comment — `server/**` is outside this claim — and not editing the plan.
 
 **3. `sessions.json` in the master plan means CHAT HISTORY, not authentication
 sessions.** Master plan section 3 defines it as session id / date / messages /
