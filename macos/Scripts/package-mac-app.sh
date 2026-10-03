@@ -56,6 +56,9 @@ ALLOW_OUTSIDE_WORKSPACE="${ALLOW_OUTSIDE_WORKSPACE:-0}"
 
 MARKER_FILE=".muster-local-dev-bundle"
 MARKER_HEADER="created-by macos/Scripts/package-mac-app.sh - safe to replace"
+# Marker layout: line 1 header, line 2 absolute bundle path, line 3 SHA-256 of the
+# built executable. The digest stops a marker from authorising deletion of a bundle
+# that merely occupies the recorded path after being swapped out.
 
 step() { printf '\n=== %s\n' "$1"; }
 fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
@@ -131,21 +134,51 @@ APP_ABS="$(python3 -c 'import os,sys;print(os.path.realpath(os.path.abspath(sys.
 
 if [ -e "${APP}" ]; then
   [ -d "${APP}" ] || fail "refusing: ${APP} exists and is not a directory. Move it aside."
+  [ ! -L "${APP}" ] || fail "refusing: ${APP} is a symlink -> $(readlink "${APP}")."
+  if [ -L "${MARKER_PATH}" ]; then
+    fail "refusing: the ownership marker ${MARKER_PATH} is a symlink -> $(readlink "${MARKER_PATH}").
+    A symlinked marker can redirect reads and writes outside OUT_DIR. Refusing
+    rather than following it."
+  fi
   if [ ! -f "${MARKER_PATH}" ]; then
     fail "refusing to remove ${APP}
-  It exists but there is no ownership marker at ${MARKER_PATH}, so this script did
-  not create it. The directory is left completely untouched. Move it aside, or
-  choose another OUT_DIR, and re-run."
+    It exists but there is no ownership marker at ${MARKER_PATH}, so this script did
+    not create it. The directory is left completely untouched. Move it aside, or
+    choose another OUT_DIR, and re-run."
   fi
+  MARKED_HEADER="$(sed -n '1p' "${MARKER_PATH}" 2>/dev/null || true)"
   MARKED_PATH="$(sed -n '2p' "${MARKER_PATH}" 2>/dev/null || true)"
+  MARKED_DIGEST="$(sed -n '3p' "${MARKER_PATH}" 2>/dev/null || true)"
+  if [ "${MARKED_HEADER}" != "${MARKER_HEADER}" ]; then
+    fail "refusing to remove ${APP}
+    The marker at ${MARKER_PATH} does not carry this script's header, so it is stale
+    or forged:
+      found    : ${MARKED_HEADER:-<empty>}
+      expected : ${MARKER_HEADER}
+    Refusing."
+  fi
   if [ "${MARKED_PATH}" != "${APP_ABS}" ]; then
     fail "refusing to remove ${APP}
-  The marker at ${MARKER_PATH} names a different bundle:
-    marked : ${MARKED_PATH:-<empty>}
-    actual : ${APP_ABS}
-  Refusing rather than deleting something this script cannot prove it created."
+    The marker names a different bundle:
+      marked : ${MARKED_PATH:-<empty>}
+      actual : ${APP_ABS}
+    Refusing rather than deleting something this script cannot prove it created."
   fi
-  printf '  marker matches this bundle - safe to replace: %s\n' "${APP_ABS}"
+  # Header and path match, but is the bundle still ours? A marker alone would
+  # authorise deleting any directory that later occupied the recorded path.
+  if [ -f "${APP}/Contents/MacOS/${PRODUCT}" ]; then
+    CURRENT_DIGEST="$(shasum -a 256 "${APP}/Contents/MacOS/${PRODUCT}" | awk '{print $1}')"
+    if [ "${MARKED_DIGEST}" != "${CURRENT_DIGEST}" ]; then
+      fail "refusing to remove ${APP}
+    The bundle at the recorded path no longer matches its marker. Its executable
+    digest is ${CURRENT_DIGEST}, the marker records ${MARKED_DIGEST:-<empty>}.
+    Something replaced the bundle after it was built, so this script cannot prove the
+    directory is still the one it created. Refusing."
+    fi
+    printf '  header, path and executable digest all match - safe to replace\n'
+  else
+    printf '  header and path match (no executable present yet) - safe to replace\n'
+  fi
 else
   printf '  no existing bundle at %s\n' "${APP}"
 fi
@@ -189,7 +222,9 @@ install -m 0644 "${INFO_PLIST_SRC}" "${CONTENTS}/Info.plist"
 {
   printf '%s\n' "${MARKER_HEADER}"
   printf '%s\n' "${APP_ABS}"
+  printf '%s\n' "$(shasum -a 256 "${CONTENTS}/MacOS/${PRODUCT}" | awk '{print $1}')"
 } > "${MARKER_PATH}"
+chmod 0644 "${MARKER_PATH}"
 printf '  ownership marker: %s\n' "${MARKER_PATH}"
 
 step "Stamp the version from package.json"
@@ -223,6 +258,13 @@ printf '  arch: %s\n' "$(lipo -archs "${CONTENTS}/MacOS/${PRODUCT}")"
 
 step "Verify: linked libraries (no non-system dylibs to bundle)"
 otool -L "${CONTENTS}/MacOS/${PRODUCT}"
+NON_SYSTEM="$(otool -L "${CONTENTS}/MacOS/${PRODUCT}" | tail -n +2 | awk '{print $1}' \
+  | grep -vE '^(/usr/lib/|/System/Library/)' || true)"
+if [ -n "${NON_SYSTEM}" ]; then
+  fail "non-system dependencies would need embedding, which this script does not do:
+${NON_SYSTEM}"
+fi
+printf '  every dependency resolves to /usr/lib or /System/Library\n'
 
 step "Verify: entitlements actually applied"
 codesign -d --entitlements - "${APP}" 2>/dev/null | tr -d '\0'
