@@ -9,10 +9,11 @@ This is the short active-document index for Muster.
 1. `docs/plans/Muster_MVP_Master_Plan.md`
 2. `docs/plans/Muster_Sub_Agent_Assignments.md`
 3. `docs/plans/Muster_Sub_Agent_Operating_Loop.md`
-4. `docs/plans/Muster_Future_Roadmap_And_Competitor_Research.md`
-5. `docs/plans/Muster_Repo_Audit_And_Active_Docs_Map.md`
-6. `docs/AGENT-ORIENTATION.md`
-7. `AGENTS.md`
+4. `docs/AGENT_COMMUNICATION.md`
+5. `docs/plans/Muster_Future_Roadmap_And_Competitor_Research.md`
+6. `docs/plans/Muster_Repo_Audit_And_Active_Docs_Map.md`
+7. `docs/AGENT-ORIENTATION.md`
+8. `AGENTS.md`
 
 ## Current Build Focus
 
@@ -46,6 +47,20 @@ Every agent must report:
 3. What decisions are needed
 4. What risks or blockers exist
 5. Recommended next action
+
+## Communication Rule
+
+Every agent must claim a narrow work item before starting.
+
+Every agent must declare:
+
+- task
+- files they plan to touch
+- files they will not touch
+- verification plan
+- current status
+
+Use `docs/AGENT_COMMUNICATION.md` for claim, update, handoff, conflict, and completion formats.
 
 ## Cleanup Rule
 
