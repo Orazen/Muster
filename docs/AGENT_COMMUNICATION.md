@@ -21,7 +21,7 @@ Every agent must claim a narrow work item before starting.
 
 No two agents should work on the same files at the same time.
 
-If an agent sees another agent already working on a file or task, it must choose a different task or ask for CTO review.
+If an agent sees another agent already working on a file or task, it must choose a different task or ask for Nova's coordination review.
 
 ## 2. Preferred GitHub Communication
 
@@ -31,7 +31,7 @@ Use this order when possible:
 2. Issue comments
 3. Commit messages
 4. Repo docs
-5. Final report to CTO/user
+5. Final report to Nova; owner decisions to Tharun
 
 If GitHub Issues or PR comments are unavailable, use the report format in this document.
 
@@ -178,7 +178,7 @@ If two agents touch the same file:
 1. Stop.
 2. Report the conflict.
 3. Do not overwrite the other agent's work.
-4. Ask CTO review to decide ownership.
+4. Ask Nova to decide ownership and record the disposition in the canonical register.
 
 Conflict report:
 
@@ -252,7 +252,7 @@ Agent report:
 Risks:
 - ...
 
-Needs CTO review:
+Needs Nova review:
 - yes/no
 ```
 
@@ -270,7 +270,7 @@ Use this split to avoid overlap:
 | Agent 6 Skills | skill format, `SKILL.md` template | Marketplace implementation |
 | Agent 7 Build | MVP implementation slices | Broad refactors |
 
-## 12. CTO Rule
+## 12. Nova Coordination Rule
 
 If communication is unclear, work stops until the agent clarifies:
 
