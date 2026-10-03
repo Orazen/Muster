@@ -56,6 +56,16 @@ export interface InstallationRecord {
   createdAt: number;
   lastSeenAt: number;
   revokedAt: number | null;
+  /** Durable transition counter for this row, or null when the row has never
+   * opened one. Persisted, so it survives the process — that is the entire
+   * reason it lives here and not in a private field. A restart resets every
+   * in-memory counter to zero, which would let a transition opened before the
+   * restart commit over one opened after it. Monotonic per row: only
+   * `beginTransition` moves it, and only ever upward.
+   *
+   * `null` is a real state, not an absence: it is what a legacy registry file
+   * reads as, and the first transition from it mints 1. */
+  generation: number | null;
 }
 
 const recordWire = z.object({
@@ -70,6 +80,11 @@ const recordWire = z.object({
   createdAt: z.number().refine(Number.isFinite),
   lastSeenAt: z.number().refine(Number.isFinite),
   revokedAt: z.number().refine(Number.isFinite).nullable(),
+  /** Defaults to null so a file written before this field existed still
+   * parses — otherwise every already-registered installation would be
+   * silently discarded as a corrupt registry, which fails safe in the wrong
+   * direction: it destroys live state instead of refusing one transition. */
+  generation: z.number().int().nonnegative().nullable().default(null),
 });
 
 const registryFileWire = z.object({
@@ -233,6 +248,7 @@ export class InstallationRegistry {
       createdAt: now,
       lastSeenAt: now,
       revokedAt: null,
+      generation: null,
     };
     const credential = randomBytes(32).toString("base64url");
     record.credentialHash = hashCredential(credential);
@@ -337,6 +353,58 @@ export class InstallationRegistry {
     });
     if (!committed) return null;
     return { record: this.row(installationId)!, credential: credential2, reactivated: false };
+  }
+
+  /** Open a durable transition on a row and take the next generation.
+   *
+   * The generation is persisted by this call, not by the eventual commit. Two
+   * begins therefore cannot both take the same number: the second reads the
+   * first's committed value back out of `this.file` and mints the number
+   * after it, which is exactly what makes the older holder stale. Reading the
+   * value off the draft instead would hand both callers the same generation
+   * and let the slower one overwrite the faster one's work.
+   *
+   * Refuses a missing row and refuses a revoked one. Revocation is final, so
+   * a revoked row admits no transition at all — re-registering is a NEW
+   * installation with a NEW id, never a resurrection of this one. */
+  beginTransition(installationId: string, _now = Date.now()): { generation: number } | null {
+    const current = this.row(installationId);
+    if (!current || current.revokedAt !== null) return null;
+    const next = (current.generation ?? 0) + 1;
+    const committed = this.commit((draft) => {
+      const row = draft.installations.find((candidate) => candidate.id === installationId);
+      if (!row) throw new Error("the row vanished from the draft");
+      row.generation = next;
+    });
+    if (!committed) return null;
+    // Read back from the committed file, never from the draft: the draft is
+    // the previous generation's object graph.
+    const stored = this.row(installationId);
+    if (!stored || stored.generation === null) return null;
+    return { generation: stored.generation };
+  }
+
+  /** Apply an edit ONLY while the caller's generation is the row's newest.
+   *
+   * A caller that was overtaken — by a later begin, or by a restart that
+   * re-read a newer value — is refused, and refusing writes nothing: the edit
+   * is not run at all, so it cannot half-apply or leave a trace. The counter
+   * is left exactly where it was, because a refusal consumed nothing.
+   *
+   * This is the only durable boundary a later wiring needs. It deliberately
+   * does not mint authority: `change` may edit a row, but a stale caller
+   * cannot, and a revoked row cannot be reached here either. */
+  commitTransition(installationId: string, generation: number, change: (row: InstallationRecord) => void): boolean {
+    const current = this.row(installationId);
+    if (!current || current.revokedAt !== null) return false;
+    if (current.generation === null || current.generation !== generation) return false;
+    const committed = this.commit((draft) => {
+      const row = draft.installations.find((candidate) => candidate.id === installationId);
+      if (!row) throw new Error("the row vanished from the draft");
+      if (row.generation !== generation) throw new Error("the generation moved under this commit");
+      change(row);
+    });
+    return committed;
   }
 
   /** The owner's own view. Rows of other accounts never leave the file. */

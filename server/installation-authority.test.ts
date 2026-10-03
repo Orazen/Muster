@@ -293,3 +293,146 @@ describe("installation authority", () => {
     expect(store.list("owner-1").length).toBeLessThanOrEqual(256);
   });
 });
+
+/** Durable generation boundary. The whole point of these cases is that the
+ * generation survives the PROCESS, not just a call: a transition opened
+ * before a restart must still be refusable after it. Every case below
+ * therefore builds a fresh `InstallationRegistry` over the same file rather
+ * than reusing one instance, because a single instance would pass even if the
+ * value lived in a private field — which is exactly the shape of
+ * `installation-consumer`'s process-local `epoch` that must never be reused
+ * here. A test that cannot fail for the wrong reason is not evidence. */
+describe("durable installation generation", () => {
+  it("mints a first generation for an active row", () => {
+    const store = registry();
+    const created = registered(store, BASE, 1_000);
+    expect(store.beginTransition(created.record.id, 1_100)?.generation).toBe(1);
+    // Monotonic: each begin moves strictly forward.
+    expect(store.beginTransition(created.record.id, 1_200)?.generation).toBe(2);
+    expect(store.beginTransition(created.record.id, 1_300)?.generation).toBe(3);
+  });
+
+  it("a generation survives a restart, so a pre-restart transition stays refusable", () => {
+    const first = registry();
+    const created = registered(first, BASE, 1_000);
+    const opened = first.beginTransition(created.record.id, 1_100);
+    expect(opened?.generation).toBe(1);
+
+    // A brand-new instance over the same file. If the generation were only
+    // in memory this would read 1 again and the stale commit below would win.
+    const restarted = registry();
+    expect(restarted.beginTransition(created.record.id, 2_000)?.generation).toBe(2);
+    expect(restarted.commitTransition(created.record.id, opened!.generation, () => {})).toBe(false);
+    expect(restarted.commitTransition(created.record.id, 2, () => {})).toBe(true);
+  });
+
+  it("a refused commit does not advance the generation", () => {
+    const store = registry();
+    const created = registered(store, BASE, 1_000);
+    const opened = store.beginTransition(created.record.id, 1_100);
+    expect(opened?.generation).toBe(1);
+    expect(store.commitTransition(created.record.id, 99, () => {})).toBe(false);
+    expect(store.commitTransition(created.record.id, 0, () => {})).toBe(false);
+    // The next minted generation is 2, not 3: nothing was consumed.
+    expect(store.beginTransition(created.record.id, 1_400)?.generation).toBe(2);
+  });
+
+  it("only the current generation's commit applies, and only its own edit", () => {
+    const store = registry();
+    const created = registered(store, BASE, 1_000);
+    const first = store.beginTransition(created.record.id, 1_100)!;
+    const second = store.beginTransition(created.record.id, 1_200)!;
+    let applied = false;
+    expect(store.commitTransition(created.record.id, first.generation, () => { applied = true; })).toBe(false);
+    expect(applied).toBe(false);
+    expect(store.commitTransition(created.record.id, second.generation, () => { applied = true; })).toBe(true);
+    expect(applied).toBe(true);
+  });
+
+  it("a refused commit writes nothing at all, even when the edit would have thrown", () => {
+    const store = registry();
+    const created = registered(store, BASE, 1_000);
+    const opened = store.beginTransition(created.record.id, 1_100)!;
+    store.beginTransition(created.record.id, 1_200);
+    const before = readFileSync(registryPathFor(directory), "utf8");
+    expect(store.commitTransition(created.record.id, opened.generation, () => { throw new Error("must not run"); })).toBe(false);
+    expect(readFileSync(registryPathFor(directory), "utf8")).toBe(before);
+  });
+
+  it("a revoked row admits no transition, before or after a restart", () => {
+    const store = registry();
+    const created = registered(store, BASE, 1_000);
+    expect(store.revoke("owner-1", created.record.id, 1_100)).toBe(true);
+    expect(store.beginTransition(created.record.id, 1_200)).toBeNull();
+    expect(registry().beginTransition(created.record.id, 1_300)).toBeNull();
+    expect(store.commitTransition(created.record.id, 1, () => {})).toBe(false);
+  });
+
+  it("an unknown installation mints and commits nothing", () => {
+    const store = registry();
+    expect(store.beginTransition("no-such-installation", 1_000)).toBeNull();
+    expect(store.commitTransition("no-such-installation", 1, () => {})).toBe(false);
+    expect(store.list("owner-1")).toEqual([]);
+  });
+
+  it("two registries over separate files count independently and never compare", () => {
+    const other = mkdtempSync(join(tmpdir(), "muster-installation-other-"));
+    try {
+      const mine = registry();
+      const theirs = new InstallationRegistry(registryPathFor(other));
+      const a = registered(mine, BASE, 1_000);
+      const b = registered(theirs, { ...BASE, ownerId: "owner-2" }, 1_000);
+      // Both start at 1. That is two unrelated counters, not a shared one:
+      // each file advances on its own and neither can commit against the other.
+      expect(mine.beginTransition(a.record.id, 1_100)?.generation).toBe(1);
+      expect(theirs.beginTransition(b.record.id, 1_100)?.generation).toBe(1);
+      expect(mine.beginTransition(a.record.id, 1_200)?.generation).toBe(2);
+      // The other file's row is untouched by my second mint.
+      expect(theirs.commitTransition(b.record.id, 1, () => {})).toBe(true);
+      expect(theirs.beginTransition(b.record.id, 1_300)?.generation).toBe(2);
+      // A generation from one file is not a generation of the other.
+      expect(mine.commitTransition(b.record.id, 2, () => {})).toBe(false);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it("a legacy registry file with no generation still reads, and starts at 1", () => {
+    const store = registry();
+    const created = registered(store, BASE, 1_000);
+    // Rewrite the file the way a pre-generation build wrote it: the row with
+    // no `generation` key at all. This must not read as corrupt (which would
+    // silently drop every existing installation) and must not read as
+    // adopting some arbitrary stored value.
+    const path = registryPathFor(directory);
+    // SAFETY: the registry file is written by this module's own persist() with
+    // a fixed top-level shape {version, installations}; the assertion names
+    // only the field these cases remove.
+    const legacy = JSON.parse(readFileSync(path, "utf8")) as { installations: Array<{ generation?: number | null }> };
+    for (const row of legacy.installations) delete row.generation;
+    writeFileSync(path, JSON.stringify(legacy, null, 2));
+
+    const reopened = registry();
+    expect(reopened.list("owner-1")).toHaveLength(1);
+    expect(reopened.authenticate(created.credential!, 2_000)).not.toBeNull();
+    expect(reopened.beginTransition(created.record.id, 2_100)?.generation).toBe(1);
+    expect(reopened.commitTransition(created.record.id, 0, () => {})).toBe(false);
+  });
+
+  it("a corrupt generation fails closed rather than resetting the counter", () => {
+    const store = registry();
+    const created = registered(store, BASE, 1_000);
+    expect(store.beginTransition(created.record.id, 1_100)?.generation).toBe(1);
+    const path = registryPathFor(directory);
+    // SAFETY: same fixed {version, installations} shape written by persist();
+    // the assertion names the field deliberately corrupted below. It is
+    // written as a widened string on purpose, which is the whole point of the
+    // case: the loader must reject it, not coerce it back to 0.
+    const tampered = JSON.parse(readFileSync(path, "utf8")) as { installations: Array<{ generation: string }> };
+    tampered.installations[0].generation = "two";
+    writeFileSync(path, JSON.stringify(tampered, null, 2));
+    // A row whose generation cannot be read is not silently treated as 0,
+    // which would re-admit an already-consumed generation.
+    expect(registry().beginTransition(created.record.id, 2_000)).toBeNull();
+  });
+});
