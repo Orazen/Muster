@@ -117,7 +117,7 @@ Observations are **not** passes: `A1.8` (ZIP channel carries no stapled ticket) 
 | **NOT RUN total** | **44** |
 | Total rows | 56 |
 
-The NOT RUN buckets are counted from the environment column of the table above: 1 + 4 + 27 + 4 + 3 = **44**.
+The NOT RUN buckets are counted from the environment column of the table above: 1 + 4 + 27 + 4 + 3 + 5 = **44**.
 
 Target A executed rows: **10 PASS + 2 observations**. Observations are recorded findings, not successes.
 
