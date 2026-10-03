@@ -45,6 +45,22 @@ Built and tested in CI, but **no `.app`, no `Info.plist`, no entitlements, no si
 
 SmartScreen shows "unknown publisher". This is a **documented product decision**, not a defect, and is not presented as one. Recorded so release notes do not imply macOS and Windows trust are equivalent.
 
+## Verified NOT a gap — CLI release parity
+
+I previously said I found no packaging gate or smoke test for the CLI. **That was wrong.** I had searched only the workflow file. Reading the full chain at the reviewed SHA:
+
+| Stage | Where | Status |
+|---|---|---|
+| Built | `release.yml` macos job, `node scripts/build-cli.mjs` | ✅ |
+| Uploaded | macos job attach step, includes `muster-cli.mjs`, `Muster-<version>-cli.mjs`, `SHA256SUMS-cli.txt` | ✅ |
+| **Gated** | `scripts/release-payload.mjs` — `SHA256SUMS-cli.txt` is in `CHECKSUMS`, `muster-cli.mjs` in `STABLE`, and lines 187-191 **fail the release** unless both bundles and their exact dedicated checksums are present. Guarded by `if (requireComplete || …)`, so on a complete release the CLI is **mandatory** | ✅ |
+| Behaviour verified | publish job, `node scripts/build-cli.mjs verify`, gated on `needs.macos.result == 'success'` | ✅ |
+| Mirrored | deploy-downloads → `node scripts/release-payload.mjs mirror` → `/opt/muster-downloads` | ✅ |
+
+**Verdict: the CLI has no missing gate.** It is validated as strictly as the desktop artifacts.
+
+One coupling observation, not a gap: the CLI is **built and uploaded by the macOS job**, so an x64-macOS failure would block the cross-platform CLI, and its behaviour check depends on `needs.macos.result`. That is a coupling worth knowing, not a defect.
+
 ## Withdrawn — errors I made and corrected
 
 Recording these because each was plausible enough to have become a false release defect.
@@ -56,8 +72,11 @@ Recording these because each was plausible enough to have become a false release
 | "Windows and Linux have no checksum manifests" | #43 | Both ship `SHA256SUMS-*.txt` and both jobs generate them. |
 | "The DMG is the stapled path" (asserted untested) | #42 | Now verified — DMG `stapler validate` exits 0. But my first test validated the *mounted app* and gave a false exit 65; the image is the correct target. |
 | A quoted `publisherName` warning presented as literal | #43 | It is split across three comment lines with `#` prefixes; not a literal substring. Now stated. |
+| "No CLI packaging gate or smoke test exists" | this file | It does. The gate is in `scripts/release-payload.mjs`, not the workflow; I had searched only the workflow. |
 
-**Pattern worth noting:** four of five errors came from reading a workflow or config file *partially* — one job, one line, one line-wrapped sentence. Each was caught only by re-reading with an explicit assertion rather than a plausible pattern match.
+**Pattern worth noting — this is the most useful thing in this document.** **Five of six errors came from searching one place and concluding absence.** One job instead of four, one file instead of two, one line instead of a range, one grep pattern instead of a wrap-tolerant one. Every one was caught only by re-reading with an explicit, targeted assertion rather than accepting a plausible "not found".
+
+The lesson generalises past this lane: **a negative result from a search is evidence about the search, not about the system.** Any future claim of the form "X has no gate / no test / no check" should be treated as unproven until the assertion has been run against every file that could plausibly hold it.
 
 ## What is verified working
 
