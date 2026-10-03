@@ -1,0 +1,238 @@
+name: macOS local app bundle (build + static validation)
+
+# Claim: MAC-BUNDLE-CI/v1. Owns exactly `.github/workflows/macos-local-app-bundle.yml`.
+# It does not edit ci.yml, release.yml, or any packaging source path.
+#
+# Ordering: this workflow is integrated AFTER the packaging slice
+# (macos/Resources/Info.plist, macos/Resources/MusterMac.entitlements,
+# macos/Scripts/package-mac-app.sh) is independently accepted and integrated. Until
+# then this job fails at the packaging step, which is the intended behaviour.
+#
+# ci.yml's `macos-tests` job already runs `swift build` and `swift test` for macos/.
+# This job covers the gap that remained: nothing packaged the bundle or checked its
+# plist, executable name, architecture, signature or dependencies. It deliberately
+# duplicates no existing job.
+#
+# Build and static validation only. No install, no launch, no signing identity, no
+# notarization, no release, and NO artifact upload.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'macos/**'
+      # MusterMacCore links CompanionCore from ../ios, so an iOS change can change
+      # what the native package links against.
+      - 'ios/**'
+      # The bundle's CFBundleShortVersionString is stamped from package.json.
+      - 'package.json'
+      - '.github/workflows/macos-local-app-bundle.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-local-app-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Fresh, runner-owned output for every run. The packaging script fences writes to
+  # the workspace by default, so the packaging step below makes the one recorded
+  # scope decision that relaxes location only.
+  BUNDLE_OUT: ${{ runner.temp }}/muster-mac-bundle
+
+jobs:
+  package:
+    name: Package and statically validate the development bundle
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Show the toolchain
+        run: swift --version
+
+      # Explicit precondition. This workflow is integrated only after the packaging
+      # slice lands, so on this branch alone the script is absent and the job must
+      # say so in plain terms rather than failing later with a missing-file error.
+      - name: Require the packaging slice to be integrated first
+        run: |
+          set -euo pipefail
+          if [ ! -f macos/Scripts/package-mac-app.sh ]; then
+            echo "::error::macos/Scripts/package-mac-app.sh is not present on this ref."
+            echo "::error::This workflow is ordered AFTER the packaging slice"
+            echo "::error::(macos/Resources/Info.plist, macos/Resources/MusterMac.entitlements,"
+            echo "::error::macos/Scripts/package-mac-app.sh). Failing here is the intended"
+            echo "::error::behaviour until that slice is accepted and integrated."
+            exit 1
+          fi
+          for f in macos/Resources/Info.plist macos/Resources/MusterMac.entitlements; do
+            [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
+          done
+          echo "  packaging slice present"
+
+
+      # Every negative case asserts its EXPECTED diagnostic, so an unrelated
+      # prerequisite or build failure cannot masquerade as a containment success.
+      #
+      # Each case states whether the ALLOW_OUTSIDE_WORKSPACE override is set, because
+      # the override deliberately permits a location outside the workspace. F1 and F2
+      # therefore run WITHOUT it: with it, an outside path is allowed by design, and
+      # asserting a refusal there would assert the opposite of the design.
+      - name: Safety fences refuse unsafe output paths
+        run: |
+          set -uo pipefail
+          script=./macos/Scripts/package-mac-app.sh
+          ref="$RUNNER_TEMP/fence-fixtures"
+          mkdir -p "$ref" macos/.build
+          pass=0; fail=0
+          realpath_of() { python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$1"; }
+
+          expect_refusal() { # label, expected diagnostic, OUT_DIR, override(1|0)
+            local label="$1" diag="$2" out="$3" override="${4:-1}" log; log="$(mktemp)"
+            if [ "$override" = "1" ]; then
+              OUT_DIR="$out" ALLOW_OUTSIDE_WORKSPACE=1 "$script" >"$log" 2>&1
+            else
+              OUT_DIR="$out" ALLOW_OUTSIDE_WORKSPACE=0 "$script" >"$log" 2>&1
+            fi
+            local rc=$?
+            if [ "$rc" -ne 0 ] && grep -q "$diag" "$log"; then
+              echo "  PASS  $label"; pass=$((pass + 1))
+            else
+              echo "  FAIL  $label (exit=$rc, expected diagnostic: $diag)"
+              sed 's/^/        /' "$log" | tail -6
+              fail=$((fail + 1))
+            fi
+            rm -f "$log"
+          }
+          survived() { # label, file
+            if [ -f "$2" ] && grep -qx "must survive" "$2"; then
+              echo "  PASS  $1"; pass=$((pass + 1))
+            else
+              echo "  FAIL  $1"; fail=$((fail + 1))
+            fi
+          }
+
+          # F1  A path outside the workspace. WITHOUT the override: the override exists
+          #     precisely to allow a runner-owned temp location.
+          expect_refusal "outside-workspace OUT_DIR (no override)" "escapes the workspace" "$ref/elsewhere" 0
+
+          # F2  Canonical containment itself, not final-component refusal: the symlink is
+          #     a PARENT component and the final component is a real directory, so only
+          #     realpath resolution can catch this.
+          mkdir -p "$ref/escape-parent/leaf"
+          echo "sentinel-outside" > "$ref/escape-parent/leaf/keep.txt"
+          ln -s "$ref/escape-parent" macos/.build/ci-parent-escape
+          expect_refusal "parent-component symlink escaping the workspace" "escapes the workspace" \
+            "macos/.build/ci-parent-escape/leaf" 0
+          if [ "$(cat "$ref/escape-parent/leaf/keep.txt" 2>/dev/null)" = "sentinel-outside" ]; then
+            echo "  PASS  outside sentinel survived"; pass=$((pass + 1))
+          else
+            echo "  FAIL  outside sentinel was modified"; fail=$((fail + 1))
+          fi
+          rm -f macos/.build/ci-parent-escape
+
+          # F3  A VALID symlink at the configured path whose target really is inside the
+          #     workspace. The fixture is asserted before use, so this cannot silently
+          #     pass as a dangling link.
+          mkdir -p macos/.build/ci-inside-target
+          ln -s "$(realpath_of macos/.build/ci-inside-target)" macos/.build/ci-inside-link
+          resolved="$(realpath_of macos/.build/ci-inside-link)"
+          expected="$(realpath_of macos/.build/ci-inside-target)"
+          if [ "$resolved" != "$expected" ] || [ ! -d "$resolved" ]; then
+            echo "  FAIL  F3 fixture is not a valid inside-workspace link ($resolved != $expected)"
+            fail=$((fail + 1))
+          else
+            echo "  PASS  F3 fixture is a valid inside-workspace link -> $resolved"; pass=$((pass + 1))
+            expect_refusal "valid inside-workspace symlink at the output path" "symlink" \
+              "macos/.build/ci-inside-link" 1
+          fi
+          rm -rf macos/.build/ci-inside-link macos/.build/ci-inside-target
+
+          # F4  A pre-existing bundle with NO ownership marker: refused, and both its
+          #     contents and an unrelated sibling file byte-identical afterwards.
+          d="$ref/unmarked"; mkdir -p "$d/MusterMacDev.app/Contents"
+          printf 'must survive\n' > "$d/MusterMacDev.app/Contents/precious.txt"
+          printf 'must survive\n' > "$d/unrelated-sibling.txt"
+          expect_refusal "unmarked pre-existing bundle" "no ownership marker" "$d" 1
+          survived "unmarked bundle contents intact" "$d/MusterMacDev.app/Contents/precious.txt"
+          survived "unrelated sibling file intact" "$d/unrelated-sibling.txt"
+
+          # F5  A forged marker: the right path, but not this script's header.
+          d="$ref/forged"; mkdir -p "$d/MusterMacDev.app/Contents"
+          printf 'not-written-by-this-script\n%s\ndeadbeef\n' \
+            "$(realpath_of "$d/MusterMacDev.app")" > "$d/.muster-local-dev-bundle"
+          printf 'must survive\n' > "$d/MusterMacDev.app/Contents/precious.txt"
+          expect_refusal "forged marker header" "does not carry this script's header" "$d" 1
+          survived "forged-marker bundle intact" "$d/MusterMacDev.app/Contents/precious.txt"
+
+          # F6  A symlinked ownership marker, refused rather than followed.
+          d="$ref/markerlink"; mkdir -p "$d/MusterMacDev.app/Contents" "$ref/marker-elsewhere"
+          printf 'elsewhere\n' > "$ref/marker-elsewhere/marker"
+          ln -s "$ref/marker-elsewhere/marker" "$d/.muster-local-dev-bundle"
+          printf 'must survive\n' > "$d/MusterMacDev.app/Contents/precious.txt"
+          expect_refusal "symlinked ownership marker" "ownership marker" "$d" 1
+          survived "symlinked-marker bundle intact" "$d/MusterMacDev.app/Contents/precious.txt"
+
+          # F7  A foreign bundle swapped into a path a VALID marker names. Header and
+          #     path both match, so only the executable digest proves it is not ours.
+          #     The marker must record the same realpath the script computes.
+          d="$ref/swapped"; mkdir -p "$d/MusterMacDev.app/Contents/MacOS"
+          bin="$d/MusterMacDev.app/Contents/MacOS/MusterMac"
+          printf 'the-binary-this-script-built' > "$bin"
+          printf 'created-by macos/Scripts/package-mac-app.sh - safe to replace\n%s\n%s\n' \
+            "$(realpath_of "$d/MusterMacDev.app")" "$(shasum -a 256 "$bin" | awk '{print $1}')" \
+            > "$d/.muster-local-dev-bundle"
+          printf 'a-foreign-binary-swapped-in-after-marking' > "$bin"
+          printf 'must survive\n' > "$d/MusterMacDev.app/Contents/precious.txt"
+          expect_refusal "foreign bundle swapped into the recorded path" "no longer matches its marker" "$d" 1
+          survived "foreign bundle intact" "$d/MusterMacDev.app/Contents/precious.txt"
+
+          echo "  fence fixtures: pass=$pass fail=$fail"
+          [ "$fail" -eq 0 ] || { echo "::error::$fail fence fixture(s) failed"; exit 1; }
+
+      # Builds the real SwiftPM product, packages it, signs ad-hoc and verifies it.
+      - name: Build, package, sign ad-hoc and verify
+        run: ./macos/Scripts/package-mac-app.sh
+        env:
+          # Recorded scope decision: relax location only for the package output.
+          # Ownership checks and all refusal fixtures remain enforced.
+          ALLOW_OUTSIDE_WORKSPACE: '1'
+          OUT_DIR: ${{ env.BUNDLE_OUT }}
+
+      - name: Refuse entitlements, distribution signatures, release artifacts or extra libraries
+        run: |
+          set -euo pipefail
+          app="$BUNDLE_OUT/MusterMacDev.app"
+
+          # 1. This slice requests no entitlement at all.
+          keys="$(codesign -d --entitlements - "$app" 2>/dev/null | grep -c '<key>' || true)"
+          [ "$keys" = "0" ] || { echo "::error::expected 0 entitlement keys, found $keys"; exit 1; }
+          echo "  entitlement keys: 0"
+
+          # 2. Ad-hoc only. A Developer ID signature, or any TeamIdentifier, would mean
+          #    a distribution path had opened up inside a development bundle.
+          sig="$(codesign -dvv "$app" 2>&1 | grep -m1 '^Signature=' || true)"
+          case "$sig" in *adhoc*) ;; *) echo "::error::expected ad-hoc, got: $sig"; exit 1 ;; esac
+          if codesign -dvv "$app" 2>&1 | grep -q 'TeamIdentifier=[0-9A-Z]'; then
+            echo "::error::a TeamIdentifier is set on a development bundle"; exit 1
+          fi
+          echo "  $sig / TeamIdentifier: not set"
+
+          # 3. No release feed, blockmap, archive or updater config may exist.
+          if find "$app" \( -name 'latest*.yml' -o -name '*.blockmap' \
+               -o -name 'app-update.yml' -o -name '*.dmg' -o -name '*.zip' \
+               -o -name '*.pkg' \) -print -quit | grep -q .; then
+            echo "::error::release artifacts found in a development bundle"; exit 1
+          fi
+          echo "  no release artifacts present"
+
+          # 4. No dependency outside /usr/lib and /System/Library. The packaging
+          #    script also asserts this, and it is repeated here so the gate is
+          #    visible in the job log independently of the script's wording.
+          extra="$(otool -L "$app/Contents/MacOS/MusterMac" | tail -n +2 | awk '{print $1}' \
+            | grep -vE '^(/usr/lib/|/System/Library/)' || true)"
+          [ -z "$extra" ] || { echo "::error::non-system dependencies: $extra"; exit 1; }
+          echo "  every dependency resolves to /usr/lib or /System/Library"
+
+          echo "static validation passed"
