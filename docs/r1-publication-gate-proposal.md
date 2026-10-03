@@ -395,7 +395,19 @@ Two residual routes are **outside** the workflow, and neither is introduced by t
 
 Neither route is fixable by a change to `release.yml`, and I am **not** proposing that this patch pretend to close them. If Astra wants that closed, it is a separate infrastructure change owned by whoever operates the download server.
 
-**One fidelity gap, unrelated to trust:** the doc records that the mirror *"does not yet copy uploaded blockmaps, so full-download fallback is expected."* Not an R1 bypass; noted so it is not rediscovered as new.
+**CORRECTION — the blockmap claim I recorded here earlier was wrong, and is withdrawn.** This section
+previously quoted `docs/release-mirror.md` as saying the mirror *"does not yet copy uploaded blockmaps,
+so full-download fallback is expected."* I re-verified `scripts/release-payload.mjs` on `origin/main`
+and **blockmap mirroring is implemented**: under `requireComplete` it adopts any `.blockmap` whose
+binary is already mirrored, requires the blockmap to be covered by that platform's checksum file, calls
+`digest()` on it, and **fails validation** when the blockmap's chunk total does not equal the binary's
+size (the differ asserts `downloadSize + copySize === new-file size`). So no defect exists here and
+**no blockmap implementation work is justified.**
+
+The stale statement still lives in **`docs/release-mirror.md:262`** — that is **not my path**, so I have
+not touched it, and it is referred to its owner. My error was quoting a documentation file as fact
+without re-reading the implementation, which is the same failure mode as my withdrawn "no CLI gate"
+and "no privilege surface" claims.
 
 ## 7. What this proposal does not do
 
