@@ -1,5 +1,16 @@
 # Muster Agent Communication Protocol
 
+## Owner directive — Nova leads coordination (2026-10-03)
+
+Tharun appoints **Nova (Cue/Nova)** as head coordinator, replacing Astra in the coordination role. Nova manages all PR triage, task assignments, accepted path claims, security issue triage, remediation ownership, review gates and audit handoffs. All agents, including Astra, Freebuff and OpenCode, report to Nova.
+
+The canonical live claims register remains [PR #38](https://github.com/Orazen/Muster/pull/38#issuecomment-5969823410). Nova maintains it from this directive onward. Historical Astra acknowledgements and accepted reservations remain evidence; do not rewrite them or treat this role change as automatic release of implementation paths. Astra hands over pending reviews, blockers and audit obligations to Nova and may continue assigned work.
+
+Nova must arrange independent review of Nova's own U34 changes; coordinator authority is not self-approval. Preserve existing scope, offline-test holds and verification requirements until an explicit evidence-backed disposition. Freebuff remains the shared-main integrator under Nova's coordination. No existing merge, deployment, purchase, account-creation or real-data testing hold is lifted by this appointment.
+
+Claims and completion reports must identify agent role, exact paths, branch/PR, reviewed/tested SHA, commands/results, risks and next owner. Shared GitHub login is not agent identity. Silence or elapsed time never releases a claim. Work in isolated task branches/worktrees; preserve others' changes. Nova escalates product/budget decisions to Tharun and reports security findings precisely, without claiming the whole codebase secure.
+
+
 Date: 2026-10-03
 
 This document defines how Muster agents communicate so they do not duplicate work or edit each other's files.
@@ -10,7 +21,7 @@ Every agent must claim a narrow work item before starting.
 
 No two agents should work on the same files at the same time.
 
-If an agent sees another agent already working on a file or task, it must choose a different task or ask for CTO review.
+If an agent sees another agent already working on a file or task, it must choose a different task or ask for Nova's coordination review.
 
 ## 2. Preferred GitHub Communication
 
@@ -20,7 +31,7 @@ Use this order when possible:
 2. Issue comments
 3. Commit messages
 4. Repo docs
-5. Final report to CTO/user
+5. Final report to Nova; owner decisions to Tharun
 
 If GitHub Issues or PR comments are unavailable, use the report format in this document.
 
@@ -167,7 +178,7 @@ If two agents touch the same file:
 1. Stop.
 2. Report the conflict.
 3. Do not overwrite the other agent's work.
-4. Ask CTO review to decide ownership.
+4. Ask Nova to decide ownership and record the disposition in the canonical register.
 
 Conflict report:
 
@@ -241,7 +252,7 @@ Agent report:
 Risks:
 - ...
 
-Needs CTO review:
+Needs Nova review:
 - yes/no
 ```
 
@@ -259,7 +270,7 @@ Use this split to avoid overlap:
 | Agent 6 Skills | skill format, `SKILL.md` template | Marketplace implementation |
 | Agent 7 Build | MVP implementation slices | Broad refactors |
 
-## 12. CTO Rule
+## 12. Nova Coordination Rule
 
 If communication is unclear, work stops until the agent clarifies:
 

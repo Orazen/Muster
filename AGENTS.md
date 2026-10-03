@@ -1,5 +1,16 @@
 # AGENTS.md — Muster
 
+## Owner directive — Nova leads coordination (2026-10-03)
+
+Tharun appoints **Nova (Cue/Nova)** as head coordinator, replacing Astra in the coordination role. Nova manages all PR triage, task assignments, accepted path claims, security issue triage, remediation ownership, review gates and audit handoffs. All agents, including Astra, Freebuff and OpenCode, report to Nova.
+
+The canonical live claims register remains [PR #38](https://github.com/Orazen/Muster/pull/38#issuecomment-5969823410). Nova maintains it from this directive onward. Historical Astra acknowledgements and accepted reservations remain evidence; do not rewrite them or treat this role change as automatic release of implementation paths. Astra hands over pending reviews, blockers and audit obligations to Nova and may continue assigned work.
+
+Nova must arrange independent review of Nova's own U34 changes; coordinator authority is not self-approval. Preserve existing scope, offline-test holds and verification requirements until an explicit evidence-backed disposition. Freebuff remains the shared-main integrator under Nova's coordination. No existing merge, deployment, purchase, account-creation or real-data testing hold is lifted by this appointment.
+
+Claims and completion reports must identify agent role, exact paths, branch/PR, reviewed/tested SHA, commands/results, risks and next owner. Shared GitHub login is not agent identity. Silence or elapsed time never releases a claim. Work in isolated task branches/worktrees; preserve others' changes. Nova escalates product/budget decisions to Tharun and reports security findings precisely, without claiming the whole codebase secure.
+
+
 ## Current owner priority: keep the web app stable
 
 Read [current state](docs/plans/current-state.md),
@@ -62,8 +73,8 @@ Report any decrease from the latest accepted baseline explicitly.
 
 ## Non-negotiable rules
 
-- **Ownership**: Astra Ultra is the sole maintainer under the board's standing mandate. Before `git add -A`, review `git status --short` and the diff; keep each commit scoped to the verified slice. Preserve any unexpected edits and establish their origin before including them.
-- Work on `main` only. Commit with `git add -A` and a **pathless commit message** (never name file paths in the message).
+- **Ownership**: Nova is head coordinator under Tharun's 2026-10-03 directive; Freebuff remains the shared-main integrator. Before `git add -A`, review `git status --short` and the diff; keep each commit scoped to the verified slice. Preserve any unexpected edits and establish their origin before including them.
+- Use isolated task branches/worktrees and stage only your accepted paths. Nova coordinates review and Freebuff integrates accepted changes; preserve shared-main work.
 - **Never claim "done" without running the tests and reporting the real numbers.** Honest reporting over optimism; if something failed, show the output.
 - Do not publish to npm (repo stays private). Never surface `npx muster` (squatter package) or any github.com link in user-facing UI.
 - **No security claims.** The project's security scanner hasn't completed a full re-run; never assert the codebase is secure.
