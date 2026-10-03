@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Local DEVELOPMENT bundle for the native Mac target. Not a release artifact.
+
+  Every key below is justified by something the code actually does. The absence of
+  keys is deliberate and is justified too - see "Privacy usage strings" further on.
+
+  Companion file: macos/Resources/MusterMac.entitlements
+  Built by:       macos/Scripts/package-mac-app.sh
+-->
+<plist version="1.0">
+<dict>
+	<!--
+	  Must NOT be "com.muster.app": that identifier belongs to the shipped Electron
+	  app. Two installed apps sharing one identifier share TCC decisions, Keychain
+	  access groups and Launch Services defaults, which would make it impossible to
+	  tell the development bundle from the real one. The "-macos-dev" suffix keeps
+	  the two strictly separate.
+	-->
+	<key>CFBundleIdentifier</key>
+	<string>com.muster.app.macos-dev</string>
+
+	<!-- Distinguishable from the shipped app in Finder, the Dock and `osascript`. -->
+	<key>CFBundleName</key>
+	<string>Muster (Dev)</string>
+
+	<!--
+	  Must equal the SwiftPM product name and the file name inside Contents/MacOS.
+	  Package.swift declares .executable(name: "MusterMac", targets: ["MusterMac"]),
+	  so the built binary is "MusterMac".
+	-->
+	<key>CFBundleExecutable</key>
+	<string>MusterMac</string>
+
+	<!-- APPL = application bundle (not a framework or plug-in). -->
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+
+	<!--
+	  Substituted at package time from the repository's package.json version by
+	  scripts/package-mac-app.sh. The committed placeholder keeps this file a valid
+	  plist so `plutil -lint` passes on its own.
+	-->
+	<key>CFBundleShortVersionString</key>
+	<string>__CFBUNDLE_SHORT_VERSION__</string>
+	<key>CFBundleVersion</key>
+	<string>__CFBUNDLE_VERSION__</string>
+
+	<!--
+	  From Package.swift: platforms: [.macOS(.v14)]. Launching on an older release
+	  would fail to link, so the floor is stated rather than left to chance.
+	-->
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+
+	<!--
+	  Required for a bundled SwiftUI app: MusterMacApp.swift declares
+	  `@main struct MusterMacApp: App`, which needs an NSApplication host to own
+	  the window and the app menu.
+	-->
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+
+	<!-- The UI is vector/SwiftUI with no raster assets; the app is Retina-native. -->
+	<key>NSHighResolutionCapable</key>
+	<true/>
+
+	<!--
+	  PRIVACY USAGE STRINGS: NONE, DELIBERATELY.
+
+	  A TCC usage-description key is only meaningful if the code requests that
+	  capability. An exhaustive search of macos/Sources for the requesting APIs
+	  returns nothing:
+
+	    AVAudioEngine, AVAudioSession, AVCaptureDevice   -> no microphone capture
+	    SFSpeechRecognizer, requestRecordPermission      -> no speech recognition
+	    CGPreflightScreenCaptureAccess,
+	    CGRequestScreenCaptureAccess, CGWindowListCreateImage,
+	    CGDisplayCreateImage, NSScreen                   -> no screen capture
+	    AXIsProcessTrusted                              -> no accessibility use
+	    NSAppleScript                                   -> no Apple Events
+
+	  macos/Sources imports only AppKit, SwiftUI, Foundation, Security and
+	  CompanionCore. There is therefore no microphone, camera, screen-recording,
+	  accessibility or automation request to justify a string.
+
+	  Copying the Electron app's four privacy strings here would be wrong: the
+	  Electron app requests those capabilities and this one does not. If a future
+	  slice adds microphone or screen capture to the native target, the matching
+	  NS*UsageDescription key must be added in that slice, justified by the code
+	  that introduces the call - not pre-emptively here.
+
+	  Not an accessory app: it presents real windows (GateView, SignInView,
+	  ConversationView), so LSUIElement is deliberately absent.
+	-->
+</dict>
+</plist>
