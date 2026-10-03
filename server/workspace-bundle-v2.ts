@@ -2350,6 +2350,16 @@ export interface CommitRestoreV2Options {
   stagingDir: string;
   dataDir: string;
   backupDir: string;
+  /** Existing safety copy from this pending restore's earlier boot attempt. */
+  priorBackupDir?: string;
+  /** Created-at value from the pending marker that selected `priorBackupDir`. */
+  priorBackupCreatedAt?: number;
+  /** Hash inventory recorded before the earlier attempt began moving live files. */
+  priorBackupInventory?: RestoreBackupInventory;
+  /** Select a fresh candidate only when the recorded copy cannot be reused and the live tree is intact. */
+  fallbackBackupDir?: () => string | null;
+  /** Persist the selected path and its original covered-file inventory before any live move. */
+  onBackupPlan?: (attempt: RestoreBackupAttempt) => void;
   /** explicit and literal: a restore into a live installation is never
    * something a caller does by accident */
   confirm: boolean;
@@ -2369,6 +2379,18 @@ export interface CommitRestoreResult {
   /** populated only when a rollback step itself failed; a `rolled-back` result
    * with entries here did not fully restore the tree */
   rollbackFailures?: string[];
+}
+
+export interface RestoreBackupInventoryEntry {
+  size: number;
+  sha256: string;
+}
+
+export type RestoreBackupInventory = Record<string, RestoreBackupInventoryEntry | null>;
+
+export interface RestoreBackupAttempt {
+  backupDir: string;
+  inventory: RestoreBackupInventory;
 }
 
 /** Whether `child` is `parent` or sits inside it, judged on the paths the
@@ -2478,7 +2500,7 @@ type PreflightOutcome = { ok: true; entries: StagedEntry[] } | { ok: false; bloc
  * staging manifest is readable and unconsumed, every staged file matches the
  * hash and size recorded for it, every covered path is safe, and no covered
  * path is something this overlay could not put back. */
-function preflightCommit(stagingDir: string, dataDir: string): PreflightOutcome {
+function preflightCommit(stagingDir: string, dataDir: string, allowConsumed = false): PreflightOutcome {
   const manifestPath = join(stagingDir, RESTORE_MANIFEST);
   const blocked: RestoreBlocked[] = [];
   const raw = lstatOrNull(manifestPath);
@@ -2503,7 +2525,7 @@ function preflightCommit(stagingDir: string, dataDir: string): PreflightOutcome 
   if (decoded === null) {
     return { ok: false, blocked: [{ path: RESTORE_MANIFEST, detail: "the staging manifest is not readable" }] };
   }
-  if (decoded.consumedAt !== undefined) {
+  if (decoded.consumedAt !== undefined && !allowConsumed) {
     return {
       ok: false,
       blocked: [{ path: RESTORE_MANIFEST, detail: "the staging manifest was already consumed by an earlier commit" }],
@@ -2640,6 +2662,221 @@ function rollbackCommit(input: RollbackInput): string[] {
 /** The one directory name a safety copy may live under INSIDE a data dir:
  * reserved here so the guard and the boot-time applier cannot drift apart. */
 export const RESTORE_BACKUPS_DIR = ".restore-backups";
+export const MAX_RESTORE_BACKUP_ATTEMPTS = 64;
+
+/** The only valid safety-copy name for this pending marker's timestamp/retry series. */
+export function isExpectedRestoreBackupAttemptDir(dataDir: string, createdAt: number, path: string): boolean {
+  let stamp: string;
+  try {
+    stamp = new Date(createdAt).toISOString().replace(/[:.]/g, "-");
+  } catch {
+    return false;
+  }
+  const candidate = resolve(path);
+  const root = resolve(join(dataDir, RESTORE_BACKUPS_DIR));
+  if (dirname(candidate) !== root) return false;
+  if (basename(candidate) === stamp) return true;
+  const retry = basename(candidate).match(new RegExp(`^${stamp}-retry-([1-9][0-9]*)$`, "u"));
+  if (retry === null) return false;
+  const attempt = Number(retry[1]);
+  return Number.isSafeInteger(attempt) && attempt <= MAX_RESTORE_BACKUP_ATTEMPTS;
+}
+
+function inventoryMatchesEntries(inventory: RestoreBackupInventory, entries: StagedEntry[]): boolean {
+  const paths = Object.keys(inventory);
+  return paths.length === entries.length
+    && entries.every((entry) => {
+      if (!Object.hasOwn(inventory, entry.path)) return false;
+      const item = inventory[entry.path];
+      return item === null || (item !== undefined
+        && Number.isSafeInteger(item.size)
+        && item.size >= 0
+        && /^[a-f0-9]{64}$/u.test(item.sha256));
+    });
+}
+
+function inventoryOfLiveFiles(dataDir: string, entries: StagedEntry[]) {
+  const inventory: RestoreBackupInventory = {};
+  for (const entry of entries) {
+    const live = confinedTarget(dataDir, entry.path);
+    if (live === null) throw new Error(`${entry.path} is not a safe relative path`);
+    const info = lstatOrNull(live);
+    if (info === null) {
+      inventory[entry.path] = null;
+      continue;
+    }
+    if (!info.isFile() || info.isSymbolicLink()) {
+      throw new Error(`${entry.path} is not a regular live file`);
+    }
+    const body = readFileSync(live);
+    inventory[entry.path] = { size: body.byteLength, sha256: sha256Hex(body) };
+  }
+  return inventory satisfies RestoreBackupInventory;
+}
+
+function liveMatchesInventory(dataDir: string, entries: StagedEntry[], inventory: RestoreBackupInventory): boolean {
+  return entries.every((entry) => {
+    const live = confinedTarget(dataDir, entry.path);
+    if (live === null) return false;
+    const info = lstatOrNull(live);
+    const expected = inventory[entry.path];
+    if (expected === null) return info === null;
+    if (expected === undefined || info === null || !info.isFile() || info.isSymbolicLink()) return false;
+    try {
+      const body = readFileSync(live);
+      return body.byteLength === expected.size && sha256Hex(body) === expected.sha256;
+    } catch {
+      return false;
+    }
+  });
+}
+
+function liveMatchesStagedOverlay(dataDir: string, entries: StagedEntry[]): boolean {
+  return entries.every((entry) => {
+    const live = confinedTarget(dataDir, entry.path);
+    if (live === null) return false;
+    const info = lstatOrNull(live);
+    if (info === null) return true;
+    if (!info.isFile() || info.isSymbolicLink()) return false;
+    try {
+      const body = readFileSync(live);
+      return body.byteLength === entry.body.byteLength && sha256Hex(body) === sha256Hex(entry.body);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function backupMatchesInventory(backupDir: string, inventory: RestoreBackupInventory): boolean {
+  const expected = new Map(Object.entries(inventory).filter((item): item is [string, RestoreBackupInventoryEntry] => item[1] !== null));
+  const expectedDirectories = new Set<string>();
+  for (const path of expected.keys()) {
+    const parts = path.split("/");
+    for (let index = 1; index < parts.length; index += 1) expectedDirectories.add(parts.slice(0, index).join("/"));
+  }
+  const found = new Set<string>();
+  const visit = (directory: string, prefix: string): boolean => {
+    let names: string[];
+    try {
+      names = readdirSync(directory);
+    } catch {
+      return false;
+    }
+    for (const name of names) {
+      const path = prefix.length === 0 ? name : `${prefix}/${name}`;
+      const fullPath = join(directory, name);
+      const info = lstatOrNull(fullPath);
+      if (info === null || info.isSymbolicLink()) return false;
+      if (info.isDirectory()) {
+        if (!expectedDirectories.has(path) || !visit(fullPath, path)) return false;
+        continue;
+      }
+      if (!info.isFile()) return false;
+      const item = expected.get(path);
+      if (item === undefined) return false;
+      try {
+        const body = readFileSync(fullPath);
+        if (body.byteLength !== item.size || sha256Hex(body) !== item.sha256) return false;
+      } catch {
+        return false;
+      }
+      found.add(path);
+    }
+    return true;
+  };
+  return visit(backupDir, "") && found.size === expected.size;
+}
+
+function backupContainsOnlyStagedPaths(backupDir: string, entries: StagedEntry[]): boolean {
+  const allowedFiles = new Set(entries.map((entry) => entry.path));
+  const allowedDirectories = new Set<string>();
+  for (const path of allowedFiles) {
+    const parts = path.split("/");
+    for (let index = 1; index < parts.length; index += 1) allowedDirectories.add(parts.slice(0, index).join("/"));
+  }
+  const visit = (directory: string, prefix: string): boolean => {
+    let names: string[];
+    try {
+      names = readdirSync(directory);
+    } catch {
+      return false;
+    }
+    for (const name of names) {
+      const path = prefix.length === 0 ? name : `${prefix}/${name}`;
+      const info = lstatOrNull(join(directory, name));
+      if (info === null || info.isSymbolicLink()) return false;
+      if (info.isDirectory()) {
+        if (!allowedDirectories.has(path) || !visit(join(directory, name), path)) return false;
+      } else if (!info.isFile() || !allowedFiles.has(path)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  return visit(backupDir, "");
+}
+
+/** Validate the retained safety-copy reference before completing a consumed
+ * restore. New markers supply the exact original inventory; legacy v1 markers
+ * can still be read and use their receipt path only when it is an intended,
+ * existing directory whose contents are confined to staged paths. */
+export function validateCommittedRestoreBackup(options: {
+  dataDir: string;
+  stagingDir: string;
+  createdAt: number;
+  backupDir: string;
+  inventory?: RestoreBackupInventory;
+}): boolean {
+  if (!isExpectedRestoreBackupAttemptDir(options.dataDir, options.createdAt, options.backupDir)) return false;
+  const backupRoot = join(resolve(options.dataDir), RESTORE_BACKUPS_DIR);
+  const rootInfo = lstatOrNull(backupRoot);
+  if (rootInfo === null || !rootInfo.isDirectory() || rootInfo.isSymbolicLink()) return false;
+  const backupDir = resolve(options.backupDir);
+  const relativeBackup = relative(resolve(options.dataDir), backupDir).split(sep);
+  if (relativeBackup.length !== 2 || relativeBackup[0] !== RESTORE_BACKUPS_DIR || containsPath(backupDir, options.dataDir)) return false;
+  const backupInfo = lstatOrNull(backupDir);
+  if (backupInfo === null || !backupInfo.isDirectory() || backupInfo.isSymbolicLink()) return false;
+
+  let manifest: StagingManifest | null = null;
+  try {
+    manifest = parseStagingManifest(readFileSync(join(options.stagingDir, RESTORE_MANIFEST), "utf8"));
+  } catch {
+    return false;
+  }
+  if (manifest?.consumedAt === undefined) return false;
+  const preflight = preflightCommit(options.stagingDir, options.dataDir, true);
+  if (!preflight.ok) return false;
+  if (options.inventory === undefined) return backupContainsOnlyStagedPaths(backupDir, preflight.entries);
+  return inventoryMatchesEntries(options.inventory, preflight.entries)
+    && backupMatchesInventory(backupDir, options.inventory);
+}
+
+/** Reuse only a marker-named, contained copy that exactly matches the recorded
+ * pre-move inventory. A process may have died during the staged overlay, so
+ * each live path must now be absent or already match its verified staged bytes.
+ * If the live tree still exactly matches the original inventory, a fresh attempt
+ * may proceed while leaving any earlier candidate untouched. */
+function isReusableInterruptedBackup(
+  priorBackupDir: string,
+  dataDir: string,
+  createdAt: number,
+  entries: StagedEntry[],
+  inventory: RestoreBackupInventory,
+): boolean {
+  const prior = resolve(priorBackupDir);
+  const relativePrior = relative(resolve(dataDir), prior).split(sep);
+  if (!isExpectedRestoreBackupAttemptDir(dataDir, createdAt, priorBackupDir)
+    || !containsPath(dataDir, prior)
+    || relativePrior.length !== 2
+    || relativePrior[0] !== RESTORE_BACKUPS_DIR) return false;
+  if (containsPath(prior, dataDir)) return false;
+  const rootInfo = lstatOrNull(join(dataDir, RESTORE_BACKUPS_DIR));
+  if (rootInfo === null || !rootInfo.isDirectory() || rootInfo.isSymbolicLink()) return false;
+  const priorInfo = lstatOrNull(prior);
+  if (priorInfo === null || !priorInfo.isDirectory() || priorInfo.isSymbolicLink()) return false;
+  if (!inventoryMatchesEntries(inventory, entries) || !backupMatchesInventory(prior, inventory)) return false;
+  return liveMatchesStagedOverlay(dataDir, entries);
+}
 
 /** Overlay a staged restore onto a live installation.
  *
@@ -2664,7 +2901,7 @@ export const RESTORE_BACKUPS_DIR = ".restore-backups";
 export function commitRestoreV2(options: CommitRestoreV2Options): CommitRestoreResult {
   const stagingDir = resolve(options.stagingDir);
   const dataDir = resolve(options.dataDir);
-  const backupDir = resolve(options.backupDir);
+  let backupDir = resolve(options.backupDir);
   const report = options.onCommit ?? (() => {});
   const refuse = (blocked: RestoreBlocked[]): CommitRestoreResult => ({
     status: "refused",
@@ -2699,9 +2936,6 @@ export function commitRestoreV2(options: CommitRestoreV2Options): CommitRestoreR
   }
   if (containsPath(backupDir, dataDir)) {
     return refuse([{ path: dataDir, detail: "the data directory sits inside the backup directory" }]);
-  }
-  if (existsSync(backupDir)) {
-    return refuse([{ path: backupDir, detail: "the backup directory already exists" }]);
   }
   const dataInfo = lstatOrNull(dataDir);
   if (dataInfo === null) {
@@ -2740,6 +2974,56 @@ export function commitRestoreV2(options: CommitRestoreV2Options): CommitRestoreR
   }
   const preflight = preflightCommit(stagingDir, dataDir);
   if (!preflight.ok) return refuse(preflight.blocked);
+  const suppliedPriorAttemptFields = [
+    options.priorBackupDir,
+    options.priorBackupCreatedAt,
+    options.priorBackupInventory,
+  ].filter((value) => value !== undefined).length;
+  if (suppliedPriorAttemptFields !== 0 && suppliedPriorAttemptFields !== 3) {
+    return refuse([{ path: "-", detail: "the prior backup attempt marker is incomplete" }]);
+  }
+  let backupInventory: RestoreBackupInventory;
+  let reusablePriorBackupDir: string | null = null;
+  if (options.priorBackupDir !== undefined && options.priorBackupInventory !== undefined) {
+    if (options.priorBackupCreatedAt === undefined
+      || !isExpectedRestoreBackupAttemptDir(dataDir, options.priorBackupCreatedAt, options.priorBackupDir)) {
+      return refuse([{ path: options.priorBackupDir, detail: "the prior backup attempt does not match its pending marker timestamp/retry path" }]);
+    }
+    if (!inventoryMatchesEntries(options.priorBackupInventory, preflight.entries)) {
+      return refuse([{ path: options.priorBackupDir, detail: "the prior backup attempt inventory does not match the staging manifest" }]);
+    }
+    if (isReusableInterruptedBackup(options.priorBackupDir, dataDir, options.priorBackupCreatedAt, preflight.entries, options.priorBackupInventory)) {
+      reusablePriorBackupDir = resolve(options.priorBackupDir);
+      backupDir = reusablePriorBackupDir;
+      backupInventory = options.priorBackupInventory;
+    } else if (liveMatchesInventory(dataDir, preflight.entries, options.priorBackupInventory)) {
+      // No covered live byte has moved (or caught-exception rollback restored it).
+      // A new candidate is safe; the old path is never overwritten or deleted.
+      if (options.fallbackBackupDir !== undefined) {
+        const fallback = options.fallbackBackupDir();
+        if (fallback === null) {
+          return refuse([{ path: options.priorBackupDir, detail: "no unused safety-copy path is available; the prior copy was preserved" }]);
+        }
+        backupDir = resolve(fallback);
+        const reservedRoot = resolve(join(dataDir, RESTORE_BACKUPS_DIR));
+        if (dirname(backupDir) !== reservedRoot || !containsPath(dataDir, backupDir) || containsPath(backupDir, dataDir)) {
+          return refuse([{ path: backupDir, detail: "the fallback safety-copy path is outside the approved backup namespace" }]);
+        }
+      }
+      backupInventory = options.priorBackupInventory;
+    } else {
+      return refuse([{ path: options.priorBackupDir, detail: "the prior backup attempt is partial or ambiguous; no files were changed" }]);
+    }
+  } else {
+    try {
+      backupInventory = inventoryOfLiveFiles(dataDir, preflight.entries);
+    } catch (error) {
+      return refuse([{ path: "-", detail: error instanceof Error ? error.message : String(error) }]);
+    }
+  }
+  if (reusablePriorBackupDir === null && lstatOrNull(backupDir) !== null) {
+    return refuse([{ path: backupDir, detail: "the backup directory already exists" }]);
+  }
   // A bundle whose manifest declares an entry INSIDE the backup directory
   // would let the payload overwrite its own rollback source; refuse before
   // anything moves.
@@ -2750,13 +3034,45 @@ export function commitRestoreV2(options: CommitRestoreV2Options): CommitRestoreR
   const written: string[] = [];
   const createdDirs: string[] = [];
   try {
+    if (reusablePriorBackupDir === null) {
+      options.onBackupPlan?.({ backupDir, inventory: backupInventory });
+    }
+    // Make even an empty safety copy an actual directory before reporting a
+    // successful commit. A validated prior crash copy is left untouched and
+    // remains the receipt target instead of creating an empty retry candidate.
+    if (reusablePriorBackupDir === null) ensureDirectory(backupDir, []);
     for (const entry of preflight.entries) {
       const live = confinedTarget(dataDir, entry.path);
-      if (live === null || !existsSync(live)) continue;
+      if (live === null) continue;
+      if (reusablePriorBackupDir !== null) {
+        const liveInfo = lstatOrNull(live);
+        if (liveInfo === null) continue;
+        if (!liveInfo.isFile() || liveInfo.isSymbolicLink()) {
+          throw new Error(`${entry.path} is not a regular live file during interrupted recovery`);
+        }
+        const liveBody = readFileSync(live);
+        if (liveBody.byteLength !== entry.body.byteLength || sha256Hex(liveBody) !== sha256Hex(entry.body)) {
+          throw new Error(`${entry.path} no longer matches its verified staged bytes during interrupted recovery`);
+        }
+        // The existing file is a previously installed staged path, not a
+        // pre-restore byte to move over the immutable safety copy.
+        continue;
+      }
+      if (!existsSync(live)) continue;
       report({ step: "move", path: entry.path });
       ensureDirectory(dirname(join(backupDir, ...entry.path.split("/"))), []);
       moveFile(live, join(backupDir, ...entry.path.split("/")));
       moved.push(entry.path);
+      const expected = backupInventory[entry.path];
+      const backupPath = join(backupDir, ...entry.path.split("/"));
+      const backupInfo = lstatOrNull(backupPath);
+      if (expected === null || expected === undefined || backupInfo === null || !backupInfo.isFile() || backupInfo.isSymbolicLink()) {
+        throw new Error(`${entry.path} did not match the recorded original backup inventory`);
+      }
+      const backedUp = readFileSync(backupPath);
+      if (backedUp.byteLength !== expected.size || sha256Hex(backedUp) !== expected.sha256) {
+        throw new Error(`${entry.path} changed after its original backup inventory was recorded`);
+      }
     }
     for (const entry of preflight.entries) {
       const target = confinedTarget(dataDir, entry.path);
@@ -2771,7 +3087,13 @@ export function commitRestoreV2(options: CommitRestoreV2Options): CommitRestoreR
     if (manifest === null) throw new Error("the staging manifest disappeared during the commit");
     writeFileAtomic(join(stagingDir, RESTORE_MANIFEST), JSON.stringify({ ...manifest, consumedAt: Date.now() }));
   } catch (error) {
-    const rollbackFailures = rollbackCommit({ dataDir, backupDir, moved, written, createdDirs });
+    const rollbackMoved = reusablePriorBackupDir === null
+      ? moved
+      : preflight.entries.filter((entry) => backupInventory[entry.path] !== null).map((entry) => entry.path);
+    const rollbackWritten = reusablePriorBackupDir === null
+      ? written
+      : preflight.entries.map((entry) => entry.path);
+    const rollbackFailures = rollbackCommit({ dataDir, backupDir, moved: rollbackMoved, written: rollbackWritten, createdDirs });
     const result: CommitRestoreResult = {
       status: "rolled-back",
       moved,
@@ -2783,7 +3105,7 @@ export function commitRestoreV2(options: CommitRestoreV2Options): CommitRestoreR
     if (rollbackFailures.length > 0) result.rollbackFailures = rollbackFailures;
     return result;
   }
-  return { status: "committed", moved, written, backupDir, blocked: [] };
+  return { status: "committed", moved, written, backupDir: reusablePriorBackupDir ?? backupDir, blocked: [] };
 }
 
 // ---------------------------------------------------------------------------

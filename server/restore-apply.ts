@@ -15,19 +15,27 @@
 // The v2 commit guard requires staging and backup trees OUTSIDE the data
 // directory (a backup inside the live tree could be swept by the next export
 // or wedge the swap), so both live as siblings of DATA_DIR.
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { z } from "zod";
 
 import { capturePreMigrationSnapshot } from "./snapshot-runner.ts";
-import { commitRestoreV2, RESTORE_BACKUPS_DIR, stagingManifestConsumed, type CommitRestoreResult, type ReconsentEntry } from "./workspace-bundle-v2.ts";
+import { commitRestoreV2, isExpectedRestoreBackupAttemptDir, MAX_RESTORE_BACKUP_ATTEMPTS, RESTORE_BACKUPS_DIR, stagingManifestConsumed, validateCommittedRestoreBackup, type CommitRestoreResult, type ReconsentEntry, type RestoreBackupAttempt, type RestoreEvent } from "./workspace-bundle-v2.ts";
 
 const PENDING_FILE = "pending-restore.json";
 const RECEIPT_FILE = "last-restore.json";
 
 export const PENDING_RESTORE_FORMAT = "muster-pending-restore" as const;
+
+const backupAttemptSchema = z.object({
+  backupDir: z.string(),
+  inventory: z.record(z.string(), z.object({
+    size: z.number().int().nonnegative(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  }).nullable()),
+});
 
 const pendingSchema = z.object({
   version: z.literal(1),
@@ -39,6 +47,8 @@ const pendingSchema = z.object({
   reconsentRequired: z.array(
     z.object({ botId: z.string(), restoredId: z.string(), reason: z.string() }),
   ).default([]),
+  // Optional so legacy version-1 pending markers remain readable.
+  backupAttempt: backupAttemptSchema.optional(),
 });
 
 export type PendingRestore = z.infer<typeof pendingSchema>;
@@ -246,25 +256,44 @@ export interface ApplyResult {
  * the same refusal — forever, wedging a restore the operator may no longer be
  * able to re-stage. The retry therefore takes the next free name under the same
  * backups root: every safety copy is preserved, and only the NAME moves. */
-const MAX_BACKUP_ATTEMPTS = 64;
+const MAX_BACKUP_ATTEMPTS = MAX_RESTORE_BACKUP_ATTEMPTS;
 
-function freeBackupDir(dataDir: string, stamp: string): string {
-  const root = backupsRootFor(dataDir);
-  let candidate = join(root, stamp);
-  for (let attempt = 1; attempt <= MAX_BACKUP_ATTEMPTS && existsSync(candidate); attempt += 1) {
-    candidate = join(root, `${stamp}-retry-${attempt}`);
+function backupPathEntryExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    return !(error instanceof Error && "code" in error && error.code === "ENOENT");
   }
-  return candidate;
 }
 
-/** Retry ONLY the de-weaponization of an already-committed restore: the
- * staging manifest is consumed, so the words are on disk and the commit is
- * done. The fresh receipt carries the ORIGINAL safety-copy location forward;
- * the pending file clears only when the disarm actually landed. */
-function finishDisarmOnly(dataDir: string, pending: PendingRestore): ApplyResult {
+function freeBackupDir(dataDir: string, stamp: string, excludedPath?: string): string | null {
+  const root = backupsRootFor(dataDir);
+  const excluded = excludedPath === undefined ? null : resolve(excludedPath);
+  for (let attempt = 0; attempt <= MAX_BACKUP_ATTEMPTS; attempt += 1) {
+    const candidate = join(root, attempt === 0 ? stamp : `${stamp}-retry-${attempt}`);
+    if (resolve(candidate) === excluded) continue;
+    if (!backupPathEntryExists(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** Replace only the local pending marker atomically, before commit can move a live file. */
+function persistBackupAttempt(dataDir: string, pending: PendingRestore, attempt: RestoreBackupAttempt): void {
+  const pendingPath = join(dataDir, PENDING_FILE);
+  const temporaryPath = `${pendingPath}.tmp`;
+  write0600(temporaryPath, JSON.stringify({ ...pending, backupAttempt: attempt }, null, 2));
+  chmodSync(temporaryPath, 0o600);
+  renameSync(temporaryPath, pendingPath);
+  pending.backupAttempt = attempt;
+}
+
+/** Retry ONLY the de-weaponization of an already-committed restore. The caller
+ * validates the marker-bound safety copy first; the fresh receipt records that
+ * exact path instead of trusting a previous best-effort receipt. */
+function finishDisarmOnly(dataDir: string, pending: PendingRestore, backupDir: string): ApplyResult {
   const deWeapon = deWeaponize(dataDir);
   const armed = deWeapon.failures.length > 0;
-  const previous = readLastReceipt(dataDir);
   const disarmError = armed
     ? `the restore was written but de-weaponization did not complete: ${deWeapon.failures.join("; ")}`
     : undefined;
@@ -277,7 +306,7 @@ function finishDisarmOnly(dataDir: string, pending: PendingRestore): ApplyResult
   };
   if (pending.counts !== undefined) receipt.counts = pending.counts;
   if (disarmError !== undefined) receipt.error = disarmError;
-  if (previous?.backupDir !== undefined) receipt.backupDir = previous.backupDir;
+  receipt.backupDir = backupDir;
   try {
     write0600(join(dataDir, RECEIPT_FILE), JSON.stringify(receipt, null, 2));
   } catch {
@@ -298,9 +327,31 @@ function finishDisarmOnly(dataDir: string, pending: PendingRestore): ApplyResult
  * `failed`, not `committed`, and keeps the pending file for the same reason:
  * the staging manifest stays unconsumed, so a later boot retries ONLY the
  * disarm via finishDisarmOnly — the commit itself never re-runs. */
-export function applyPendingRestore(dataDir: string): ApplyResult {
+export function applyPendingRestore(
+  dataDir: string,
+  options: { onCommit?: (event: RestoreEvent) => void } = {},
+): ApplyResult {
   const pending = readPendingRestore(dataDir);
   if (!pending) return { status: "nothing-pending" };
+  if (pending.stagingDir !== stagingPathFor(dataDir)) {
+    const error = "staging directory must be the conventional sibling staging path";
+    const receipt: Receipt = {
+      appliedAt: Date.now(),
+      status: "refused",
+      createdAt: pending.createdAt,
+      source: pending.source,
+      reconsentRequired: pending.reconsentRequired,
+      error,
+      blocked: [{ path: pending.stagingDir, detail: error }],
+    };
+    if (pending.counts !== undefined) receipt.counts = pending.counts;
+    try {
+      write0600(join(dataDir, RECEIPT_FILE), JSON.stringify(receipt, null, 2));
+    } catch {
+      /* the unsafe staging path is still refused even if the receipt cannot land */
+    }
+    return { status: "refused", pending, error };
+  }
   // B1 pre-restore capture: the commit below REPLACES the live tree, so the
   // pre-mutation state is sealed SYNCHRONOUSLY here, before checkpointLiveDb
   // writes anything. Two-phase inside the runner: sync seal, detached ship;
@@ -315,27 +366,106 @@ export function applyPendingRestore(dataDir: string): ApplyResult {
   }
   const stamp = new Date(pending.createdAt).toISOString().replace(/[:.]/g, "-");
   if (stagingManifestConsumed(pending.stagingDir)) {
-    return finishDisarmOnly(dataDir, pending);
+    const previous = readLastReceipt(dataDir);
+    const receiptBackupDir = previous !== null
+      && (previous.status === "committed" || previous.status === "failed")
+      && previous.createdAt === pending.createdAt
+      ? previous.backupDir
+      : undefined;
+    const backupDir = pending.backupAttempt?.backupDir
+      ?? receiptBackupDir;
+    let validBackup = false;
+    if (backupDir !== undefined) {
+      const backupValidation: Parameters<typeof validateCommittedRestoreBackup>[0] = {
+        dataDir,
+        stagingDir: pending.stagingDir,
+        createdAt: pending.createdAt,
+        backupDir,
+      };
+      if (pending.backupAttempt !== undefined) backupValidation.inventory = pending.backupAttempt.inventory;
+      validBackup = validateCommittedRestoreBackup(backupValidation);
+    }
+    if (!validBackup || backupDir === undefined) {
+      throw new Error("the consumed restore has no valid marker-bound safety copy; refusing to construct Store");
+    }
+    return finishDisarmOnly(dataDir, pending, backupDir);
   }
-  const backupDir = freeBackupDir(dataDir, stamp);
-  checkpointLiveDb(dataDir);
+  const priorAttempt = pending.backupAttempt;
+  const backupDir = priorAttempt?.backupDir
+    ?? freeBackupDir(dataDir, stamp)
+    ?? join(backupsRootFor(dataDir), stamp);
   let commit: CommitRestoreResult;
-  try {
-    commit = commitRestoreV2({
-      stagingDir: pending.stagingDir,
-      dataDir,
-      backupDir,
-      confirm: true,
-    });
-  } catch (e) {
+  if (priorAttempt !== undefined && !isExpectedRestoreBackupAttemptDir(dataDir, pending.createdAt, priorAttempt.backupDir)) {
     commit = {
       status: "refused",
       moved: [],
       written: [],
       backupDir,
-      blocked: [{ path: "-", detail: e instanceof Error ? e.message : String(e) }],
-      error: e instanceof Error ? e.message : String(e),
+      blocked: [{ path: priorAttempt.backupDir, detail: "the pending backup attempt is outside its intended timestamp/retry path" }],
+      error: "the pending backup attempt path is invalid",
     };
+  } else {
+    checkpointLiveDb(dataDir);
+    try {
+      const commitOptions: Parameters<typeof commitRestoreV2>[0] = {
+        stagingDir: pending.stagingDir,
+        dataDir,
+        backupDir,
+        onBackupPlan(attempt) {
+          if (!isExpectedRestoreBackupAttemptDir(dataDir, pending.createdAt, attempt.backupDir)) {
+            throw new Error("the selected safety-copy path is outside its intended timestamp/retry path");
+          }
+          persistBackupAttempt(dataDir, pending, attempt);
+        },
+        confirm: true,
+      };
+      if (priorAttempt !== undefined) {
+        commitOptions.priorBackupDir = priorAttempt.backupDir;
+        commitOptions.priorBackupCreatedAt = pending.createdAt;
+        commitOptions.priorBackupInventory = priorAttempt.inventory;
+        commitOptions.fallbackBackupDir = () => freeBackupDir(dataDir, stamp, priorAttempt.backupDir);
+      }
+      if (options.onCommit !== undefined) commitOptions.onCommit = options.onCommit;
+      commit = commitRestoreV2(commitOptions);
+    } catch (e) {
+      commit = {
+        status: "refused",
+        moved: [],
+        written: [],
+        backupDir,
+        blocked: [{ path: "-", detail: e instanceof Error ? e.message : String(e) }],
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }
+  if (commit.status === "committed") {
+    let validDirectory = false;
+    try {
+      const info = lstatSync(commit.backupDir);
+      validDirectory = info.isDirectory() && !info.isSymbolicLink();
+    } catch {
+      validDirectory = false;
+    }
+    const committedAttempt = pending.backupAttempt;
+    const validSafetyCopy = committedAttempt !== undefined
+      && resolve(committedAttempt.backupDir) === resolve(commit.backupDir)
+      && validateCommittedRestoreBackup({
+        dataDir,
+        stagingDir: pending.stagingDir,
+        createdAt: pending.createdAt,
+        backupDir: commit.backupDir,
+        inventory: committedAttempt.inventory,
+      });
+    if (!isExpectedRestoreBackupAttemptDir(dataDir, pending.createdAt, commit.backupDir) || !validDirectory || !validSafetyCopy) {
+      commit = {
+        status: "refused",
+        moved: commit.moved,
+        written: commit.written,
+        backupDir: commit.backupDir,
+        blocked: [{ path: commit.backupDir, detail: "the committed safety-copy receipt target is not an existing intended directory" }],
+        error: "the committed safety-copy receipt target is invalid",
+      };
+    }
   }
   // De-weaponization runs BEFORE the receipt is written, because a disarm that
   // could not land is part of this run's outcome: a restored workspace that
@@ -358,13 +488,18 @@ export function applyPendingRestore(dataDir: string): ApplyResult {
     else if (commit.error !== undefined) receipt.error = commit.error;
   }
   if (commit.status !== "committed" && commit.blocked.length > 0) receipt.blocked = commit.blocked;
-  if (commit.status === "committed") receipt.backupDir = backupDir;
+  if (commit.status === "committed") receipt.backupDir = commit.backupDir;
   try {
     write0600(join(dataDir, RECEIPT_FILE), JSON.stringify(receipt, null, 2));
   } catch {
     /* receipt is best-effort; the restore itself is the contract */
   }
   if (commit.status !== "committed") {
+    if ((priorAttempt !== undefined && commit.status === "refused") || (commit.rollbackFailures?.length ?? 0) > 0) {
+      throw new Error(
+        `pending restore could not establish a complete live tree before Store construction: ${commit.error ?? commit.blocked.map((item) => item.detail).join("; ")}`,
+      );
+    }
     return { status: receipt.status, pending, commit, error: commit.error };
   }
   if (!armed) {
