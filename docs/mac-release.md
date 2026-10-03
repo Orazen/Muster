@@ -2,6 +2,8 @@
 
 Date: 2026-10-03 · Author: Agent 4 (native Mac) · Status: **documentation only**
 
+**Companion:** [`docs/mac-smoke-checklist.md`](./mac-smoke-checklist.md) — install/upgrade execution record.
+
 ## Scope, and what this document is not
 
 This runbook **describes** how a macOS release candidate is built, signed, notarized, verified and published in this repository. It **does not perform any of those actions**.
@@ -197,6 +199,15 @@ The version number has not been advanced despite 78 commits of source change, so
 ---
 
 ## 6. Clean-install and upgrade smoke tests
+
+> **Companion:** [`docs/mac-smoke-checklist.md`](./mac-smoke-checklist.md) is the executable
+> checklist with recorded results. It separates the shipped Electron installer from the Swift
+> development app, and records which install / launch / permissions / login / persistence /
+> upgrade / uninstall / credential tests have actually been run. This section stays the summary.
+
+**Status as of 2026-10-03:** static verification of the published `v1.23.3` arm64 artifact **has been executed** (digest match, signature verifies, Gatekeeper accepts, notarized Developer ID). **All 37 install-and-behaviour tests remain NOT RUN**, because they require installing to a location that is not a user's working app.
+
+
 
 **[NOT EXECUTED]** — the following are the repository's own checks.
 
