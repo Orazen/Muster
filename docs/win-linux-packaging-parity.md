@@ -81,7 +81,7 @@ Windows has a related but *different* guard, and it is a good one. Its gate runs
 
 So Windows permits unsigned builds too, but it refuses to ship one that lies about it. **macOS has no equivalent consistency check.**
 
-The Windows hazard is documented in `electron-builder.yml` and is worth repeating because it is easy to trip. The comment is line-wrapped in the file; it reads in full: *"Do NOT set publisherName without actually signing, or every update is rejected as untrusted; and once signed, keep the cert subject stable (or list both old and new in publisherName) or you strand already-installed users."* That is a silent, total auto-update failure — the app stops updating for every user, with no error at build time.
+The Windows hazard is documented in `electron-builder.yml` and is worth repeating because it is easy to trip. The comment is **split across three comment lines with a `#` prefix at each break**, so the sentence is not a literal substring of the file. Reassembled, it reads: *"Do NOT set publisherName without actually signing, or every update is rejected as untrusted; and once signed, keep the cert subject stable (or list both old and new in publisherName) or you strand already-installed users."* A `grep` for the reassembled sentence will fail against the raw file — verified, not assumed. That is a silent, total auto-update failure — the app stops updating for every user, with no error at build time.
 
 **A smaller asymmetry between the two macOS jobs, found while verifying this.** The signature-gate conditions differ:
 
