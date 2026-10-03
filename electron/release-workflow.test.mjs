@@ -11,6 +11,53 @@ describe('release control decision matrix', () => {
     expect(verifyReleaseWorkflow(original)).toEqual({ platformUploads: 4, mutationSteps: 9 });
   });
 
+  it('fails closed if artifact trust is absent from public publication or mirror promotion', () => {
+    const noOutput = copy();
+    delete noOutput.jobs.macos.outputs.trust_evidence;
+    expect(() => verifyReleaseWorkflow(noOutput)).toThrow(/Mac trust evidence/);
+    const noConsumer = copy();
+    noConsumer.jobs.publish.steps = noConsumer.jobs.publish.steps.filter((entry) => entry.id !== 'trust-gate');
+    expect(() => verifyReleaseWorkflow(noConsumer)).toThrow(/Expected one release control step/);
+    const optionalIntel = copy();
+    optionalIntel.jobs['deploy-downloads'].if = optionalIntel.jobs['deploy-downloads'].if.replace(" && needs.macos-x64.result == 'success'", '');
+    expect(() => verifyReleaseWorkflow(optionalIntel)).toThrow(/Mirror must revalidate/);
+    const noStableTrust = copy();
+    noStableTrust.jobs.publish.outputs.published = "${{ steps.release.outcome == 'success' && steps.draft.outputs.value == 'false' && !contains(needs.prepare.outputs.version, '-') }}";
+    expect(() => verifyReleaseWorkflow(noStableTrust)).toThrow(/Public publication signal/);
+  });
+
+  it('declares both exact-SHA macOS artifact-bound trust outputs as release prerequisites', () => {
+    for (const [platform, architecture] of [['macos', 'arm64'], ['macos-x64', 'intel']]) {
+      const job = original.jobs[platform];
+      const signing = job.steps.find((entry) => entry.id === 'signature');
+      const attestation = job.steps.find((entry) => entry.id === 'attest-mac');
+      const checksums = job.steps.find((entry) => /shasum -a 256/.test(entry.run ?? ''));
+      expect(job.outputs.trust_evidence).toBe('${{ steps.attest-mac.outputs.evidence }}');
+      expect(attestation).toMatchObject({
+        id: 'attest-mac',
+        run: 'node scripts/release-policy.mjs attest',
+        env: {
+          MAC_ARCH: architecture,
+          RELEASE_VERSION: '${{ needs.prepare.outputs.version }}',
+          RELEASE_SHA: '${{ needs.prepare.outputs.sha }}',
+          SIGNATURE_OUTCOME: '${{ steps.signature.outcome }}',
+          NOTARIZATION_OUTCOME: '${{ steps.notarize.outcome }}',
+          GATEKEEPER_OUTCOME: '${{ steps.gatekeeper.outcome }}',
+        },
+      });
+      expect(job.steps.indexOf(attestation)).toBeGreaterThan(job.steps.indexOf(checksums));
+      expect(job.steps.indexOf(attestation)).toBeLessThan(job.steps.findIndex((entry) => /gh release upload/.test(entry.run ?? '')));
+      expect(signing.continueOnError ?? signing['continue-on-error']).toBeUndefined();
+    }
+    const draft = original.jobs.publish.steps.find((entry) => entry.id === 'draft');
+    expect(draft.env.ARM64_TRUST_EVIDENCE).toBe('${{ needs.macos.outputs.trust_evidence }}');
+    expect(draft.env.INTEL_TRUST_EVIDENCE).toBe('${{ needs.macos-x64.outputs.trust_evidence }}');
+    expect(original.jobs.publish.outputs.published).toContain("steps.draft.outputs.macos_trust == 'verified'");
+    const trustGate = original.jobs.publish.steps.find((entry) => entry.id === 'trust-gate');
+    expect(trustGate.run).toBe('node scripts/release-policy.mjs require-trust');
+    expect(original.jobs['deploy-downloads'].needs).toEqual(expect.arrayContaining(['macos', 'macos-x64']));
+  });
+
   it('covers blockmaps in platform checksums and uploads so differential updates can use the mirror', () => {
     for (const [platform, sums] of [['macos', '> SHA256SUMS-macos-arm64.txt'], ['macos-x64', '> SHA256SUMS-macos-x64.txt'], ['windows', '> SHA256SUMS-windows-x64.txt']]) {
       const sumsStep = step(original, platform, sums);

@@ -163,8 +163,11 @@ export function verifyReleaseWorkflow(workflow) {
         (success && dry === 'false' && credentials), 'Notarization must not submit from a dry or failed run');
     }
   }
-  check(evaluateGuard(intelNotarize.if, { success: true, env: Object.fromEntries(['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT', 'APPLE_CERTIFICATE'].map((key) => [key, 'present'])), needs: { prepare: { outputs: { dry_run: 'false' } } } }) === true,
+  const intelCredentials = Object.fromEntries(['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT', 'APPLE_CERTIFICATE', 'APPLE_TEAM_ID'].map((key) => [key, 'present']));
+  check(evaluateGuard(intelNotarize.if, { success: true, env: intelCredentials, needs: { prepare: { outputs: { dry_run: 'false' } } } }) === true,
     'Intel notarization must submit only with credentials from a non-dry run');
+  check(evaluateGuard(intelNotarize.if, { success: true, env: { ...intelCredentials, APPLE_CERTIFICATE: '' }, needs: { prepare: { outputs: { dry_run: 'false' } } } }) === false,
+    'Intel notarization must fail closed without the signing certificate');
   check(evaluateGuard(intelNotarize.if, { success: true, env: { ASC_KEY_ID: '' }, needs: { prepare: { outputs: { dry_run: 'false' } } } }) === false,
     'Intel notarization must skip when the ASC key is missing');
   check(evaluateGuard(intelNotarize.if, { success: true, env: { ASC_KEY_ID: 'present', ASC_ISSUER_ID: 'present', ASC_KEY_CONTENT: 'present', APPLE_CERTIFICATE: '' }, needs: { prepare: { outputs: { dry_run: 'false' } } } }) === false,
@@ -172,13 +175,63 @@ export function verifyReleaseWorkflow(workflow) {
   const intelChecksums = one(jobs['macos-x64'], (step) => /shasum -a 256/.test(shell(step)));
   check(steps(jobs['macos-x64']).indexOf(intelChecksums) > steps(jobs['macos-x64']).indexOf(intelNotarize),
     'Intel checksums must follow stapling (stapling rewrites the dmg bytes)');
+  for (const [platform, architecture] of [['macos', 'arm64'], ['macos-x64', 'intel']]) {
+    const job = jobs[platform];
+    const signature = one(job, (step) => step.id === 'signature');
+    const notarizeStep = one(job, (step) => /notarytool submit/.test(shell(step)));
+    const gatekeeperStep = one(job, (step) => step.id === 'gatekeeper');
+    const attest = one(job, (step) => step.id === 'attest-mac');
+    const releaseUpload = one(job, (step) => /gh\s+release\s+upload/.test(shell(step)));
+    const checksums = one(job, (step) => /shasum -a 256/.test(shell(step)));
+    check(job.outputs?.trust_evidence === '${{ steps.attest-mac.outputs.evidence }}'
+      && attest.env?.ASSETS_DIR === 'release'
+      && signature.if === "${{ " + (platform === 'macos' ? "env.APPLE_CERTIFICATE != ''" : "success() && env.APPLE_CERTIFICATE != ''") + " }}"
+      && signature['continue-on-error'] === undefined
+      && attest.env?.MAC_ARCH === architecture
+      && attest.env?.RELEASE_VERSION === '${{ needs.prepare.outputs.version }}'
+      && attest.env?.RELEASE_SHA === '${{ needs.prepare.outputs.sha }}'
+      && attest.env?.SIGNATURE_OUTCOME === '${{ steps.signature.outcome }}'
+      && attest.env?.NOTARIZATION_OUTCOME === '${{ steps.notarize.outcome }}'
+      && attest.env?.GATEKEEPER_OUTCOME === '${{ steps.gatekeeper.outcome }}'
+      && attest.run === 'node scripts/release-policy.mjs attest' && attest.if === undefined
+      && attest['continue-on-error'] === undefined
+      && steps(job).indexOf(attest) > steps(job).indexOf(gatekeeperStep)
+      && steps(job).indexOf(attest) > steps(job).indexOf(checksums)
+      && steps(job).indexOf(attest) < steps(job).indexOf(releaseUpload),
+      'Mac trust evidence must consume actual checks and hash the upload inventory after all edits');
+    if (platform === 'macos-x64') {
+      check(job.steps.find((step) => step.id === 'signature').run.includes("flags=0x10000(runtime)"),
+        'Intel Developer ID verification requires hardened runtime');
+      check(shell(gatekeeperStep).includes('stapler validate "$APP"') && shell(gatekeeperStep).includes('spctl --assess'),
+        'Intel trust evidence requires stapler validation and Gatekeeper');
+      check(steps(job).indexOf(gatekeeperStep) > steps(job).indexOf(notarizeStep),
+        'Intel Gatekeeper assessment follows successful notarization');
+    }
+  }
+
   const publish = jobs.publish;
   const mirror = jobs['deploy-downloads'];
   const release = one(publish, (step) => String(step.uses ?? '').startsWith('softprops/action-gh-release@'));
   const draft = one(publish, (step) => step.id === 'draft');
+  check(publish.outputs?.published === "${{ steps.release.outcome == 'success' && steps.draft.outputs.value == 'false' && steps.draft.outputs.macos_trust == 'verified' && !contains(needs.prepare.outputs.version, '-') }}",
+    'Public publication signal must require verified Mac trust');
   check(shell(draft) === 'node scripts/release-policy.mjs draft' && draft.if === undefined &&
     ['MACOS', 'WINDOWS', 'LINUX'].every((platform) => draft.env?.[`${platform}_RESULT`] === `\${{ needs.${platform.toLowerCase()}.result }}`) &&
-    draft.env?.INTEL_RESULT === '${{ needs.macos-x64.result }}', 'Draft state must derive from actual platform results');
+    draft.env?.INTEL_RESULT === '${{ needs.macos-x64.result }}' &&
+    draft.env?.ARM64_TRUST_EVIDENCE === '${{ needs.macos.outputs.trust_evidence }}' &&
+    draft.env?.INTEL_TRUST_EVIDENCE === '${{ needs.macos-x64.outputs.trust_evidence }}',
+    'Draft state must consume actual per-job trust evidence and platform results');
+  const publishTrustGate = one(publish, (step) => step.id === 'trust-gate');
+  check(publishTrustGate.env?.ASSETS_DIR === 'assets'
+    && publishTrustGate.env?.GITHUB_RUN_ID === '${{ github.run_id }}'
+    && publishTrustGate.env?.GITHUB_RUN_ATTEMPT === '${{ github.run_attempt }}'
+    && shell(publishTrustGate) === 'node scripts/release-policy.mjs require-trust'
+    && publishTrustGate.env?.ARM64_TRUST_EVIDENCE === '${{ needs.macos.outputs.trust_evidence }}'
+    && publishTrustGate.env?.INTEL_TRUST_EVIDENCE === '${{ needs.macos-x64.outputs.trust_evidence }}'
+    && publishTrustGate.env?.RELEASE_VERSION === '${{ needs.prepare.outputs.version }}'
+    && publishTrustGate.env?.RELEASE_SHA === '${{ needs.prepare.outputs.sha }}'
+    && steps(publish).indexOf(publishTrustGate) < steps(publish).findIndex((step) => step.id === 'payload'),
+    'Fail-closed trust gate must precede downloaded payload validation and publication');
   check(release.id === 'release' && release.with?.target_commitish === '${{ needs.prepare.outputs.sha }}' &&
     release.with?.tag_name === 'v${{ needs.prepare.outputs.version }}' && release.with?.draft === '${{ steps.draft.outputs.value }}',
     'Publication must preserve pinned identity and explicit draft state');
@@ -210,13 +263,14 @@ export function verifyReleaseWorkflow(workflow) {
       for (const result of ['success', 'failure', 'skipped']) for (const published of ['true', 'false', '']) {
         const needs = { prepare: { result: prepare, outputs: { dry_run: dry } }, publish: { result, outputs: { published } } };
         const expected = !cancelled && prepare === 'success' && dry === 'false' && result === 'success' && published === 'true';
-        check(evaluateGuard(mirror?.if, { cancelled, needs }) === expected, 'Mirror must require confirmed stable publication');
+        check(evaluateGuard(mirror?.if, { cancelled, needs: { ...needs, macos: { result: 'success' }, 'macos-x64': { result: 'success' } } }) === expected,
+          'Mirror must require confirmed stable publication and both Mac build gates');
       }
     }
   }
   for (const outcome of ['success', 'failure', 'skipped']) for (const draft of ['true', 'false', '']) {
     for (const version of ['1.10.5', '1.10.5-beta.1']) {
-      const context = { steps: { release: { outcome }, draft: { outputs: { value: draft } } }, needs: { prepare: { outputs: { version } } } };
+      const context = { steps: { release: { outcome }, draft: { outputs: { value: draft, macos_trust: draft === 'false' ? 'verified' : 'unverified' } } }, needs: { prepare: { outputs: { version } } } };
       check(evaluateGuard(publish.outputs?.published, context) === (outcome === 'success' && draft === 'false' && !version.includes('-')),
         'Drafts and prereleases must not signal stable publication');
     }
@@ -229,8 +283,22 @@ export function verifyReleaseWorkflow(workflow) {
     String(step.uses ?? '').startsWith('softprops/action-gh-release@'));
   check(mutationSteps.length === knownMutations.size && mutationSteps.every((step) => knownMutations.has(step)),
     'Unexpected release mutation outside the validated gates');
-  check(mirror.env?.REQUIRE_COMPLETE === 'true' && steps(mirror).indexOf(mirrorPayload) < steps(mirror).indexOf(deploy) &&
-    mirrorPayload.if === undefined && deploy.if === undefined, 'Mirror must validate complete payload before deployment');
+  const mirrorTrust = one(mirror, (step) => step.id === 'trust-gate');
+  check(mirror.env?.REQUIRE_COMPLETE === 'true' &&
+    mirror.needs.includes('macos') && mirror.needs.includes('macos-x64') &&
+    mirror.if.includes("needs.macos.result == 'success'") && mirror.if.includes("needs.macos-x64.result == 'success'") &&
+    mirrorTrust.env?.ASSETS_DIR === 'artifacts' &&
+    mirrorTrust.env?.ARM64_TRUST_EVIDENCE === '${{ needs.macos.outputs.trust_evidence }}' &&
+    mirrorTrust.env?.INTEL_TRUST_EVIDENCE === '${{ needs.macos-x64.outputs.trust_evidence }}' &&
+    mirrorTrust.env?.RELEASE_VERSION === '${{ needs.prepare.outputs.version }}' &&
+    mirrorTrust.env?.RELEASE_SHA === '${{ needs.prepare.outputs.sha }}' &&
+    mirrorTrust.env?.GITHUB_RUN_ID === '${{ github.run_id }}' &&
+    mirrorTrust.env?.GITHUB_RUN_ATTEMPT === '${{ github.run_attempt }}' &&
+    mirrorTrust.run === 'node scripts/release-policy.mjs require-trust' &&
+    steps(mirror).indexOf(mirrorTrust) < steps(mirror).indexOf(mirrorPayload) &&
+    steps(mirror).indexOf(mirrorPayload) < steps(mirror).indexOf(deploy) &&
+    mirrorTrust.if === undefined && mirrorPayload.if === undefined && deploy.if === undefined,
+    'Mirror must revalidate current-run Mac trust against public downloaded payload before deployment');
   check(download.if === undefined && steps(mirror).indexOf(download) < steps(mirror).indexOf(mirrorPayload) &&
     shell(download).includes('gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$RELEASE_VERSION" --jq .published_at') &&
     shell(download).includes('published_at=%s\\n') &&
