@@ -8,10 +8,11 @@ This is the short active-document index for Muster.
 
 1. `docs/plans/Muster_MVP_Master_Plan.md`
 2. `docs/plans/Muster_Sub_Agent_Assignments.md`
-3. `docs/plans/Muster_Future_Roadmap_And_Competitor_Research.md`
-4. `docs/plans/Muster_Repo_Audit_And_Active_Docs_Map.md`
-5. `docs/AGENT-ORIENTATION.md`
-6. `AGENTS.md`
+3. `docs/plans/Muster_Sub_Agent_Operating_Loop.md`
+4. `docs/plans/Muster_Future_Roadmap_And_Competitor_Research.md`
+5. `docs/plans/Muster_Repo_Audit_And_Active_Docs_Map.md`
+6. `docs/AGENT-ORIENTATION.md`
+7. `AGENTS.md`
 
 ## Current Build Focus
 
