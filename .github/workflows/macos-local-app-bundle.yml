@@ -1,0 +1,140 @@
+name: macOS local app bundle (build + static validation)
+
+# Builds the local development .app bundle for the native Mac target and validates it
+# statically.
+#
+# THIS IS NOT A RELEASE PIPELINE. It has no signing identity, no notarization, no
+# stapling, no publication and no deployment step, and it reads no secrets. The
+# bundle is never launched and never installed.
+#
+# Why this exists separately from ci.yml: ci.yml's `macos-tests` job already runs
+# `swift build --package-path macos` and `swift test --package-path macos`. Nothing
+# in CI packaged the bundle or checked its plist, its executable name, its
+# architecture or its signature, so a break in macos/Scripts/package-mac-app.sh or
+# in the two plists would land unnoticed. This workflow covers exactly that gap.
+#
+# Packaging needs no Node toolchain: the script is Swift plus codesign.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'macos/**'
+      - '.github/workflows/macos-local-app-bundle.yml'
+
+# Read-only. Nothing here writes to the repository or needs a token.
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-local-app-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Package and statically validate the development bundle
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Show the toolchain
+        run: swift --version
+
+      # These fences exit before the build, so they cost seconds rather than minutes.
+      # Re-verifying them here means a future edit that weakens the containment or
+      # the ownership check fails CI instead of waiting for someone's local run.
+      - name: Safety fences refuse unsafe output paths
+        run: |
+          set -euo pipefail
+          script=./macos/Scripts/package-mac-app.sh
+          mkdir -p macos/.build
+
+          # F1: a path outside the workspace must be refused
+          if OUT_DIR="$(mktemp -d)/elsewhere" "$script" >/dev/null 2>&1; then
+            echo "::error::an OUT_DIR outside the workspace was NOT refused"; exit 1
+          fi
+          echo "  F1 outside-workspace OUT_DIR refused"
+
+          # F2: a symlink that escapes the workspace must be refused
+          mkdir -p macos/.build/ci-escape-target
+          ln -s "$(cd macos/.build/ci-escape-target && pwd)" macos/.build/ci-escape-link
+          if OUT_DIR=macos/.build/ci-escape-link "$script" >/dev/null 2>&1; then
+            echo "::error::a symlink escaping the workspace was NOT refused"; exit 1
+          fi
+          echo "  F2 symlink escaping the workspace refused"
+
+          # F3: a symlink at the configured path must be refused even when its
+          # target stays inside the workspace
+          ln -s macos/.build macos/.build/ci-inside-link
+          if OUT_DIR=macos/.build/ci-inside-link "$script" >/dev/null 2>&1; then
+            echo "::error::a symlinked OUT_DIR was NOT refused"; exit 1
+          fi
+          echo "  F3 symlinked OUT_DIR refused"
+
+          # F4: a pre-existing bundle with no ownership marker must be refused AND
+          # left byte-identical
+          d=macos/.build/ci-unmarked
+          rm -rf "$d"
+          mkdir -p "$d/MusterMacDev.app/Contents"
+          printf 'must survive\n' > "$d/MusterMacDev.app/Contents/precious.txt"
+          printf 'must survive\n' > "$d/unrelated-sibling.txt"
+          if OUT_DIR="$d" "$script" >/dev/null 2>&1; then
+            echo "::error::an unmarked pre-existing bundle was NOT refused"; exit 1
+          fi
+          grep -qx 'must survive' "$d/MusterMacDev.app/Contents/precious.txt" \
+            || { echo "::error::the unmarked bundle was modified"; exit 1; }
+          grep -qx 'must survive' "$d/unrelated-sibling.txt" \
+            || { echo "::error::an unrelated sibling file was modified"; exit 1; }
+          echo "  F4 unmarked pre-existing bundle refused and preserved"
+
+      # Builds the real SwiftPM product, assembles the bundle, signs it ad-hoc, and
+      # verifies structure, executable name, architecture, plist validity, linked
+      # libraries, applied entitlements and absence of release artifacts.
+      - name: Build, package, sign ad-hoc and verify
+        run: ./macos/Scripts/package-mac-app.sh
+
+      - name: Refuse entitlements, distribution signatures or release artifacts
+        run: |
+          set -euo pipefail
+          app=macos/.build/local-app-bundle/MusterMacDev.app
+
+          # 1. This slice requests no entitlement at all.
+          keys="$(codesign -d --entitlements - "$app" 2>/dev/null | grep -c '<key>' || true)"
+          if [ "$keys" != "0" ]; then
+            echo "::error::expected 0 entitlement keys, found $keys"; exit 1
+          fi
+          echo "  entitlement keys: 0"
+
+          # 2. Ad-hoc only. A Developer ID signature here would mean a distribution
+          #    path had opened up in a development bundle.
+          sig="$(codesign -dvv "$app" 2>&1 | grep -m1 '^Signature=' || true)"
+          echo "  $sig"
+          case "$sig" in
+            *adhoc*) ;;
+            *) echo "::error::expected an ad-hoc signature, got: $sig"; exit 1 ;;
+          esac
+          if codesign -dvv "$app" 2>&1 | grep -q 'TeamIdentifier=[0-9A-Z]'; then
+            echo "::error::a TeamIdentifier is set on a development bundle"; exit 1
+          fi
+          echo "  TeamIdentifier: not set"
+
+          # 3. No release feed, blockmap, archive or updater config may exist.
+          if find "$app" \( -name 'latest*.yml' -o -name '*.blockmap' \
+               -o -name 'app-update.yml' -o -name '*.dmg' -o -name '*.zip' \
+               -o -name '*.pkg' \) -print -quit | grep -q .; then
+            echo "::error::release artifacts found in a development bundle"; exit 1
+          fi
+          echo "  no release artifacts present"
+
+          echo "static validation passed"
+
+      # A CI artifact for inspection. This is NOT a release: it is ad-hoc signed with
+      # no TeamIdentifier, unnotarized, and retained for one day. Nothing publishes it.
+      - name: Upload the unsigned development bundle for inspection
+        uses: actions/upload-artifact@v7
+        with:
+          name: muster-macos-dev-bundle-unsigned
+          path: macos/.build/local-app-bundle/MusterMacDev.app
+          retention-days: 1
+          if-no-files-found: error
