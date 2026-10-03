@@ -411,14 +411,19 @@ function socialProviders() {
       clientId: google.clientId,
       clientSecret: google.clientSecret,
       // Sign-in stays basic-scope on purpose (GOOGLE_SIGNIN_SCOPES in
-      // server/google-auth.ts is the one home for that list): drive.appdata
-      // is a RESTRICTED scope, and requesting it at login makes Google show
-      // every new user the "Google hasn't verified this app" interstitial
-      // (scope verification is separate from branding — restricted scopes
-      // need a security assessment). Accounts that granted Drive earlier
-      // keep their stored refresh token, so workspace Drive backup still
-      // works for them; a separate opt-in Drive connect is the follow-up
-      // for everyone else.
+      // server/google-auth.ts is the one home for that list): Drive is a
+      // separate opt-in connect, so a user sees and can decline it
+      // deliberately instead of it being bundled into first-run sign-in.
+      //
+      // Classification note: drive.appdata is a NON-SENSITIVE scope, not a
+      // restricted one, so it does not by itself trigger Google's
+      // "unverified app" screen (that screen applies to sensitive and
+      // restricted scopes). See
+      // https://developers.google.com/workspace/drive/api/guides/api-specific-auth
+      // and https://support.google.com/cloud/answer/7454865.
+      //
+      // Accounts that granted Drive earlier keep their stored refresh token,
+      // so workspace Drive backup still works for them.
       scope: [...GOOGLE_SIGNIN_SCOPES],
     };
   }

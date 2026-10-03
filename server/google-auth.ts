@@ -10,10 +10,18 @@
 
 /**
  * Basic identity scopes for SIGN-IN only. A Drive scope must never appear
- * here: drive.* is RESTRICTED at Google, and requesting it at login shows
- * every new user the "Google hasn't verified this app" interstitial. The
- * separate Drive connect consent lives in server/drive-oauth.ts and asks
- * for `openid drive.appdata` on its own.
+ * here: Drive connect is a separate, deliberate consent step, so a user can
+ * see and decline it rather than having it bundled into first-run sign-in.
+ *
+ * Scope sensitivity is NOT uniform across drive.*: drive.appdata,
+ * drive.appfolder, drive.install and drive.file are NON-SENSITIVE, while
+ * auth/drive, drive.readonly and drive.metadata are restricted. Do not
+ * generalise from one to the other.
+ * https://developers.google.com/workspace/drive/api/guides/api-specific-auth
+ *
+ * Note that GOOGLE_DRIVE_SCOPE below is deliberately the restricted
+ * auth/drive string: it is a namespace prefix for the drive-scope predicate,
+ * not a scope this app requests.
  */
 export const GOOGLE_SIGNIN_SCOPES = ["openid", "email", "profile"] as const;
 
