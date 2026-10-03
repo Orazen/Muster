@@ -1,17 +1,16 @@
 import { useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { useAuth } from "@/lib/auth";
 import { AuthShell, authCardBox, authInputCls, authButtonCls } from "@/components/AuthShell";
 
-import { AuthPasswordField } from "@/components/AuthPasswordField";
 import { GoogleSignIn } from "@/components/GoogleSignIn";
 import { EmailOtpSignIn } from "@/components/EmailOtpSignIn";
 import { authDestination } from "@/lib/auth-navigation";
 
 /** Account sign-in and device connection share a page, but remain separate actions. */
 export function LoginPage() {
-  const { capabilities, signIn, user, loading: authLoading, signOut, sessionError, retrySession } = useAuth();
+  const { capabilities, user, loading: authLoading, signOut, sessionError, retrySession } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = authDestination(params.get("next"));
@@ -33,36 +32,6 @@ export function LoginPage() {
   // desktop pairing bridge: code typed from muster.today/pair
   const [pairCode, setPairCode] = useState("");
   const [pairBusy, setPairBusy] = useState(false);
-
-  // email + password: first-class path, not a fallback
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [emailBusy, setEmailBusy] = useState(false);
-
-  async function handleEmailSignIn(e?: React.FormEvent) {
-    e?.preventDefault();
-    if (submitting.current) return;
-    setError("");
-    if (!email.trim() || !password) {
-      setError("Enter your email and password.");
-      return;
-    }
-    submitting.current = true;
-    setEmailBusy(true);
-    try {
-      const result = await signIn(email.trim(), password);
-      if (result.error) {
-        setError(result.error);
-        return;
-      }
-      navigate(next);
-    } catch {
-      setError("Could not reach the server. Please try again.");
-    } finally {
-      submitting.current = false;
-      setEmailBusy(false);
-    }
-  }
 
   async function handlePair() {
     if (submitting.current) return;
@@ -97,8 +66,7 @@ export function LoginPage() {
   const desktopOAuthHandoff = Boolean(capabilities.desktopOAuth) && !googleConfigured;
 
   return (
-    <AuthShell title="Your day, with Muster." subtitle="Sign in to your workspace. Your next good idea starts here."
-      footer={<>New to Muster? <Link to={`/sign-up?next=${encodeURIComponent(next)}`} className="auth-link">Create an account</Link></>}>
+    <AuthShell title="Your day, with Muster." subtitle="Continue with your email or Google. No password needed.">
       <div className="auth-stack">
         {sessionError && <div className="auth-notice auth-error" role="alert">
           <p>{sessionError}</p>
@@ -144,24 +112,16 @@ export function LoginPage() {
 
         <GoogleSignIn next={next} onError={setError} />
 
-        {(googleConfigured || desktopOAuthHandoff) && <div className="auth-divider">or use your email</div>}
+        {capabilities.emailOtp && (googleConfigured || desktopOAuthHandoff) && <div className="auth-divider">or use your email</div>}
         {capabilities.emailOtp && <EmailOtpSignIn next={next} />}
-        <details className={`auth-password-option${capabilities.emailOtp ? "" : " auth-password-default"}`} open={capabilities.emailOtp ? undefined : true}>
-          <summary hidden={!capabilities.emailOtp}>Use a password instead</summary>
-        <form onSubmit={(e) => void handleEmailSignIn(e)} className="auth-form">
-          <div>
-            <label htmlFor="email" className="auth-label">Email address</label>
-            <input id="email" name="email" type="email" required value={email}
-              onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"
-              autoComplete="email" className={authInputCls} />
-          </div>
-          <AuthPasswordField id="password" value={password} onChange={setPassword} autoComplete="current-password" />
-          {capabilities.passwordReset && <div className="auth-recovery"><Link to="/forgot-password" className="auth-link">Forgot password?</Link></div>}
-          <button type="submit" disabled={emailBusy} className={authButtonCls}>
-            {emailBusy ? "Signing in…" : "Sign in with email"}
-          </button>
-        </form>
-        </details>
+        {!authLoading && !capabilities.emailOtp && (
+          <p className="auth-notice" role="status">
+            Email code sign-in is currently unavailable.
+            {(googleConfigured || desktopOAuthHandoff) ? " Continue with Google above." :
+              capabilities.cloudPairing ? " Connect this app with a pairing code below." :
+                " Please try again later."}
+          </p>
+        )}
 
         {capabilities.cloudPairing && (
           <form id="connect" className="auth-pair" onSubmit={(event) => {
@@ -214,3 +174,4 @@ export function LoginPage() {
     </AuthShell>
   );
 }
+
