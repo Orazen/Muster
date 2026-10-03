@@ -112,12 +112,39 @@ Add immediately after the Gatekeeper gate:
             [ "$NOTARY" = "success" ] || { echo "::error::arm64 notarization did not return Accepted (${NOTARY})"; exit 1; }
             [ "$GATEKEEPER" = "success" ] || { echo "::error::arm64 Gatekeeper assessment did not pass (${GATEKEEPER})"; exit 1; }
             {
-              echo "signature=$SIG"
-              echo "hardenedRuntime=$SIG"
-              echo "notarized=accepted"
-              echo "gatekeeper=verified"
+              echo "signatureOutcome=$SIG"
+              echo "hardenedRuntimeOutcome=$SIG"
+              echo "notarizeOutcome=$NOTARY"
+              echo "gatekeeperOutcome=$GATEKEEPER"
             } >> "$GITHUB_OUTPUT"
 ```
+
+**The producer emits raw step outcomes; the policy owns the mapping.** My earlier draft emitted
+`signature=success` while the consumer demanded `verified`, and hardcoded `notarized=accepted` and
+`gatekeeper=verified` as literals. Both were wrong. A genuinely verified build would have been
+**rejected** by the consumer, and the two hardcoded keys made the consumer's comparison an echo of
+the step's own `exit 1` rather than an independent check. One schema, mapped in exactly one place:
+
+```js
+// scripts/release-policy.mjs (additive)
+const OUTCOME_TO_EVIDENCE = { success: 'verified', failure: 'failed', cancelled: 'failed' };
+const asEvidence = (outcome, pass = 'verified') => {
+  const key = String(outcome ?? '').trim();
+  if (key === 'success') return pass;
+  return OUTCOME_TO_EVIDENCE[key] ?? 'skipped';   // absent / unknown never becomes a pass
+};
+export function toMacosEvidence(outcomes = {}) {
+  return {
+    signature:       asEvidence(outcomes.signatureOutcome),
+    hardenedRuntime: asEvidence(outcomes.hardenedRuntimeOutcome),
+    notarized:       asEvidence(outcomes.notarizeOutcome, 'accepted'),
+    gatekeeper:      asEvidence(outcomes.gatekeeperOutcome),
+  };
+}
+```
+
+Absent, unknown and skipped all collapse to `skipped`, which **fails** the consumer's comparison —
+so a missing or unrecognised gate can never be read as a pass.
 
 `hardenedRuntime` mirrors `SIG` deliberately: the gate asserts the runtime flag and fails if absent, so one verified outcome legitimately covers both checks. Splitting them would imply two independent signals where there is one.
 
@@ -176,6 +203,13 @@ Inserted **before** `Publish the verified release state`, after the payload vali
 
 On failure this step exits non-zero, `steps.release` never runs, the draft stays a draft, and `deploy-downloads` is skipped because it requires `publish.outputs.published == 'true'`.
 
+### 3d. Honest limit of the policy layer
+
+Returning `skipped` and letting the step exit 0 is **not by itself a publication barrier** — the
+existing workflow `if:` guards are what stop the dry-run path reaching publish. The policy adds a
+second, testable barrier; it is not the only one and must not be described as one. Testing the
+**caller** and every mutation boundary is required in addition to the decision function.
+
 ## 4. Proposed policy tests — `electron/release-policy.test.mjs`
 
 Appended to the existing suite; existing tests untouched. Style matches the file (`vitest`, `describe`/`it`/`expect`, `it.each`).
@@ -183,7 +217,12 @@ Appended to the existing suite; existing tests untouched. Style matches the file
 ```js
 import { decideMacosTrust, REQUIRED_MACOS_ARCHES } from '../scripts/release-policy.mjs';
 
-const trusted = { signature: 'verified', hardenedRuntime: 'verified', notarized: 'accepted', gatekeeper: 'verified' };
+// Built by the SAME mapping the workflow uses, from raw step outcomes, so these
+// tests cannot pass by hand-constructing values the producer never emits.
+const trusted = toMacosEvidence({
+  signatureOutcome: 'success', hardenedRuntimeOutcome: 'success',
+  notarizeOutcome: 'success', gatekeeperOutcome: 'success',
+});
 const bothTrusted = { arm64: trusted, intel: { ...trusted } };
 const publish = { dryRun: 'false', arches: bothTrusted };
 
@@ -255,7 +294,22 @@ Test Files  1 passed (1)
      Tests  34 passed (34)
 ```
 
-**34 = the 6 pre-existing `release-policy` tests (unmodified and still passing) + 28 from the new `it.each` expansions.** The repository was not edited to obtain this result, and no file under `scripts/` or `.github/` was touched.
+**34 = the 21 pre-existing `release-policy` cases (unmodified and still passing) + 13 new.**
+Astra's independent review corrected my breakdown: I had written "6 pre-existing + 28 new", but that
+**6 counted `it()` *blocks*, not test *cases***. The file holds 6 plain `it()` blocks plus two
+`it.each` templates expanding to 12 and 3 cases — **21 cases**. The total 34 was right; my
+decomposition of it was wrong. The repository was not edited to obtain this result, and no file under
+`scripts/` or `.github/` was touched.
+
+**What this receipt does and does not establish.** It exercises the **policy function only**. It does
+**not** establish the producer → job-output → policy wiring, and it did **not** catch the mismatch
+above: the old tests hand-constructed `verified` while the producer emitted `success`, so they passed
+against a gate that would have rejected every real build. **A passing policy unit test is not a
+known-good release gate**, and I should not have called this proposal known-good before the workflow
+halves had ever run. They still have not: **0 executions of the workflow wiring exist.**
+
+Also not shown and therefore not claimed: the **dry-run signature-check asymmetry** fix. Intel still
+requires a non-dry run in this draft.
 
 ## 5. Scope of the proposal
 
