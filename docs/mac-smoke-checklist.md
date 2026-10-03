@@ -40,7 +40,7 @@ Companion to [`docs/mac-release.md`](./mac-release.md) — that document covers 
 | Field | Value |
 |---|---|
 | Release | `v1.23.3`, published 2026-09-30 |
-| Artifacts examined | `Muster-1.23.3-arm64.zip` (185,958,712 bytes) |
+| Artifacts examined | `Muster-1.23.3-arm64.zip` (185,958,712 bytes) and `Muster-1.23.3.dmg` (186,187,768 bytes) |
 | Architecture | `arm64` — verified, see A1.3 |
 | Bundle identifier | `com.muster.app` — verified, see A1.4 |
 | `CFBundleVersion` | `1.23.3` — verified |
@@ -70,20 +70,30 @@ These are static checks on the extracted bundle. No install, no launch.
 | # | Test | Prerequisite | Expected | **Actual** | Evidence |
 |---|---|---|---|---|---|
 | A1.1 | SHA-256 of the arm64 ZIP vs published manifest | Download `SHA256SUMS-macos-arm64.txt` + the ZIP | Digests match | ✅ **PASS** — `bf7aae61…a3690` both sides | `shasum -a 256` vs manifest line |
-| A1.2 | `sha512` of the ZIP vs `latest-mac.yml` | Download the feed | Feed digest matches shipped bytes, or `electron-updater` rejects the delta | ✅ **PASS** — base64 digest identical | `openssl dgst -sha512` vs feed |
+| A1.2 | `sha512` of the ZIP vs `latest-mac.yml` | Download the feed | Feed digest matches the shipped bytes | ✅ **PASS** — base64 digest identical. **This proves artifact integrity only. Whether the updater would actually apply the delta is NOT RUN (see A6.1).** | `openssl dgst -sha512` vs feed |
 | A1.3 | Architecture of the shipped binary | Extracted bundle | `arm64` on Apple silicon | ✅ **PASS** — `lipo -archs` → `arm64` | `lipo -archs Muster.app/Contents/MacOS/Muster` |
 | A1.4 | Bundle identity | Extracted bundle | Matches `appId` in `electron-builder.yml` | ✅ **PASS** — `com.muster.app`; `Format=app bundle with Mach-O thin (arm64)` | `codesign -dv`, `PlistBuddy` |
 | A1.5 | Code signature valid before trust | Extracted bundle | `codesign --verify --deep --strict` exits 0 | ✅ **PASS** — **exit 0** | recorded |
 | A1.6 | Signature chains to a Developer ID | Extracted bundle | Developer ID → Developer ID CA → Apple Root CA | ✅ **PASS** — `Developer ID Application: THARUN RAMAGIRI (7375K23WFU)`, `TeamIdentifier=7375K23WFU` | `codesign -dv --verbose=2` |
 | A1.7 | Gatekeeper accepts the app | Extracted bundle | `spctl --assess --type exec` accepts | ✅ **PASS** — **exit 0**, `source=Notarized Developer ID` | recorded |
-| A1.8 | Stapled ticket on the ZIP-delivered app | Extracted bundle | Ticket stapled | ❌ **NOT STAPLED** — `stapler validate` **exit 65**, *"does not have a ticket stapled to it"* | recorded |
+| A1.8 | Stapled ticket on the **ZIP-delivered app** | Extracted bundle | Ticket stapled | ❌ **NOT STAPLED** — `xcrun stapler validate` **exit 65** | recorded |
+| A1.8b | Stapled ticket on the **DMG file** | Download `Muster-1.23.3.dmg` | `stapler validate` on the DMG succeeds | ✅ **PASS — exit 0**, *"The validate action worked!"*; `spctl -a -t open --context context:primary-signature` → `accepted`, `source=Notarized Developer ID` | recorded |
 | A1.9 | Hardened runtime / entitlements | Extracted bundle | Matches `hardenedRuntime: true` | ⚠️ **OBSERVED** — entitlements include `allow-jyld-environment-variables`, `allow-unsigned-executable-memory`, **`disable-library-validation`**, `device.audio-input` | `codesign -d --entitlements -` |
 | A1.10 | Privacy usage strings shipped | Extracted bundle | All four declared strings present | ✅ **PASS** — microphone, speech recognition, accessibility, screen capture all present with real text | `PlistBuddy` |
 | A1.11 | Update channel wired in-bundle | Extracted bundle | Generic provider, tokenless mirror | ✅ **PASS** — `provider: generic`, `url: https://muster.orazen.online/downloads`, `updaterCacheDirName: muster-updater` | `Contents/Resources/app-update.yml` |
 
 ### A1 findings
 
-1. **A1.8 is expected, and worth understanding rather than "fixing".** The ZIP-delivered app is **notarized but not stapled**. This is the documented scope limit in `release.yml`: the ZIP is never modified after electron-builder writes `latest-mac.yml`, because restapling into the ZIP would invalidate the feed hash and strand every installed Mac. **The DMG is the stapled path.** Consequence for a tester: installing from the ZIP may require a network round trip for Gatekeeper, and must not be treated as a packaging defect. **[NOT RUN]** — confirming the DMG actually carries a ticket requires the DMG.
+1. **A1.8 / A1.8b — now verified rather than asserted.** In revision 1 of this document I wrote that "the DMG is the stapled path" **without having tested it**. I have now tested it.
+
+   - **DMG channel is stapled.** `xcrun stapler validate Muster-1.23.3.dmg` → **exit 0, "The validate action worked!"** ✅
+   - **ZIP channel is not.** The app extracted from the ZIP → `stapler validate` **exit 65** ❌
+
+   This matches the documented scope limit in `release.yml`: the ZIP is never modified after electron-builder writes `latest-mac.yml`, because restapling into the ZIP would invalidate the feed hash and strand every installed Mac. The stapled artifact is the DMG.
+
+   **Methodology correction worth recording:** my first DMG test validated the **app inside** the mounted DMG and reported exit 65 — which would have been a *false* finding. The correct check for a stapled disk image is `stapler validate` on the **DMG file**, because the ticket is attached to the container. Anyone re-running this should validate the image, not the mounted bundle.
+
+   **Consequence for a tester:** installing from the ZIP may require a Gatekeeper network round trip; installing from the DMG does not. This is a packaging characteristic, **not** a defect.
 2. **A1.9 is an observation for the security reviewer, not a verdict from me.** `disable-library-validation` and `allow-unsigned-executable-memory` are hardening relaxations. They are common in Electron apps (JIT needs `allow-jit`), but `disable-library-validation` in particular widens what can be loaded. **Flagged to Agent 5; I am not calling this a defect and I am not claiming it is safe.**
 
 ---
@@ -226,6 +236,100 @@ This package **is** built and tested in CI — `ci.yml` job `macos-tests` on `ma
 | B2.8 | **No updater channel** | No `app-update.yml` equivalent **[VERIFIED]** |
 
 **Consequence:** the Swift app is a developer and CI target only. Until B2.1–B2.8 are addressed it must not be described as installable, shippable, or part of a release, and none of Target A's tests apply to it.
+
+---
+
+---
+
+# Reproducible artifact-check receipt
+
+Every **[RUN]** result above is reproducible from a clean machine. These are the exact commands, the artifact they were run against, and what was observed.
+
+## Environment
+
+| Field | Value |
+|---|---|
+| Host architecture | `arm64` (Apple silicon) |
+| macOS | 26.5 (build 25F71) |
+| Release under test | `v1.23.3`, published 2026-09-30 |
+| Working directory | a temporary directory, since removed |
+
+## Reproduce
+
+```sh
+D=$(mktemp -d)
+gh release download v1.23.3 --repo Orazen/Muster --pattern Muster-1.23.3-arm64.zip --dir "$D"
+gh release download v1.23.3 --repo Orazen/Muster --pattern SHA256SUMS-macos-arm64.txt --dir "$D"
+gh release download v1.23.3 --repo Orazen/Muster --pattern latest-mac.yml --dir "$D"
+gh release download v1.23.3 --repo Orazen/Muster --pattern Muster-1.23.3.dmg --dir "$D"
+
+# A1.1  SHA-256 vs published manifest
+shasum -a 256 "$D/Muster-1.23.3-arm64.zip"
+grep 'arm64.zip$' "$D/SHA256SUMS-macos-arm64.txt"
+# observed: bf7aae611506197c042aae6dc11b36cc4b95f5b839c908b6dc465cdce53a3690  (both sides)
+
+# A1.2  sha512 vs the shipped auto-update feed  (integrity only, not update behaviour)
+openssl dgst -sha512 -binary "$D/Muster-1.23.3-arm64.zip" | openssl base64 -A
+grep -A2 'arm64.zip' "$D/latest-mac.yml" | grep sha512 | head -1
+# observed: YnMvSg5xx1LFcIP/1nZNt29VAYnDZm4BtVN3fqG71mCOr7Yb/foaQdYOOY8rIxM5ljdxPMwnqdQ7CDVf4AOPoA==  (both sides)
+
+# A1.3-A1.7, A1.10, A1.11  extract and verify statically (nothing installed, nothing launched)
+ditto -x -k "$D/Muster-1.23.3-arm64.zip" "$D/extract"
+APP="$D/extract/Muster.app"
+lipo -archs "$APP/Contents/MacOS/Muster"                       # arm64
+codesign --verify --deep --strict "$APP"; echo $?               # 0
+codesign -dv --verbose=2 "$APP" 2>&1 | grep -E 'Identifier|Authority|TeamIdentifier'
+spctl --assess --type exec -vv "$APP"; echo $?                 # 0, Notarized Developer ID
+xcrun stapler validate "$APP"; echo $?                          # 65  (ZIP channel: not stapled)
+for k in NSMicrophoneUsageDescription NSSpeechRecognitionUsageDescription \
+         NSAccessibilityUsageDescription NSScreenCaptureUsageDescription; do
+  /usr/libexec/PlistBuddy -c "Print $k" "$APP/Contents/Info.plist"
+done
+cat "$APP/Contents/Resources/app-update.yml"                   # provider: generic
+
+# A1.8b  DMG channel stapling — validate the IMAGE, not the mounted app
+shasum -a 256 "$D/Muster-1.23.3.dmg"                            # 0142fd22... matches manifest
+xcrun stapler validate "$D/Muster-1.23.3.dmg"; echo $?          # 0, "The validate action worked!"
+hdiutil attach "$D/Muster-1.23.3.dmg" -nobrowse -readonly -mountpoint "$D/mnt"
+lipo -archs "$D/mnt/Muster.app/Contents/MacOS/Muster"           # arm64
+spctl --assess --type exec -vv "$D/mnt/Muster.app"             # accepted, Notarized Developer ID
+hdiutil detach "$D/mnt"
+
+rm -rf "$D"
+```
+
+**Safety properties of these commands:** no `cp` into `/Applications`, no `open`, no launch, no writes outside the temporary directory, and the DMG is mounted `-readonly -nobrowse`. `/Applications/Muster.app` was never read or modified.
+
+## Digests observed
+
+| Artifact | SHA-256 | Source |
+|---|---|---|
+| `Muster-1.23.3-arm64.zip` | `bf7aae611506197c042aae6dc11b36cc4b95f5b839c908b6dc465cdce53a3690` | matches `SHA256SUMS-macos-arm64.txt` |
+| `Muster-1.23.3.dmg` | `0142fd22b84e1f3093212d9c3f5d4e6e12ec728bf5242422cc0cb04bca9f7d94` | matches `SHA256SUMS-macos-arm64.txt` |
+| `Muster.dmg` | published with the **same** digest as `Muster-1.23.3.dmg` | stable-named copy |
+
+---
+
+# Isolated testing — investigated, and why it is still blocked
+
+The 37 behavioural tests need the app to actually **run**. Running it would touch the user's real environment, so I investigated what isolation is actually available rather than assuming.
+
+| Option | Isolates? | Verdict |
+|---|---|---|
+| Run the extracted app in place | **No** | Would use the user's login Keychain and `~/Library`. **Unacceptable.** |
+| Run with `HOME=<temp>` | **No** | `HOME` does not redirect the login Keychain (keychain access is per-login-session, not per-`HOME`), and TCC privacy grants are stored system-wide per user. This would **not** isolate anything that matters and would risk polluting real state. **Unacceptable.** |
+| Copy to a second `/Applications` entry | Partially | Avoids replacing the existing app, but shares the user's Keychain, `~/Library/Application Support`, and TCC grants. **Still touches real user data.** |
+| **Separate macOS user account** | **Yes**, largely | A fresh login gets its own Keychain and its own TCC grant set. This is the cheapest legitimate isolation. **Requires authorisation to create the account, and a password the tester knows.** |
+| **Disposable macOS VM** | **Yes**, fully | Strongest isolation, and the only option that can test a genuine *first* launch — fresh TCC prompts, empty Keychain, no prior state. Heaviest: needs a macOS runtime image and hours of setup. |
+
+**Conclusion and honest blocker.** The 37 tests stay **NOT RUN**. Nothing I can do from this session executes them safely, and I will not run the app against the user's real environment to make the checklist look complete.
+
+**The two things that would unblock them, in order of cost:**
+
+1. **Authorise a separate macOS user account** for testing. Unblocks install, first launch, permissions, login, persistence, uninstall/reinstall and credential tests. TCC prompts will be genuinely fresh for that account.
+2. **Stand up a disposable macOS VM.** Unblocks the same set **plus** failed-upgrade recovery and cross-account data-isolation tests, because a VM can be destroyed and rebuilt between attempts — which is what a destructive restore/upgrade test actually needs.
+
+**Partial workaround available today, with no isolation:** the **upgrade test (A6) does not require deleting or reinstalling anything.** `v1.23.2` and `v1.23.3` are both published. In-place update testing exercises the real updater against a real install — which does touch the working installation, so it still needs authorisation, but it is a single reversible step rather than a destructive test.
 
 ---
 
