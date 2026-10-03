@@ -64,6 +64,26 @@ jobs:
       - name: Show the toolchain
         run: swift --version
 
+      # Explicit precondition. This workflow is integrated only after the packaging
+      # slice lands, so on this branch alone the script is absent and the job must
+      # say so in plain terms rather than failing later with a missing-file error.
+      - name: Require the packaging slice to be integrated first
+        run: |
+          set -euo pipefail
+          if [ ! -f macos/Scripts/package-mac-app.sh ]; then
+            echo "::error::macos/Scripts/package-mac-app.sh is not present on this ref."
+            echo "::error::This workflow is ordered AFTER the packaging slice"
+            echo "::error::(macos/Resources/Info.plist, macos/Resources/MusterMac.entitlements,"
+            echo "::error::macos/Scripts/package-mac-app.sh). Failing here is the intended"
+            echo "::error::behaviour until that slice is accepted and integrated."
+            exit 1
+          fi
+          for f in macos/Resources/Info.plist macos/Resources/MusterMac.entitlements; do
+            [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
+          done
+          echo "  packaging slice present"
+
+
       # Every negative case asserts its EXPECTED diagnostic, so an unrelated
       # prerequisite or build failure cannot masquerade as a containment success.
       #
