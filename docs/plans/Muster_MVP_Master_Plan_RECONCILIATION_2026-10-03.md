@@ -50,8 +50,55 @@ npx vitest run \
   --reporter=default
 ```
 
-**Result: `Test Files 15 passed (15)`, `Tests 277 passed (277)`,
-`Duration 46.72s`, exit code `0`.**
+### Reproducible receipt
+
+**Code SHA under test: `ba9c4fbe68028d902c7e71d129f319b88ca8e631`**
+(`origin/main` = `3067009`)
+
+The tested commit differs from `origin/main` only in documentation. This is
+proven, not asserted — the `server/` tree object is byte-identical:
+
+```
+server/ tree at ba9c4fb : 5044ba6762e222d1c3a2c99bf192b6ce9ef017c4
+server/ tree at 3067009 : 5044ba6762e222d1c3a2c99bf192b6ce9ef017c4   IDENTICAL
+```
+
+Environment: node `v24.20.0`, repo's own `vite.config.ts`, `node_modules`
+symlinked from the shared checkout. Worktree `/tmp/recon`.
+
+Exact command:
+
+```bash
+npx vitest run \
+  server/auth.test.ts server/google-auth.test.ts server/desktop-auth.test.ts \
+  server/drive-oauth.test.ts server/account-drive-consent.test.ts \
+  server/account-drive-roundtrip.test.ts server/drive-access.test.ts \
+  server/sync-chats.test.ts server/sync-memory.test.ts \
+  server/memory-retrieval.test.ts server/memory-grants.test.ts \
+  server/soul-md.test.ts server/restore-apply.test.ts \
+  server/restore-catalog.test.ts server/task-engine.test.ts \
+  --reporter=default
+```
+
+Result:
+
+```
+ Test Files  15 passed (15)
+      Tests  277 passed (277)
+   Duration  42.80s (tests 93%, setup 5%, transform 1%, import 1%)
+exit code 0
+```
+
+**Run twice** (42.80s and 46.72s) with identical results — `15 passed / 277
+passed / exit 0` both times. The variation is wall-clock only.
+
+Scope limits, restated because they are easy to misread:
+- This is **15 files**, not the full 473-file suite. **No full-suite result is
+  claimed.**
+- These are unit/integration tests in a dev environment. **No real Google
+  account, no real Drive, no physical device, no installed app.**
+- The last accepted product CI was 13/13 at `53b8072`; that is not re-asserted
+  here as current.
 
 | Pillar | Code present | Tests present | Tests run, passed | Real-device verified |
 | --- | --- | --- | --- | --- |
@@ -180,7 +227,7 @@ Three real options. **No implementation change is proposed or made here.**
 | **Permission surface** | Smallest. Only the app's own config data | `drive.file` is per-file (user picks files) — still narrow. Full `drive` sees **all** files | Same as A, opt-in extra write at export time |
 | **User access** | **None.** Hidden from user and other apps; not visible in Drive UI | **Full.** User sees, edits, deletes, shares at will | **None by default**; user gets copies only when they export |
 | **Backup/restore** | Automatic; survives device change **while the app stays installed**. **Deleted if the user uninstalls the app** | Automatic; survives uninstall; user can also copy it themselves | Restore depends on export existing; appData copy is the primary |
-| **Migration** | None today | Would require a migration from appDataFolder content, and the two locations cannot interoperate (no moving files out of appDataFolder per Google) | Adds an export format + versioning to maintain |
+| **Migration** | None today | Requires a copy migration from appDataFolder. Google **permits** reading appDataFolder and creating files elsewhere, so migration is achievable; see §5.1 | Adds an export format + versioning to maintain |
 | **Encryption** | App-controlled already (bundle is encrypted; keys/credentials excluded) | Same, but **user-visible files invite manual editing**, which can corrupt manifests | Same as A |
 | **Failure mode** | User cannot inspect, back up by hand, or recover if they uninstall | User may edit/delete files and break restore; larger blast radius | Most moving parts; export staleness risk |
 | **Fits "user-owned data"?** | Partly — owned but **not accessible**. Google can delete it on uninstall | **Most literally** — visible and self-serviceable | Owned, accessible on demand, at the cost of complexity |
@@ -190,11 +237,19 @@ Three real options. **No implementation change is proposed or made here.**
 Evidence-based reasoning:
 
 1. **`drive.appdata` conflicts with the product direction.** Muster is
-   "user-owned data" and "privacy-first". Google's docs state the folder is
-   hidden from the user and **deleted when the user uninstalls the app**. A user
-   who removes Muster and reinstalls it can lose their memory and sessions
-   permanently. That is a data-loss path in a product whose central promise is
-   that the user keeps their data.
+   "user-owned data" and "privacy-first". Google's exact wording is that the
+   folder "is deleted when a user uninstalls your app **from their My Drive**",
+   and users can also delete it manually.
+
+   **Precise scope of that risk — corrected.** It is *not* triggered by deleting
+   the local desktop app, and *not* by reinstalling on a new machine; the folder
+   lives in Drive, and reinstall is exactly what it is designed to survive. It
+   **is** triggered when a user removes Muster's Drive access from My Drive
+   (connected-apps settings) or manually deletes the folder. The real hazard is
+   therefore sharper than "uninstall": an **ordinary account-cleanup gesture**
+   silently destroys the user's memory and sessions, and the user has never seen
+   the folder to know what was in it. The exposure window is the whole time the
+   app is connected, not a rare edge case.
 2. **Privacy is not actually lost by moving to `drive.file`.** `drive.file` is a
    **non-sensitive** scope granting access only to files the user opens with the
    app or shares via the Picker. Google recommends it over restricted scopes
@@ -202,10 +257,11 @@ Evidence-based reasoning:
    covered by `drive.file` — the app does **not** need full `drive`.
    Source: <https://developers.google.com/workspace/drive/api/guides/api-specific-auth>
 3. **Option B with `drive.file` keeps the narrow-permission story** while fixing
-   the uninstall data-loss and user-invisibility problems.
-4. **Cost, stated honestly:** this is a real migration with real risk — two
-   storage locations cannot interoperate, and it needs its own gated slice with
-   a migration path for existing appDataFolder content. It is not a small change.
+   the access-revocation data-loss and user-invisibility problems.
+4. **Cost, stated honestly:** this is a real migration with real risk, and it needs
+   its own gated slice with a migration path for existing appDataFolder content.
+   Full proposal, with verification and rollback gates:
+   `docs/plans/2026-10-03-drive-visible-folder-migration-proposal.md`.
 
 **Option C is rejected for now** as premature: it carries option A's hidden
 storage plus a second format to version, before the MVP has a single real-device
@@ -215,6 +271,28 @@ restore. Revisit if a user reports they want manual export.
 the highest-value decision on the board, because §3.1 means the current master
 plan instructs the next agent to build something that contradicts both the code
 and the privacy direction.
+
+### 5.1 What "cannot interoperate" actually means — corrected
+
+I previously wrote that the two locations "cannot interoperate." That conflated a
+**Google API limitation** with a limitation in **our own implementation**. Only
+the first is a platform fact:
+
+- **Google API limits (not our choice):** you cannot **move** files out of
+  `appDataFolder` between storage locations, and cannot trash or share files
+  inside it (`notSupportedForAppDataFolderFiles`).
+- **What the API allows:** **reading** every appDataFolder file normally, and
+  **creating** files in an ordinary visible folder. So migration is
+  technically achievable — copy, not move.
+- **Our limitation (fixable):** Muster has **no code today** to write or read the
+  bundle from a visible folder. The bundle is encrypted and manifest-backed with
+  `SUBSET_ROOT_FILES` and a manifest digest, and restore currently discovers
+  entries from the appData folder by id. A visible-folder read/write path must be
+  built.
+
+Stated accurately: *Google permits read-and-copy; Muster lacks the visible-folder
+code path and would need manifest/id addressing to work in both locations during
+migration.* That is build work, not a platform impossibility.
 
 ## 6. Fresh-device restore — OPEN, with a reproducible procedure
 

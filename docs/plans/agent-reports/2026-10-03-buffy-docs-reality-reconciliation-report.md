@@ -110,6 +110,42 @@ preserved without the data-loss path.
 stated honestly: real migration, two storage locations cannot interoperate, needs
 its own gated slice. Option C rejected as premature.
 
+## 5b. Two corrections to my own earlier findings
+
+Both imprecise; both now corrected in the reconciliation.
+
+**"Uninstall"** — I wrote that a user "who uninstalls and reinstalls Muster can
+permanently lose memory and sessions." Wrong emphasis. Google's exact wording is
+"deleted when a user uninstalls your app **from their My Drive**". Deleting the
+local desktop app does **not** delete it; reinstalling on a new machine does
+**not** delete it — that is what the folder is for. The real trigger is
+**removing Muster's Drive access from My Drive** (or manual deletion). The
+corrected risk is sharper: an **ordinary account-cleanup gesture** silently
+destroys memory and sessions, invisibly, with the exposure window lasting the
+whole time the app is connected.
+
+**"Cannot interoperate"** — I wrote that the two locations cannot interoperate.
+That conflated a **Google API limit** (cannot *move* files out of appDataFolder)
+with **our own gap** (no visible-folder read/write path exists). Google permits
+*reading* appDataFolder and *creating* files elsewhere, so migration is
+achievable. The limitation is ours to build, not a platform impossibility.
+
+## 5c. Second site of the wrong comment — found by the grep I recommended
+
+Running my own suggested `git grep` surfaced the same error in
+**`server/google-auth.ts:13`**, which claims **"`drive.*` is RESTRICTED"**. That
+is false — `drive.appdata`, `drive.appfolder`, `drive.install` and `drive.file`
+are non-sensitive.
+
+This one matters more than site 1, because it argues **against** the owner's
+preferred direction: it implies the visible-folder option (`drive.file`) would
+drag Muster into restricted-scope verification. Left uncorrected, the comment
+would block the change. The handoff now covers both sites, with a nuance so the
+fix is not itself wrong: `GOOGLE_DRIVE_SCOPE` at `google-auth.ts:20` really is
+the restricted `auth/drive`, used as a namespace prefix for a drive-scope
+predicate. **That predicate is correct and must not change** — only the prose
+about sensitivity is wrong.
+
 ## 6. Recheck at finalize
 
 - `origin/main` = **`3067009`** — `git log 3067009..origin/main` → **no commits**.
@@ -171,6 +207,19 @@ paternalistic (F2)? Is F1 corrected without a decision being smuggled in? Does
 the reconciliation still match Muster's vision, or is it redundant internal
 hygiene earning nothing? Do its citations still resolve at then-current `main`?
 Has any agent meanwhile claimed a Drive-storage task and duplicated it?
+
+## 10b. Documents added in this revision
+
+- `docs/plans/2026-10-03-drive-visible-folder-migration-proposal.md` — migration
+  proposal for the owner's preferred direction (visible, user-owned Drive via
+  `drive.file`): permissions, fresh-device discovery, encrypted backup handling,
+  5-phase copy-then-verify migration with per-phase gates, interrupted-migration
+  recovery, rollback, and 8 verification items (V1–V8). **Existing appData
+  backups are never deleted** — rollback works precisely because appData is never
+  modified.
+- `docs/plans/2026-10-03-handoff-drive-appdata-comment.md` — the incorrect OAuth
+  comment handed to the `server/auth.ts` owner, **kept separate** from storage
+  behaviour changes, with official sources and suggested replacement text.
 
 ## 11. Next handoff
 
