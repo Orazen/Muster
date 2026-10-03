@@ -37,20 +37,8 @@ concurrency:
 
 env:
   # Fresh, runner-owned output for every run. The packaging script fences writes to
-  # the workspace by default, so this is the one recorded scope decision that relaxes
-  # it: ALLOW_OUTSIDE_WORKSPACE=1 permits a RUNNER_TEMP output directory.
-  #
-  # RECORDED SCOPE DECISION (Codex asked for this to be explicit rather than a silent
-  # weakening): the relaxation is to LOCATION ONLY. Ownership is unaffected — the
-  # script still refuses any bundle it cannot prove it created, still rejects a
-  # symlinked marker or bundle path, and still refuses a bundle whose executable
-  # digest does not match its marker. The refusal fixtures below re-assert every one
-  # of those WITH the override set, so a future change cannot quietly widen it.
-  #
-  # If a location relaxation is ever judged unacceptable, the alternative is to drop
-  # the override and package into the checkout; that is a scope amendment, not a
-  # silent edit.
-  ALLOW_OUTSIDE_WORKSPACE: '1'
+  # the workspace by default, so the packaging step below makes the one recorded
+  # scope decision that relaxes location only.
   BUNDLE_OUT: ${{ runner.temp }}/muster-mac-bundle
 
 jobs:
@@ -207,6 +195,9 @@ jobs:
       - name: Build, package, sign ad-hoc and verify
         run: ./macos/Scripts/package-mac-app.sh
         env:
+          # Recorded scope decision: relax location only for the package output.
+          # Ownership checks and all refusal fixtures remain enforced.
+          ALLOW_OUTSIDE_WORKSPACE: '1'
           OUT_DIR: ${{ env.BUNDLE_OUT }}
 
       - name: Refuse entitlements, distribution signatures, release artifacts or extra libraries
