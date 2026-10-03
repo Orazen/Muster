@@ -5,7 +5,7 @@
 // credential cannot authenticate; a restart (fresh registry over the same
 // file) cannot resurrect revoked authority. The wire behavior is pinned by
 // installation-harness.test.ts.
-import { chmodSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -434,5 +434,94 @@ describe("durable installation generation", () => {
     // A row whose generation cannot be read is not silently treated as 0,
     // which would re-admit an already-consumed generation.
     expect(registry().beginTransition(created.record.id, 2_000)).toBeNull();
+  });
+});
+
+/** Reentrancy. A commit hands its caller the DRAFT row, so a caller that calls
+ * back into the registry from inside that callback starts a second commit
+ * while the first is still holding a draft cloned from the older state. The
+ * two cannot both be right: the outer commit persists and adopts its own
+ * draft afterwards, which silently erases whatever the nested one wrote.
+ *
+ * The dangerous half is not the lost edit, it is the silence. A nested
+ * revoke that disappears leaves a caller believing the machine was
+ * revoked, so these cases assert the PERSISTED state after a restart, not
+ * just a return value. */
+describe("reentrant commit cannot overwrite a nested commit", () => {
+  it("a nested generation advance is not erased by the commit that started it", () => {
+    const store = registry();
+    const created = registered(store, BASE, 1_000);
+    const outer = store.beginTransition(created.record.id, 1_100)!;
+
+    let nested: number | null = null;
+    const applied = store.commitTransition(created.record.id, outer.generation, () => {
+      // Re-enter while the outer draft is still open.
+      nested = store.beginTransition(created.record.id, 1_200)?.generation ?? null;
+    });
+
+    // Whichever way the race is resolved, the nested advance must not vanish:
+    // if it reports a generation, the file has to carry that generation, and
+    // an outer "true" must not mean the nested write was rolled back.
+    if (nested !== null) {
+      const persisted = registry().beginTransition(created.record.id, 1_300);
+      // The nested value (2) is still on disk, so the next mint is 3 — not the
+      // 2 we would get if the nested advance had been overwritten.
+      expect(persisted?.generation).toBe(3);
+    } else {
+      // Refused nesting: the outer commit must then report honestly.
+      expect(applied).toBe(false);
+    }
+  });
+
+  it("a nested revoke survives, and survives a restart", () => {
+    const store = registry();
+    const created = registered(store, BASE, 1_000);
+    const outer = store.beginTransition(created.record.id, 1_100)!;
+
+    const revokedInside = store.commitTransition(created.record.id, outer.generation, () => {
+      store.revoke("owner-1", created.record.id, 1_200);
+    });
+    // If the outer commit returned true it is asserting it adopted its own
+    // draft; a true alongside a vanished revocation would be the exact lie
+    // this case exists to catch.
+    if (revokedInside) {
+      // SAFETY: the registry file is written by this module's own persist()
+      // with a fixed top-level shape {version, installations}; the assertion
+      // names only the field this case reads.
+      const rows = JSON.parse(readFileSync(registryPathFor(directory), "utf8")) as {
+        installations: Array<{ id: string; revokedAt: number | null }>;
+      };
+      expect(rows.installations.find((row) => row.id === created.record.id)?.revokedAt).toBe(1_200);
+    }
+
+    // The revocation is durable either way: a fresh registry must not be able
+    // to authenticate a credential for a row that was revoked in-process.
+    const restarted = registry();
+    expect(restarted.authenticate(created.credential!, 1_500)).toBeNull();
+    expect(restarted.beginTransition(created.record.id, 1_600)).toBeNull();
+  });
+
+  it("a nested mutation never leaves memory disagreeing with the file", () => {
+    const store = registry();
+    const created = registered(store, BASE, 1_000);
+    const outer = store.beginTransition(created.record.id, 1_100)!;
+    store.commitTransition(created.record.id, outer.generation, () => {
+      store.beginTransition(created.record.id, 1_200);
+    });
+
+    // Compare against a SNAPSHOT of the file, not the live one: minting twice
+    // against the same path would let the first mint change what the second
+    // reads, and the two numbers would then differ for a reason that has
+    // nothing to do with the defect under test.
+    const snapshot = mkdtempSync(join(tmpdir(), "muster-installation-snapshot-"));
+    try {
+      copyFileSync(registryPathFor(directory), registryPathFor(snapshot));
+      const fromFile = new InstallationRegistry(registryPathFor(snapshot)).beginTransition(created.record.id, 1_700);
+      const fromMemory = store.beginTransition(created.record.id, 1_700);
+      // The number this process mints must equal the number the file mints.
+      expect(fromMemory?.generation).toBe(fromFile?.generation ?? null);
+    } finally {
+      rmSync(snapshot, { recursive: true, force: true });
+    }
   });
 });

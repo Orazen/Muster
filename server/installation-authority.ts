@@ -155,6 +155,11 @@ export class InstallationRegistry {
   private path: string;
   private file: RegistryFile;
   private durable: boolean;
+  /** Bumped whenever this.file is adopted from disk. It exists so a commit
+   * can notice that a NESTED commit landed while its draft was open, and
+   * refuse rather than overwrite. In-memory only, and deliberately not part
+   * of the persisted row: nothing durable depends on it. */
+  private revision = 0;
 
   constructor(path: string, now = Date.now()) {
     this.path = path;
@@ -184,13 +189,30 @@ export class InstallationRegistry {
    * Copying also keeps the returned record honest: adopting the draft means
    * the object handed back is the one that is on disk, not the pre-commit
    * object the caller was already holding.
-   */
+   *
+   * REENTRANCY. `change` runs while this draft is open and the caller is
+   * handed it, so a callback that calls back into the registry starts a
+   * second commit in the middle of this one. That nested commit persists and
+   * adopts its own draft; if this one then persisted its older draft, it would
+   * erase the nested write and still report success. The observable damage is
+   * not the lost edit but the silence: a revoke issued from inside a
+   * transition vanished from the file while the transition reported `true`, so
+   * the installation stayed live and the caller believed otherwise.
+   *
+   * So the state this draft was built from is remembered, and the write is
+   * skipped if that state moved underneath us. The nested commit already
+   * reached disk, so refusing here loses nothing and keeps the more
+   * important of the two — a revocation — instead of letting an in-flight
+   * edit roll it back. The caller is told it did not apply. Nothing failed to
+   * write, so durability is untouched. */
   private commit(change: (draft: RegistryFile) => void): boolean {
+    const base = this.revision;
     const draft: RegistryFile = {
       version: this.file.version,
       installations: this.file.installations.map((row) => ({ ...row, capabilities: [...row.capabilities] })),
     };
     change(draft);
+    if (this.revision !== base) return false;
     if (!persist(this.path, draft)) {
       // The change is discarded whole. `this.file` still describes the last
       // durable state, so a caller that retries changes nothing it did not mean to.
@@ -198,6 +220,7 @@ export class InstallationRegistry {
       return false;
     }
     this.file = draft;
+    this.revision += 1;
     this.durable = true;
     return true;
   }
