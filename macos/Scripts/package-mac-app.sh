@@ -4,7 +4,7 @@
 #
 # This is NOT a release packaging script. It exists because macos/ is a SwiftPM
 # package whose only product is a bare Mach-O executable, so there is no bundle to
-# launch during native development. It deliberately:
+# launch during development. It deliberately:
 #
 #   * signs with an AD-HOC identity (codesign -s -) - never Developer ID
 #   * does NOT notarize, staple, upload, publish or write any feed
@@ -12,13 +12,31 @@
 #   * NEVER launches the bundle
 #   * touches no GitHub Actions workflow
 #
+# SAFETY MODEL - this script deletes exactly one directory, so that one deletion is
+# fenced in three ways:
+#
+#   1. CONTAINMENT. OUT_DIR and SCRATCH_PATH must resolve (symlinks followed) to
+#      paths inside the workspace. A path that escapes - directly or through a
+#      symlink - is refused. Override only with ALLOW_OUTSIDE_WORKSPACE=1, and the
+#      ownership check below still applies even then.
+#   2. NO SYMLINKS AT THE TARGET. If the output directory or the bundle path is
+#      itself a symlink, the script refuses rather than following it.
+#   3. OWNERSHIP MARKER. A sibling file, OUT_DIR/.muster-local-dev-bundle, records
+#      the absolute path of the bundle this script built. Only a bundle named in a
+#      matching marker is ever removed. A pre-existing directory at the same path
+#      is left untouched and the run fails, so an unrelated bundle cannot be
+#      destroyed.
+#
+#      The marker is deliberately a SIBLING of the bundle and never a file inside
+#      it. codesign seals every file under Contents/, so a marker placed in the
+#      bundle would make signing fail outright with "code object is not signed at
+#      all". The marker survives a rebuild because only the .app is removed.
+#
 # Usage:
 #   macos/Scripts/package-mac-app.sh
 #   CONFIG=debug macos/Scripts/package-mac-app.sh
-#   OUT_DIR=/tmp/whatever macos/Scripts/package-mac-app.sh
-#
-# Outputs are confined to the build scratch path and OUT_DIR, both overridable, so
-# nothing is written outside the workspace.
+#   OUT_DIR=macos/.build/local-app-bundle macos/Scripts/package-mac-app.sh
+#   ALLOW_OUTSIDE_WORKSPACE=1 OUT_DIR=/tmp/dev macos/Scripts/package-mac-app.sh
 
 set -euo pipefail
 
@@ -34,27 +52,113 @@ PRODUCT="MusterMac"
 CONFIG="${CONFIG:-release}"
 SCRATCH_PATH="${SCRATCH_PATH:-${MACOS_DIR}/.build}"
 OUT_DIR="${OUT_DIR:-${SCRATCH_PATH}/local-app-bundle}"
-APP="${OUT_DIR}/MusterMacDev.app"
-CONTENTS="${APP}/Contents"
+ALLOW_OUTSIDE_WORKSPACE="${ALLOW_OUTSIDE_WORKSPACE:-0}"
 
-INFO_PLIST_SRC="${MACOS_DIR}/Resources/Info.plist"
-ENTITLEMENTS="${MACOS_DIR}/Resources/MusterMac.entitlements"
+MARKER_FILE=".muster-local-dev-bundle"
+MARKER_HEADER="created-by macos/Scripts/package-mac-app.sh - safe to replace"
 
 step() { printf '\n=== %s\n' "$1"; }
 fail() { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
+
+INFO_PLIST_SRC="${MACOS_DIR}/Resources/Info.plist"
+ENTITLEMENTS="${MACOS_DIR}/Resources/MusterMac.entitlements"
 
 for f in "${INFO_PLIST_SRC}" "${ENTITLEMENTS}"; do
   [ -f "$f" ] || fail "missing required file: $f"
 done
 [ -f "${REPO_ROOT}/package.json" ] || fail "package.json not found at ${REPO_ROOT}"
+command -v python3 >/dev/null || fail "python3 is required for path resolution"
+
+# --- SAFETY 1: resolve, follow symlinks, enforce containment ------------------
+step "Safety: resolve output paths and enforce workspace containment"
+
+WORKSPACE_REAL="$(python3 -c 'import os,sys;print(os.path.realpath(os.path.abspath(sys.argv[1])))' "${REPO_ROOT}")"
+
+# Validate both caller-influenced paths in one place, so the rule is stated once.
+python3 - "${WORKSPACE_REAL}" "${SCRATCH_PATH}" "${OUT_DIR}" "${ALLOW_OUTSIDE_WORKSPACE}" <<'PY'
+import os, sys
+
+workspace, scratch, out, allow = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+workspace = os.path.realpath(workspace)
+problems = []
+
+def resolve(p):
+    return os.path.realpath(os.path.abspath(p))
+
+def inside(p):
+    return p == workspace or p.startswith(workspace + os.sep)
+
+for label, raw in (("SCRATCH_PATH", scratch), ("OUT_DIR", out)):
+    real = resolve(raw)
+    # A symlink anywhere in the chain that lands outside the workspace is an escape.
+    if not inside(real) and allow != "1":
+        problems.append(
+            f"{label} escapes the workspace\n"
+            f"    configured : {raw}\n"
+            f"    resolved   : {real}\n"
+            f"    workspace  : {workspace}\n"
+            f"  A symlink in that path may be redirecting it. Use a path inside the\n"
+            f"  workspace, or set ALLOW_OUTSIDE_WORKSPACE=1 to accept it deliberately."
+        )
+    # A symlink AT the final component is refused outright, even if it stays inside.
+    if os.path.islink(raw):
+        problems.append(
+            f"{label} is a symlink and will not be followed: {raw} -> {os.readlink(raw)}"
+        )
+    print(f"  {label:<13} {raw}")
+    print(f"  {'':<13} -> {real}{'  (OUTSIDE WORKSPACE, allowed)' if not inside(real) else ''}")
+
+if problems:
+    print("\nERROR: refusing to continue:\n", file=sys.stderr)
+    for p in problems:
+        print("  - " + p, file=sys.stderr)
+    sys.exit(1)
+PY
+
+# --- SAFETY 2 and 3: no symlink at the target, ownership marker ---------------
+APP="${OUT_DIR}/MusterMacDev.app"
+CONTENTS="${APP}/Contents"
+
+step "Safety: refuse symlinked target, require ownership marker before replacing"
+
+[ ! -L "${OUT_DIR}" ] || fail "OUT_DIR is a symlink and will not be followed: ${OUT_DIR}"
+if [ -L "${APP}" ]; then
+  fail "refusing: ${APP} is a symlink -> $(readlink "${APP}"). Move it aside; this script does not write through symlinks."
+fi
+
+MARKER_PATH="${OUT_DIR}/${MARKER_FILE}"
+APP_ABS="$(python3 -c 'import os,sys;print(os.path.realpath(os.path.abspath(sys.argv[1])))' "${APP}")"
+
+if [ -e "${APP}" ]; then
+  [ -d "${APP}" ] || fail "refusing: ${APP} exists and is not a directory. Move it aside."
+  if [ ! -f "${MARKER_PATH}" ]; then
+    fail "refusing to remove ${APP}
+  It exists but there is no ownership marker at ${MARKER_PATH}, so this script did
+  not create it. The directory is left completely untouched. Move it aside, or
+  choose another OUT_DIR, and re-run."
+  fi
+  MARKED_PATH="$(sed -n '2p' "${MARKER_PATH}" 2>/dev/null || true)"
+  if [ "${MARKED_PATH}" != "${APP_ABS}" ]; then
+    fail "refusing to remove ${APP}
+  The marker at ${MARKER_PATH} names a different bundle:
+    marked : ${MARKED_PATH:-<empty>}
+    actual : ${APP_ABS}
+  Refusing rather than deleting something this script cannot prove it created."
+  fi
+  printf '  marker matches this bundle - safe to replace: %s\n' "${APP_ABS}"
+else
+  printf '  no existing bundle at %s\n' "${APP}"
+fi
 
 step "Inputs"
 printf '  package path : %s\n' "${MACOS_DIR}"
+printf '  workspace    : %s\n' "${WORKSPACE_REAL}"
 printf '  product      : %s\n' "${PRODUCT}"
 printf '  config       : %s\n' "${CONFIG}"
 printf '  scratch path : %s\n' "${SCRATCH_PATH}"
 printf '  out dir      : %s\n' "${OUT_DIR}"
 printf '  bundle       : %s\n' "${APP}"
+printf '  ad-hoc sign  : yes   |   launch: never\n'
 
 step "Lint the committed plists (before substitution)"
 plutil -lint "${INFO_PLIST_SRC}"
@@ -79,6 +183,14 @@ mkdir -p "${CONTENTS}/MacOS" "${CONTENTS}/Resources"
 install -m 0755 "${BUILT_BINARY}" "${CONTENTS}/MacOS/${PRODUCT}"
 printf 'APPL????' > "${CONTENTS}/PkgInfo"
 install -m 0644 "${INFO_PLIST_SRC}" "${CONTENTS}/Info.plist"
+# Ownership marker lives OUTSIDE the bundle: codesign seals every file under
+# Contents/, so a file placed inside the bundle would break signing. This sibling
+# survives a rebuild because only the .app directory is removed.
+{
+  printf '%s\n' "${MARKER_HEADER}"
+  printf '%s\n' "${APP_ABS}"
+} > "${MARKER_PATH}"
+printf '  ownership marker: %s\n' "${MARKER_PATH}"
 
 step "Stamp the version from package.json"
 VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "${REPO_ROOT}/package.json")"
@@ -114,6 +226,8 @@ otool -L "${CONTENTS}/MacOS/${PRODUCT}"
 
 step "Verify: entitlements actually applied"
 codesign -d --entitlements - "${APP}" 2>/dev/null | tr -d '\0'
+ENT_KEYS="$(codesign -d --entitlements - "${APP}" 2>/dev/null | grep -c '<key>' || true)"
+printf '  entitlement keys requested: %s\n' "${ENT_KEYS}"
 codesign -dvv "${APP}" 2>&1 | grep -E 'Identifier|TeamIdentifier|Signature|CodeDirectory' || true
 
 step "Verify: no distribution artifacts leaked into the bundle"

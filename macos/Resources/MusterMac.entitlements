@@ -3,61 +3,62 @@
 <!--
   Local DEVELOPMENT entitlements for the native Mac target.
 
-  RULE APPLIED HERE: a permission and an entitlement are different things, and a
-  privacy usage description is not an entitlement. Only capabilities the code
-  actually exercises are requested. Each omission below is deliberate.
+  REQUESTED SET: EMPTY. This bundle asks for no entitlement at all, and that is a
+  decision rather than an oversight. Each candidate is listed with why it is absent.
 
   Companion file: macos/Resources/Info.plist
   Built by:       macos/Scripts/package-mac-app.sh (ad-hoc identity, `codesign -s -`)
+
+  NOTE ON A PREVIOUS REVISION
+  An earlier revision of this file requested exactly one entitlement,
+  com.apple.security.get-task-allow, on the grounds that it is what Xcode attaches
+  to a local build so a debugger can attach. That has been REMOVED. This slice has
+  no explicit debugging requirement, and the honest position is that the
+  entitlement was not demonstrably necessary: this binary is ad-hoc signed WITHOUT
+  hardened runtime, so debugger attach can work without it, and nothing in the
+  slice depends on debugging. Asserting necessity would have been overclaiming.
+  Deleting the key pair is the whole fix if a future slice adds a real debugging
+  requirement and documents it.
+
+  CANDIDATES CONSIDERED, ALL ABSENT:
+
+  com.apple.security.get-task-allow
+    Debugger attachment. No explicit debugging requirement exists for this slice.
+
+  com.apple.security.app-sandbox
+    The target writes under the user's home, reaches a caller-supplied base URL
+    over HTTP, and uses the login Keychain via SessionKeychain.swift. Sandboxing
+    would require further entitlements for all three and would change the native
+    app's security posture for no development benefit.
+
+  com.apple.security.network.client / .network.server
+    Entitlement-only when sandboxed. Unsandboxed processes need no network
+    entitlement; MusterTransport's GET-only probe works without one.
+
+  keychain-access-groups
+    SessionKeychain uses the default access group of an unsandboxed app, which
+    needs no declared group. Declaring one would place development credentials in a
+    shared group - the opposite of what a development bundle should do.
+
+  com.apple.security.cs.allow-jit, com.apple.security.cs.allow-unsigned-executable-memory
+    Nothing in this Swift target generates or executes code at runtime, so there is
+    no JIT and no unsigned executable memory to permit. The shipped Electron app
+    needs both because Chromium's V8 does; copying that pair here would grant an
+    exception this binary never uses.
+
+  com.apple.security.cs.disable-library-validation
+    The Electron app needs this to load its own unsigned helper bundles. This binary
+    loads no unsigned plugin or bundle - only system frameworks and a statically
+    linked CompanionCore - so the exception is unnecessary and would weaken library
+    validation for no reason.
+
+  com.apple.security.device.audio-input,
+  com.apple.security.automation.apple-events, and any TCC capability
+    Entitlement-only under the sandbox. The code requests no microphone, screen
+    capture, accessibility or Apple Events access at all, so there is no capability
+    to declare. The matching NS*UsageDescription strings are absent from Info.plist
+    for the same reason.
 -->
 <plist version="1.0">
-<dict>
-	<!--
-	  The ONE entitlement requested, and the only one Xcode itself attaches to a
-	  locally built bundle: it lets a debugger attach to the process. This is a
-	  development convenience for a bundle that exists to be run locally and
-	  debugged - it is not a TCC permission, and it grants the user no access to
-	  anything. It is signed with an ad-hoc identity, so it confers no trust.
-
-	  DELIBERATELY ABSENT, each justified:
-
-	  com.apple.security.app-sandbox
-	    Not sandboxed. The target writes under the user's home, reaches a
-	    caller-supplied base URL over HTTP, and uses the login Keychain via
-	    SessionKeychain.swift. Sandboxing would require further entitlements for
-	    all three, and would change the security posture of the native app for no
-	    development benefit. A local development bundle is the one case where
-	    running unsandboxed is appropriate.
-
-	  com.apple.security.network.client / .network.server
-	    Entitlement-only when sandboxed. Unsandboxed processes need no network
-	    entitlement; MusterTransport's GET-only probe works without one.
-
-	  keychain-access-groups
-	    SessionKeychain uses the default access group of an unsandboxed app, which
-	    needs no declared group. Declaring one would place dev credentials in a
-	    shared group - the opposite of what a development bundle should do.
-
-	  com.apple.security.cs.allow-jit, .allow-unsigned-executable-memory
-	    Nothing in this Swift target generates or executes code at runtime, so
-	    there is no JIT and no unsigned executable memory to permit. The shipped
-	    Electron app needs both because Chromium's V8 requires them; copying that
-	    pair here would grant an exception this binary never uses.
-
-	  com.apple.security.cs.disable-library-validation
-	    The Electron app needs this to load its own unsigned helper bundles. This
-	    binary loads no unsigned plugin or bundle - only system frameworks and a
-	    statically linked CompanionCore - so the exception is unnecessary and
-	    would weaken library validation for no reason.
-
-	  com.apple.security.device.audio-input,
-	  com.apple.security.automation.apple-events, and any TCC capability
-	    Entitlement-only under the sandbox. The code requests no microphone,
-	    screen capture, accessibility or Apple Events access at all, so there is
-	    no capability to declare. The matching NS*UsageDescription strings are
-	    absent from Info.plist for the same reason.
-	-->
-	<key>com.apple.security.get-task-allow</key>
-	<true/>
-</dict>
+<dict/>
 </plist>
