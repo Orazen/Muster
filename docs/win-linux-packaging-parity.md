@@ -81,7 +81,14 @@ Windows has a related but *different* guard, and it is a good one. Its gate runs
 
 So Windows permits unsigned builds too, but it refuses to ship one that lies about it. **macOS has no equivalent consistency check.**
 
-The Windows hazard is documented in `electron-builder.yml` and is worth repeating because it is easy to trip: *"Do NOT set publisherName without actually signing, or every update is rejected as untrusted."* That is a silent, total auto-update failure — the app stops updating for every user, with no error at build time.
+The Windows hazard is documented in `electron-builder.yml` and is worth repeating because it is easy to trip. The comment is line-wrapped in the file; it reads in full: *"Do NOT set publisherName without actually signing, or every update is rejected as untrusted; and once signed, keep the cert subject stable (or list both old and new in publisherName) or you strand already-installed users."* That is a silent, total auto-update failure — the app stops updating for every user, with no error at build time.
+
+**A smaller asymmetry between the two macOS jobs, found while verifying this.** The signature-gate conditions differ:
+
+- arm64 job: `if: ${{ env.APPLE_CERTIFICATE != '' }}` — runs whenever a certificate exists, **including during a dry run**.
+- x64 / Intel job: `if: ${{ success() && needs.prepare.outputs.dry_run == 'false' && env.APPLE_CERTIFICATE != '' && env.ASC_KEY_ID != '' && env.ASC_ISSUER_ID != '' && env.ASC_KEY_CONTENT != '' }}` — additionally requires a **real release** and the **full App Store Connect key set**.
+
+So the Intel build is signature-verified **less often** than the arm64 build. Practical exposure is limited to the "certificate present, ASC key absent" case, where a real release could ship an x64 build whose signature was never checked.
 
 ### Gap C — Windows ships unsigned, by design **[VERIFIED]**
 
