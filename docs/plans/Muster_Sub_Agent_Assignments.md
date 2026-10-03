@@ -4,6 +4,12 @@ This file assigns the first focused work packages for the Muster MVP.
 
 All agents must use `docs/plans/Muster_MVP_Master_Plan.md` as the source of truth.
 
+All agents must also follow `docs/plans/Muster_Sub_Agent_Operating_Loop.md` for the full loop:
+
+```txt
+Goal -> Read docs -> Research -> Plan -> Build -> Verify -> Commit/PR -> Report -> CTO Review
+```
+
 ## Operating Rule
 
 Do not expand the product scope.
