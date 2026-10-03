@@ -35,6 +35,89 @@ Companion to [`docs/mac-release.md`](./mac-release.md) — that document covers 
 
 # Target A — Shipped Electron installer
 
+## Authoritative inventory — every total derived from the rows below
+
+| | Rows | PASS | Observations | NOT RUN |
+|---|---|---|---|---|
+| **Target A** — shipped Electron installer | 52 | 10 | 2 | 40 |
+| **Target B** — Swift development app | 4 | 0 | 0 | 4 |
+| **Total** | **56** | **10** | **2** | **44** |
+
+Observations are **not** passes: `A1.8` (ZIP channel carries no stapled ticket) and `A1.9` (shipped entitlements recorded) are notable results from checks that ran.
+
+| Test | Target | Environment required | Status | Blocker |
+|---|---|---|---|---|
+| `A1.1` SHA-256 of the arm64 ZIP vs published manifest | A — Electron | Any Mac + downloaded artifact | **PASS** | none — already executed |
+| `A1.2` sha512 of the ZIP vs latest-mac.yml | A — Electron | Any Mac + downloaded artifact | **PASS** | none — already executed |
+| `A1.3` Architecture of the shipped binary | A — Electron | Any Mac + downloaded artifact | **PASS** | none — already executed |
+| `A1.4` Bundle identity | A — Electron | Any Mac + downloaded artifact | **PASS** | none — already executed |
+| `A1.5` Code signature valid before trust | A — Electron | Any Mac + downloaded artifact | **PASS** | none — already executed |
+| `A1.6` Signature chains to a Developer ID | A — Electron | Any Mac + downloaded artifact | **PASS** | none — already executed |
+| `A1.7` Gatekeeper accepts the app | A — Electron | Any Mac + downloaded artifact | **PASS** | none — already executed |
+| `A1.8` Stapled ticket on the ZIP-delivered app | A — Electron | Any Mac + downloaded artifact | **OBSERVATION** | none — already executed |
+| `A1.8b` Stapled ticket on the DMG file | A — Electron | Any Mac + downloaded artifact | **PASS** | none — already executed |
+| `A1.9` Hardened runtime / entitlements | A — Electron | Any Mac + downloaded artifact | **OBSERVATION** | none — already executed |
+| `A1.10` Privacy usage strings shipped | A — Electron | Any Mac + downloaded artifact | **PASS** | none — already executed |
+| `A1.11` Update channel wired in-bundle | A — Electron | Any Mac + downloaded artifact | **PASS** | none — already executed |
+| `A2.1` DMG mounts and shows drag-to-Applications layout | A — Electron | Any Mac (read-only mount) | **NOT RUN** | authorisation to run only |
+| `A2.2` Copy to a test Applications path | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A2.3` Launch from the DMG vs from /Applications | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A3.1` First launch completes without a Gatekeeper block | A — Electron | Disposable macOS user (fresh TCC) | **NOT RUN** | account authorisation |
+| `A3.2` Microphone permission prompt appears and is honoured | A — Electron | Disposable macOS user (fresh TCC) | **NOT RUN** | account authorisation |
+| `A3.3` Screen Recording prompt appears and is honoured | A — Electron | Disposable macOS user (fresh TCC) | **NOT RUN** | account authorisation |
+| `A3.4` Accessibility prompt appears and is honoured | A — Electron | Disposable macOS user (fresh TCC) | **NOT RUN** | account authorisation |
+| `A3.5` Speech recognition prompt | A — Electron | Disposable macOS user (fresh TCC) | **NOT RUN** | account authorisation |
+| `A3.6` Denial of each permission does not crash or wedge th | A — Electron | Disposable macOS user (fresh TCC) | **NOT RUN** | account authorisation |
+| `A4.1` Email + password sign-in succeeds against production | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A4.2` Wrong password shows an error and does not establish | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A4.3` Session persists across an app restart | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A4.4` Sign-out clears the session | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A4.5` Google Sign-In is unavailable on macOS today | A — Electron | Disposable macOS user | **NOT RUN** | unverified — capability claim to settle |
+| `A5.1` Session credential survives quit/relaunch | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A5.2` Conversation history survives restart | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A5.3` Settings survive restart | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A5.4` Uninstall does not delete user data | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A5.5` Reinstall over an existing install preserves data | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A5.6` Uninstall then reinstall restores the previous sessi | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A6.1` Auto-update detects latest-mac.yml | A — Electron | Disposable macOS user + explicit old→new artifacts | **NOT RUN** | account + both versions |
+| `A6.2` Update applies and relaunches | A — Electron | Disposable macOS user + explicit old→new artifacts | **NOT RUN** | account + both versions |
+| `A6.3` Session survives the update | A — Electron | Disposable macOS user + explicit old→new artifacts | **NOT RUN** | account + both versions |
+| `A6.4` User data survives the update | A — Electron | Disposable macOS user + explicit old→new artifacts | **NOT RUN** | account + both versions |
+| `A6.5` Interrupted update leaves the app recoverable | A — Electron | Disposable VM | **NOT RUN** | VM provisioning — UNAUTHORISED |
+| `A6.6` Failed upgrade recovers | A — Electron | Disposable VM | **NOT RUN** | VM provisioning — UNAUTHORISED |
+| `A6.7` Manual DMG overwrite preserves user data | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A7.1` A user sees only their own account's restorable reco | A — Electron | Disposable macOS user + isolated Drive backend | **NOT RUN** | executor unassigned — Astra asked |
+| `A7.2` Installation-scoped records are not presented as per | A — Electron | Disposable macOS user + isolated Drive backend | **NOT RUN** | executor unassigned — Astra asked |
+| `A7.3` Excluded credential/grant items are disclosed, not s | A — Electron | Disposable macOS user + isolated Drive backend | **NOT RUN** | executor unassigned — Astra asked |
+| `A7.4` A restore that fails once can be retried | A — Electron | Disposable VM | **NOT RUN** | VM provisioning — UNAUTHORISED |
+| `A7.5` Interrupted restore does not destroy the current sta | A — Electron | Disposable VM | **NOT RUN** | VM provisioning — UNAUTHORISED |
+| `A7.6` Upgrading the app does not change what is restorable | A — Electron | Disposable VM | **NOT RUN** | VM provisioning — UNAUTHORISED |
+| `A8.1` Remove Muster.app | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A8.2` Keychain entries after uninstall | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A8.3` Reinstall and first launch | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A9.1` Session token is not stored in a world-readable file | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A9.2` Uninstalling does not silently destroy a recoverable | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A9.3` No provider key is readable from the UI | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `A9.4` No plaintext fallback for provider secrets | A — Electron | Disposable macOS user | **NOT RUN** | account authorisation |
+| `B1.1` swift build --package-path macos | B — Swift dev | Any Mac with Xcode | **NOT RUN** | not an installable release |
+| `B1.2` swift test --package-path macos | B — Swift dev | Any Mac with Xcode | **NOT RUN** | not an installable release |
+| `B1.3` Launch the Swift app for manual inspection | B — Swift dev | Any Mac with Xcode | **NOT RUN** | not an installable release |
+| `B1.4` Sign-in lifecycle behaves in the running app | B — Swift dev | Any Mac with Xcode | **NOT RUN** | not an installable release |
+
+### Derived roll-up
+
+| Environment | NOT RUN tests |
+|---|---|
+| Already executed — Target A `A1` | 12 executed |
+| Any Mac with Xcode, no account — `B1` | 4 |
+| Disposable macOS user, non-destructive | 27 |
+| Disposable macOS user + explicit old→new artifacts | 4 |
+| Disposable macOS user + isolated Drive backend | 3 |
+| **Disposable VM — UNAUTHORISED** | **5** |
+| **Total rows** | **56** |
+
+Superseded figures, for the record: an earlier revision said "37 remaining", which excluded `A2.1`–`A2.3` and the four `B1` rows. The derived NOT RUN count is **44**.
+
 ## A0. Artifact under test
 
 | Field | Value |
@@ -77,7 +160,7 @@ These are static checks on the extracted bundle. No install, no launch.
 | A1.6 | Signature chains to a Developer ID | Extracted bundle | Developer ID → Developer ID CA → Apple Root CA | ✅ **PASS** — `Developer ID Application: THARUN RAMAGIRI (7375K23WFU)`, `TeamIdentifier=7375K23WFU` | `codesign -dv --verbose=2` |
 | A1.7 | Gatekeeper accepts the app | Extracted bundle | `spctl --assess --type exec` accepts | ✅ **PASS** — **exit 0**, `source=Notarized Developer ID` | recorded |
 | A1.8 | Stapled ticket on the **ZIP-delivered app** | Extracted bundle | Ticket stapled | ❌ **NOT STAPLED** — `xcrun stapler validate` **exit 65** | recorded |
-| A1.8b | Stapled ticket on the **DMG file** | Download `Muster-1.23.3.dmg` | `stapler validate` on the DMG succeeds | ✅ **PASS — exit 0**, *"The validate action worked!"*; `spctl -a -t open --context context:primary-signature` → `accepted`, `source=Notarized Developer ID` | recorded |
+| A1.8b | Stapled ticket on the **DMG file** | Download `Muster-1.23.3.dmg` | `stapler validate` on the DMG succeeds | ✅ **PASS — `xcrun stapler validate Muster-1.23.3.dmg` exit 0**, *"The validate action worked!"* | recorded |
 | A1.9 | Hardened runtime / entitlements | Extracted bundle | Matches `hardenedRuntime: true` | ⚠️ **OBSERVED** — entitlements include `allow-jyld-environment-variables`, `allow-unsigned-executable-memory`, **`disable-library-validation`**, `device.audio-input` | `codesign -d --entitlements -` |
 | A1.10 | Privacy usage strings shipped | Extracted bundle | All four declared strings present | ✅ **PASS** — microphone, speech recognition, accessibility, screen capture all present with real text | `PlistBuddy` |
 | A1.11 | Update channel wired in-bundle | Extracted bundle | Generic provider, tokenless mirror | ✅ **PASS** — `provider: generic`, `url: https://muster.orazen.online/downloads`, `updaterCacheDirName: muster-updater` | `Contents/Resources/app-update.yml` |
@@ -86,7 +169,7 @@ These are static checks on the extracted bundle. No install, no launch.
 
 1. **A1.8 / A1.8b — now verified rather than asserted.** In revision 1 of this document I wrote that "the DMG is the stapled path" **without having tested it**. I have now tested it.
 
-   - **DMG channel is stapled.** `xcrun stapler validate Muster-1.23.3.dmg` → **exit 0, "The validate action worked!"** ✅
+   - **DMG channel is stapled.** `xcrun stapler validate Muster-1.23.3.dmg` → **exit 0, "The validate action worked!"** ✅. Separately, `spctl -a -t open --context context:primary-signature -v Muster-1.23.3.dmg` → `accepted`, `source=Notarized Developer ID`. Those are two commands on the **image**; the exec assessment in `A1.7` was run against the **mounted app**, a different target.
    - **ZIP channel is not.** The app extracted from the ZIP → `stapler validate` **exit 65** ❌
 
    This matches the documented scope limit in `release.yml`: the ZIP is never modified after electron-builder writes `latest-mac.yml`, because restapling into the ZIP would invalidate the feed hash and strand every installed Mac. The stapled artifact is the DMG.
@@ -131,9 +214,11 @@ These are static checks on the extracted bundle. No install, no launch.
 | A4.2 | Wrong password shows an error and does not establish a session | Error surfaced | *NOT RUN* | — |
 | A4.3 | Session persists across an app restart | Session restored without re-login | *NOT RUN* | — |
 | A4.4 | Sign-out clears the session | Signed out; next launch shows sign-in | *NOT RUN* | — |
-| A4.5 | **Google Sign-In is unavailable on macOS today** | Documented, not tested | See §A7 | — |
+| A4.5 | Google Sign-In on the shipped Electron build | Works, or fails cleanly | *NOT RUN* | — |
 
-> **A4.5 is a known product gap, recorded so it is not mistaken for a smoke failure.** The native Swift Mac path has no OAuth callback seam at all, and the Electron desktop path's Google/OTP support is a separate open item. A tester should not expect Google sign-in to work on macOS v1.23.3.
+**A4.5 corrected — my earlier row was wrong.** I had asserted Google Sign-In was unavailable on macOS, and justified it with the **native Swift** gap (no OAuth callback seam). That conflated two different targets. The shipped **Electron** build at `v1.23.3` already contains a desktop Google handoff (`src/components/GoogleSignIn.tsx`) and a server start endpoint (`server/index.ts`). Source presence does not prove installed success either, so the honest status is **NOT RUN / unverified** — not a capability claim in either direction.
+
+The **Swift** Google gap remains real and separate: the native Mac path has no `ASWebAuthenticationSession`, no URL scheme and no callback route. That is a statement about the Swift development target and is **not** evidence about the Electron installer. It is recorded here as context, not as a test outcome.
 
 ## A5. Persistence and user-data preservation — **[NOT RUN]**
 
@@ -285,6 +370,7 @@ for k in NSMicrophoneUsageDescription NSSpeechRecognitionUsageDescription \
          NSAccessibilityUsageDescription NSScreenCaptureUsageDescription; do
   /usr/libexec/PlistBuddy -c "Print $k" "$APP/Contents/Info.plist"
 done
+codesign -d --entitlements - "$APP" 2>/dev/null                # A1.9 entitlements
 cat "$APP/Contents/Resources/app-update.yml"                   # provider: generic
 
 # A1.8b  DMG channel stapling — validate the IMAGE, not the mounted app
@@ -324,12 +410,14 @@ The 37 behavioural tests need the app to actually **run**. Running it would touc
 
 **Conclusion and honest blocker.** The 37 tests stay **NOT RUN**. Nothing I can do from this session executes them safely, and I will not run the app against the user's real environment to make the checklist look complete.
 
+**Fresh per-user state is not a fresh OS.** A disposable macOS *account* gives a fresh login Keychain, fresh TCC grants and fresh `~/Library` — which is what the permission tests need. It does **not** give a clean OS image, so tests that assume never-before-seen machine state (a first-ever Gatekeeper assessment, an OS-level TCC reset, a clean update history) are **not** satisfied by an account alone. Those belong to the VM bucket. The earlier wording that called A2–A3 "VM only" while calling A3 "fresh-user TCC" contradicted itself; the split is now stated this way and the table above is the authority.
+
 **The two things that would unblock them, in order of cost:**
 
 1. **Authorise a separate macOS user account** for testing. Unblocks install, first launch, permissions, login, persistence, uninstall/reinstall and credential tests. TCC prompts will be genuinely fresh for that account.
 2. **Stand up a disposable macOS VM.** Unblocks the same set **plus** failed-upgrade recovery and cross-account data-isolation tests, because a VM can be destroyed and rebuilt between attempts — which is what a destructive restore/upgrade test actually needs.
 
-**Partial workaround available today, with no isolation:** the **upgrade test (A6) does not require deleting or reinstalling anything.** `v1.23.2` and `v1.23.3` are both published. In-place update testing exercises the real updater against a real install — which does touch the working installation, so it still needs authorisation, but it is a single reversible step rather than a destructive test.
+**The user's working installation is not a test target for this assignment.** A6 requires an isolated disposable macOS user and an explicit old→new artifact pair. `v1.23.2` and `v1.23.3` both exist, so the transition is available without publishing anything — but it must be exercised against an isolated install, never the owning user's. Rollback after a failed update is **unverified**, and `A6.5`/`A6.6` are explicitly destructive, so no characterisation of the upgrade path as reversible is warranted.
 
 ---
 
