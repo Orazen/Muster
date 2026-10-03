@@ -61,12 +61,14 @@ This runbook **describes** how a macOS release candidate is built, signed, notar
 
 | Artifact | arm64 (Apple silicon) | x64 (Intel) |
 |---|---|---|
-| **A — Electron** | **Built, signed, notarized and shipped by CI** [VERIFIED, `release.yml` job `macos`] | `pnpm package:mac:x64` **script exists** [VERIFIED, `package.json`] but **[GAP] no CI job builds, signs, notarizes or ships it** |
+| **A — Electron** | **Built, signed, notarized and shipped by CI** [VERIFIED, `release.yml` job *"macOS arm64 (sign, notarize, staple)"*] | **Also built, signed, notarized and shipped by CI** [VERIFIED, `release.yml` job *"macOS x64 / Intel"* on `macos-15-intel`, with its own `release-native-smoke.mjs --platform darwin --arch x64` gate] |
 | **B — Swift** | Builds for the host/CI architecture (`macos-15` = arm64) [VERIFIED] | Not produced; no universal binary configured |
 
 **[VERIFIED]** `electron-builder.yml`'s `mac:` block deliberately sets **no `arch`**, so the CLI flag (`--arm64` / `--x64`) is the only architecture source. The file comments that an explicit arch list previously caused both architectures to build and land on the **same** `Muster-${version}.dmg` filename, with the second silently overwriting the first. Any change here must preserve that property.
 
-**Practical statement of support:** as the repository stands, **only Apple-silicon macOS has a release path.** Intel Macs have a local build script and no release artifact.
+**Practical statement of support:** both macOS architectures have a signed, notarized release path, and `v1.23.3` shipped both (`Muster-1.23.3.dmg` for arm64, `Muster-1.23.3-intel.dmg` for x64). The DMG artifact name carries no architecture, so the x64 build overrides it via `-c.dmg.artifactName` on the command line — which is why the two DMGs have different names on the release.
+
+> **Correction to an earlier draft of this document.** It previously stated that Intel Macs had no release artifact. **That was wrong** — `release.yml` contains a dedicated *"macOS x64 / Intel"* job, and the x64 DMG is present in `v1.23.3`. The error came from reading only the first macOS job in the file.
 
 ---
 
@@ -281,12 +283,14 @@ A release candidate should be considered **not** fully verified until someone ru
 |---|---|---|
 | 1 | **Swift native app is not a distributable artifact** — no `.app`, no signing, no notarization, no packaging job | `ci.yml` builds/tests it; 0 packaging hits across all 5 workflows [VERIFIED] |
 | 2 | **Swift app has no `Info.plist` or entitlements** — no privacy usage strings | Only `electron/resources/speech-helper-Info.plist` and `ios/**` plists exist [VERIFIED] |
-| 3 | **Intel (x64) macOS has no release artifact** | Script exists; no CI job [VERIFIED] |
+| 3 | **Signing is optional and its absence fails no gate** — if the Apple secrets are unset, the *entire* Developer ID signature and hardened-runtime gate is skipped (`if: env.APPLE_CERTIFICATE != ''`) and an unsigned, un-notarized macOS build can publish silently | [VERIFIED, `release.yml`] |
 | 4 | **Released v1.23.3 does not contain current source** | 78 commits since tag; version not bumped [VERIFIED] |
 | 5 | **No installed-app or upgrade smoke test** | All checks are artifact/static [VERIFIED] |
 | 6 | **No documented rollback procedure** | Absent from `release.yml` [VERIFIED] |
 
-**Gap 3 has a second-order effect worth stating:** `electron-builder.yml` sets no `arch`, precisely so the CLI flag decides. If an x64 job were added, it must produce a **distinct** DMG filename — `artifactName` has no arch placeholder, and the file's own comment records that a previous attempt built both architectures onto the same name and silently overwrote one.
+**On the original gap 3 (Intel):** withdrawn as factually wrong — see the correction note in §1.2. The x64 job exists and ships. The DMG-name collision the config warns about is real but is avoided today by the `-c.dmg.artifactName` override on the x64 build command, not by the missing job.
+
+**Replacement concern, and it is the more interesting one:** macOS signing is *optional* and degrades silently, while `electron-builder.yml` documents a matching hazard for Windows — *"Do NOT set publisherName without actually signing, or every update is rejected as untrusted."* The Windows job at least gates that inconsistency in both directions. No equivalent gate exists for Apple secrets.
 
 ---
 
