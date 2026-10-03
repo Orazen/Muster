@@ -99,11 +99,15 @@ public struct MusterTransport: Sendable {
 
     // MARK: - Requests
 
-    private func request(_ method: String, _ path: String, body: [String: Any]? = nil, extraHeaders: [String: String] = [:]) throws -> URLRequest {
+    /// `query` is passed separately from `path` on purpose: assigning a
+    /// "path?key=value" string to `URLComponents.path` percent-encodes the `?`,
+    /// which reaches the server as `%3F` and silently drops the parameter.
+    private func request(_ method: String, _ path: String, query: [URLQueryItem] = [], body: [String: Any]? = nil, extraHeaders: [String: String] = [:]) throws -> URLRequest {
         guard var components = URLComponents(url: origin, resolvingAgainstBaseURL: false) else {
             throw MusterTransportError.badOrigin
         }
         components.path = path
+        if !query.isEmpty { components.queryItems = query }
         guard let url = components.url else { throw MusterTransportError.badOrigin }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
         request.httpShouldHandleCookies = false
@@ -186,8 +190,17 @@ public struct MusterTransport: Sendable {
 
     // MARK: - Reads
 
+    /// `messages` is the transcript page the caller wants. GET /api/bots only
+    /// returns the slim page when the client asks for it: omitting `?messages=`
+    /// makes the server hand back every bot's entire transcript with screen
+    /// captures inline as base64 PNGs, which for a long-running bot is megabytes
+    /// on every bootstrap and every refresh. The page size is therefore forwarded,
+    /// including `0`.
     public func roster(messages: Int) async throws -> Fleet {
-        try await send(request("GET", "/api/bots", extraHeaders: [:]), as: Fleet.self)
+        precondition(messages >= 0, "a transcript page is a non-negative count")
+        return try await send(
+          request("GET", "/api/bots", query: [URLQueryItem(name: "messages", value: String(messages))]),
+          as: Fleet.self)
     }
 
     public func threadMessages(threadId: String) async throws -> [Message] {

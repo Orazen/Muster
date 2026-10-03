@@ -212,6 +212,24 @@ final class LiveTransportSecurityTests: XCTestCase {
         XCTAssertEqual(error as? MusterTransportError, .redirectRefused, file: file, line: line)
     }
 
+    /// The server only returns the slim page when the client asks for it. Omitting
+    /// `?messages=` makes GET /api/bots hand back every bot's entire transcript with
+    /// screen captures inline as base64 PNGs, so a long-running bot's thread arrives
+    /// in megabytes. `roster(messages:)` takes a page size and must send it.
+    func testRosterSendsTheTranscriptPageItWasGiven() async throws {
+        let source = try await origin { _ in .reply(200, [:], Data(#"{"bots":[],"groups":[]}"#.utf8)) }
+        let transport = try transport(source)
+
+        _ = try await transport.roster(messages: 50)
+        XCTAssertEqual(source.received.last?.path, "/api/bots?messages=50",
+                       "roster must forward the page size; without ?messages the server returns every message with inline base64 screen captures")
+
+        // A caller that wants no transcript at all must be able to say so.
+        _ = try await transport.roster(messages: 0)
+        XCTAssertEqual(source.received.last?.path, "/api/bots?messages=0",
+                       "roster(messages: 0) must still send the parameter rather than falling back to the unpaginated shape")
+    }
+
     func testUnprotected307ControlForwardsPasswordAndCookieAcrossOrigins() async throws {
         let target = try await origin { _ in .reply(200, [:], Data("{}".utf8)) }
         let location = "http://localhost:\(target.port)/capture"
