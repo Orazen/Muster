@@ -4,6 +4,12 @@ Date: 2026-10-03
 
 This document defines how Muster agents communicate so they do not duplicate work or edit each other's files.
 
+Before choosing work, follow the [repository-first startup guide](guides/agent-repository-preflight.md).
+Verify the remote, fetch current main, preserve local changes, read the required
+documents and inspect GitHub claims. Include the reviewed revision in your claim.
+Use a separate task branch under the owner's current instruction; preserve
+existing file claims and shared-main integration ownership.
+
 ## 1. Core Rule
 
 Every agent must claim a narrow work item before starting.
@@ -34,6 +40,9 @@ AGENT CLAIM
 Agent:
 Task:
 Goal:
+Repository and checkout:
+Reviewed branch/commit:
+Task branch:
 Files I plan to touch:
 - ...
 
@@ -158,6 +167,12 @@ Risks/blockers:
 
 Recommended next action:
 - ...
+
+Next-day audit:
+- Owner:
+- Due date/time and timezone:
+- Source revision and scope:
+- Scheduling confirmation or pending handoff:
 ```
 
 ## 7. Conflict Rules
