@@ -9,100 +9,134 @@ Supersedes `docs/mac-smoke-recommended-setup.md`, which proposed `/Applications`
 
 ---
 
-## Part 1 — Test count reconciliation
+## Part 1 — Inventory: single source of truth
 
-**My earlier figure of "37 remaining tests" was wrong.** Counting the checklist from source gives the truth.
+The authoritative inventory is the per-test table in `docs/mac-smoke-checklist.md`
+(**PR #42**), where every total is derived from the rows rather than asserted. That table lists,
+for each test ID, its target, required environment, execution status and blocker.
 
-| | Count |
-|---|---|
-| Rows carrying a test ID | 63 |
-| `B2.x` rows — these are **distribution blockers, not tests** | −8 |
-| **Defined tests** | **55** |
-| Already executed (`A1.1`–`A1.11`) | −11 |
-| **Remaining NOT RUN** | **44** |
+**The figures previously stated in this document were wrong and are withdrawn:**
 
-### Where "37" came from
-
-| | |
-|---|---|
-| Old claim | 37 |
-| `+ A2.1`–`A2.3` — install tests, which I tallied separately as "blocked" | +3 |
-| `+ B1.1`–`B1.4` — Swift build/run tests, a different target I never counted | +4 |
-| **Actual** | **44** |
-
-So the previously "unexplained" remainder was **11, not 4**: three install tests and four Swift tests that I had silently excluded from the total.
-
-### Every remaining test, with its environment
-
-| # | Test | Environment required | Status |
-|---|---|---|---|
-| 1 | `A2.1` DMG mounts, shows drag-to-Applications layout | **Any Mac — read-only mount** | NOT RUN |
-| 2 | `A2.2` Copy to a **user** Applications path | Test account, `~/Applications` | NOT RUN |
-| 3 | `A2.3` Launch from mounted DMG vs installed copy | Test account | NOT RUN |
-| 4–9 | `A3.1`–`A3.6` first launch + microphone / screen / accessibility / speech prompts + denial handling | **Test account — needs genuinely fresh TCC** | NOT RUN |
-| 10–13 | `A4.1`–`A4.4` sign-in, wrong password, session persists, sign-out | Test account | NOT RUN |
-| 14 | `A4.5` Google Sign-In unavailable on macOS today | **Documentation assertion — not a runtime test** | NOT RUN |
-| 15–20 | `A5.1`–`A5.6` persistence, uninstall keeps data, reinstall preserves, reinstall restores session | Test account | NOT RUN |
-| 21–24 | `A6.1`–`A6.4` update detected, applies, session survives, data survives | Test account + in-place update (modifies the install, reversible) | NOT RUN |
-| 25 | `A6.7` manual DMG overwrite preserves user data | Test account | NOT RUN |
-| 26–28 | `A7.1`–`A7.3` restore contract: own-account only, installation-scoped records not personal, exclusions disclosed | **Test account signed in + Google Drive — overlaps Cue/Buffy's lane** | NOT RUN |
-| 29–30 | `A6.5`–`A6.6` interrupted update recovers, failed upgrade recovers | **Disposable VM — destructive** | NOT RUN |
-| 31–33 | `A7.4`–`A7.6` retry after failed restore, interrupted restore preserves state, contract stable across versions | **Disposable VM — destructive** | NOT RUN |
-| 34–36 | `A8.1`–`A8.3` remove app, Keychain after uninstall, reinstall first launch | Test account | NOT RUN |
-| 37–40 | `A9.1`–`A9.4` token not world-readable, uninstall does not silently destroy a session, no provider-key readback, no plaintext fallback | Test account | NOT RUN |
-| 41–44 | `B1.1`–`B1.4` Swift build, test, launch, sign-in lifecycle | **Any Mac with Xcode — NOT an installable release** | NOT RUN |
-
-### Roll-up by environment
-
-| Environment | Tests | Unblocked by |
+| Withdrawn claim | Problem | Corrected |
 |---|---|---|
-| Any Mac, read-only, no account | **1** (`A2.1`) | authorisation only |
-| Any Mac with Xcode, no account | **4** (`B1.1`–`B1.4`) | authorisation only |
-| Documentation assertion | **1** (`A4.5`) | a decision, not a run |
-| **Test account, non-destructive** | **25** | **account authorisation** |
-| Test account + in-place update | **5** (`A6.1`–`A6.4`, `A6.7`) | account authorisation |
-| Test account + Google Drive | **3** (`A7.1`–`A7.3`) | account **and** Cue/Buffy coordination |
-| **Disposable VM — destructive** | **5** (`A6.5`, `A6.6`, `A7.4`–`A7.6`) | VM provisioning |
-| **Total** | **44** | |
+| "37 remaining tests" | Excluded the three install tests (`A2.1`–`A2.3`) and the four `B1` Swift rows | Derived NOT RUN count is **44** |
+| "44" | The category buckets summed to 43 | Buckets now sum to 44 |
+| "36 need no VM" + 5 VM-only = 41 | Does not total the stated 44 | **39 need no VM** + **5 VM-only** = 44 |
 
-**Corrected claim:** a test account plus authorisation makes **30** of 44 executable (25 non-destructive + 5 update). Add the 5 that need only a Mac and the 1 read-only mount, and **36 of 44** need no VM. **5 remain VM-only. 3 need Drive coordination.**
+### Environment roll-up — derived from the per-test rows
 
----
+| Environment required | NOT RUN tests |
+|---|---|
+| Any Mac, read-only mount, no account (`A2.1`) | 1 |
+| Any Mac with Xcode, no account (`B1`) | 4 |
+| Disposable macOS user, non-destructive | 27 |
+| Disposable macOS user + explicit old→new artifacts | 4 |
+| Disposable macOS user + isolated Drive backend | 3 |
+| **Disposable VM — UNAUTHORISED** | **5** |
+| **NOT RUN total** | **44** |
 
-## Part 2 — Isolation verification (this is not proven by a separate account alone)
+A disposable macOS account makes **36** of the 44 executable (1 + 4 + 27 + 4 require only an
+account or no account; the 3 Drive tests additionally need a named backend and an assigned
+executor). **5 remain VM-only. 3 need Drive coordination.**
 
-A separate account gives a fresh Keychain and fresh TCC grants. It does **not** by itself stop the app from writing outside that account. I inspected the actual write paths at the reviewed SHA.
+**None of these have been run. Account creation and VM provisioning are both unauthorised.**
 
-### What the code writes, and where
+## Part 2 — Isolation: SOURCE-REVIEWED, NOT PROVEN
 
-| Path | Root | Per-user? |
+> **Status of this section.** Everything below is a **source review at a fixed SHA**. It is *not* a
+> proof of isolation. I read the code; I did not execute the app, observe a filesystem, or watch an
+> updater run. Three of my earlier phrasings here overstated what a source review can establish, and
+> are corrected below. Isolation must be **observed at runtime** in the authorised environment before
+> any test result is trusted.
+
+### What the source review actually found
+
+| Path | Root as written | Per-user by construction? |
 |---|---|---|
-| `credentials.bin` — `path.join(app.getPath("userData"), "credentials.bin")` (`main.mjs:212`) | `~/Library/Application Support/…` | ✅ yes |
-| `config.json` — `process.env.OMB_DATA_DIR \|\| path.join(app.getPath("home"), ".muster")` (`main.mjs:237`) | `~` | ✅ yes |
-| Credential encryption | `safeStorage.encryptStringAsync` — login-Keychain backed, file mode `0o600` | ✅ yes |
-| `Muster Speech.app` helper | ships inside `Contents/Resources/` (`electron-builder.yml` `extraResources`) | ✅ travels with the install |
-| CUA driver / SDK | `Contents/Resources/cua-driver`, `cua-sdk` | ✅ travels with the install |
-| Companion sidecar | spawned via `utilityProcess` / `fork` from Resources | ✅ travels with the install |
+| `credentials.bin` — `path.join(app.getPath("userData"), "credentials.bin")` (`electron/main.mjs:212`) | `app.getPath("userData")` | yes |
+| `config.json` — `process.env.OMB_DATA_DIR \|\| path.join(app.getPath("home"), ".muster")` | home, unless the env var is set | yes, unless overridden |
+| Credential encryption | `safeStorage.encryptStringAsync`, file mode `0o600` | yes (login-Keychain backed) |
+| `Muster Speech.app`, CUA driver/SDK, companion sidecar | shipped in `Contents/Resources/` via `extraResources` | travels with the install |
 
-**Verified:** a whole-file search for write calls targeting an absolute root path (`writeFileSync|writeFile|mkdirSync|mkdir|createWriteStream` with a `'/…'` literal) returns **no matches**. Every write is rooted at `app.getPath("userData")` or `app.getPath("home")`.
+A whole-file search of `electron/main.mjs` for write calls taking an absolute root-path literal
+(`writeFileSync|writeFile|mkdirSync|mkdir|createWriteStream` with a `'/…'` argument) returns no
+matches.
 
-### The updater — the component that could reach outside
+### Correction 1 — a negative search is not a behavioural guarantee
 
-`electron/updater.mjs` contains **no `/Applications` reference and no absolute-path write**. Its install target derives from `process.execPath` (`:33`) — the running binary's own location.
+I previously wrote that "no `/Applications` literal exists, therefore the updater cannot touch the
+owning user's install". That inference does not hold. **The absence of a string in the source says
+something about the source, not about runtime behaviour.** The updater's target is chosen by
+electron-updater and Squirrel.Mac at run time, not by a literal in our code. Recorded as
+"source-reviewed, unverified".
 
-**Consequence:** a copy installed in the test account's `~/Applications` updates **itself**. And because the account is non-admin, it **cannot write `/Applications` at all**, so it cannot replace the owning user's install even if it tried. That is the structural guarantee, not merely a convention.
+### Correction 2 — the updater has an explicit macOS path I had not read
 
-### Three caveats I will not paper over
+`electron/updater.mjs` defines `macUpdatesTrusted()`: on `darwin` it looks for a marker resource at
+`Contents/Resources/trusted-mac-updates`, and only then permits Squirrel.Mac's **in-place swap**.
+Ad-hoc builds fail or hang on apply, so the renderer falls back to a direct download
+(`src/components/UpdateBanner.tsx`).
 
-1. **A non-admin account can still *read* `/Applications/Muster.app`.** If the test account accidentally launches the owning user's copy, it would use its *own* Keychain and userData but run *different code*. **Every run must first confirm which binary is executing** (see step 5). Without that check the results are worthless, and this is the one way the isolation can silently fail.
-2. **`OMB_DATA_DIR` overrides the data root.** If that variable is set in the environment, `~/.muster` is bypassed. Step 3 checks it is unset.
-3. **Verification is static.** I read the code paths; I did not trace them at runtime. Runtime confirmation is exactly what the tests are for.
+So the macOS update mechanism is: *marker present → in-place swap of the bundle at the running
+binary's directory; marker absent → direct download.* **For the signed v1.23.3 release the marker is
+expected to be present**, which makes the in-place swap the live path and therefore the thing most
+worth observing. I had asserted the target from `process.execPath` without reading this gate.
 
-### Why `~/Applications` and not `/Applications`
+Related, and flagged rather than resolved: the comment above that function states Muster's builds are
+"only ad-hoc signed (no paid Apple Developer certificate)". The **released** `v1.23.3` artifact I
+verified in A1 is Developer ID signed (`THARUN RAMAGIRI (7375K23WFU)`) and notarized. That comment
+appears stale relative to the release; I am not asserting which is correct for current `main` builds,
+only that the two disagree and a reader would be misled.
 
-A non-admin user cannot write `/Applications`, so `~/Applications` is the only location that works without elevating — and elevating is exactly what would weaken isolation, because an admin session can reach the owning user's data. **Least privilege and strongest isolation coincide here**, which is why this is the recommended setup.
+### Correction 3 — a privilege-escalation helper exists in the vendored updater
 
----
+`electron/vendor/electron-updater.cjs` contains `runCommandWithSudoIfNeeded` and the strings
+`"Running as root, no need to use sudo"` / `"Running as non-root user, using sudo to install"`. My
+earlier statement that there was no privilege surface was based on searching our own source and
+missing vendored code.
+
+Precisely what I did and did not establish:
+
+- The helper is defined in the **shared base class `_AppUpdater`** (single call site), not in a
+  platform-specific file.
+- The `_MacUpdater` class body contains **no** `sudo` reference.
+- **I have not traced whether any macOS code path reaches the base-class helper.** I am not claiming
+  it is unreachable, and I am not claiming it is reachable.
+
+### No privileged helper in our own source — also only a source-level negative
+
+Searched `electron/`, `macos/`, `scripts/`, `electron-builder.yml` for `SMJobBless`, `SMAppService`,
+`AuthorizationExecuteWithPrivileges`, `AuthorizationCreate`, `SMLoginItemSetEnabled`, `launchd`,
+`LaunchDaemon`, `LaunchAgent`, `mach_service`, `SMPrivilegeExecutables`, `setuid`: **no matches.**
+(`XPC` matched only as a substring of `reRegExpChar` in vendored code — a false positive.)
+
+This is evidence about *our* repository. It is not evidence about the **installed** bundle, which may
+carry entitlements or helper binaries the source does not show.
+
+### Runtime verification required — none of this is established yet
+
+Run in the authorised environment, before trusting any result:
+
+| # | Verify | Why source review cannot answer it |
+|---|---|---|
+| V1 | **The running binary is the test copy.** Record `ps` path / About screen for the running process. | A non-admin account can still *read* `/Applications/Muster.app`. If it launched that copy it would use its own Keychain and userData but different code — silent, total invalidation of every result. **This is the single most important check.** |
+| V2 | `~/Applications` is writable; `/Applications` is **not** writable by the test user. Attempt the write and record the denial. | Filesystem permissions are an OS/runtime fact I never tested. My "cannot write `/Applications` at all" was an assumption. |
+| V3 | Does `Contents/Resources/trusted-mac-updates` exist in the installed copy? | Determines whether the in-place swap or the direct-download fallback runs. |
+| V4 | Perform a real update and record where the new bundle lands. | The actual install target is chosen by Squirrel.Mac at run time. |
+| V5 | **Watch for any sudo/authorization prompt during install, update, helper launch and uninstall.** | The vendored sudo helper's reachability from the macOS path is unresolved. |
+| V6 | Inspect the *installed* bundle for privilege surface: `codesign -d --entitlements -`, `ls -l` for setuid bits, `launchctl list` for installed jobs. | Source-level absence does not describe the installed artifact. |
+| V7 | Confirm `OMB_DATA_DIR` is unset before launch. | If set, the data root bypasses `~/.muster` entirely. |
+| V8 | Confirm no helper (`Muster Speech.app`) writes outside `~/`. | Helper is in-bundle, but its runtime behaviour is unobserved. |
+
+Until V1–V8 are recorded, the correct statement is: *isolation is designed for and consistent with
+the source, and is unproven.*
+
+### Why `~/Applications` regardless
+
+A non-admin user is expected to be unable to write `/Applications`, so `~/Applications` is the only
+location that works without elevating — and elevating is what would weaken isolation, since an admin
+session can reach the owning user's data. Least privilege and strongest isolation coincide. **V2
+confirms the premise; it is not assumed.**
 
 ## Part 3 — Exact plan
 
