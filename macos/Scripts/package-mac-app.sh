@@ -132,14 +132,17 @@ fi
 MARKER_PATH="${OUT_DIR}/${MARKER_FILE}"
 APP_ABS="$(python3 -c 'import os,sys;print(os.path.realpath(os.path.abspath(sys.argv[1])))' "${APP}")"
 
+# Validate the sibling marker before any read or write. Even when the app is absent,
+# a symlinked marker could redirect the later marker write and chmod outside OUT_DIR.
+if [ -L "${MARKER_PATH}" ]; then
+  fail "refusing: the ownership marker ${MARKER_PATH} is a symlink -> $(readlink "${MARKER_PATH}").
+    A symlinked marker can redirect reads and writes outside OUT_DIR. Refusing
+    rather than following it."
+fi
+
 if [ -e "${APP}" ]; then
   [ -d "${APP}" ] || fail "refusing: ${APP} exists and is not a directory. Move it aside."
   [ ! -L "${APP}" ] || fail "refusing: ${APP} is a symlink -> $(readlink "${APP}")."
-  if [ -L "${MARKER_PATH}" ]; then
-    fail "refusing: the ownership marker ${MARKER_PATH} is a symlink -> $(readlink "${MARKER_PATH}").
-    A symlinked marker can redirect reads and writes outside OUT_DIR. Refusing
-    rather than following it."
-  fi
   if [ ! -f "${MARKER_PATH}" ]; then
     fail "refusing to remove ${APP}
     It exists but there is no ownership marker at ${MARKER_PATH}, so this script did
@@ -166,19 +169,23 @@ if [ -e "${APP}" ]; then
   fi
   # Header and path match, but is the bundle still ours? A marker alone would
   # authorise deleting any directory that later occupied the recorded path.
-  if [ -f "${APP}/Contents/MacOS/${PRODUCT}" ]; then
-    CURRENT_DIGEST="$(shasum -a 256 "${APP}/Contents/MacOS/${PRODUCT}" | awk '{print $1}')"
-    if [ "${MARKED_DIGEST}" != "${CURRENT_DIGEST}" ]; then
-      fail "refusing to remove ${APP}
+  EXECUTABLE_PATH="${APP}/Contents/MacOS/${PRODUCT}"
+  if [ ! -f "${EXECUTABLE_PATH}" ]; then
+    fail "refusing to remove ${APP}
+    The marker matches this bundle path, but the expected executable is missing or
+    not a regular file:
+      expected executable : ${EXECUTABLE_PATH}
+    Refusing rather than skipping digest validation."
+  fi
+  CURRENT_DIGEST="$(shasum -a 256 "${EXECUTABLE_PATH}" | awk '{print $1}')"
+  if [ "${MARKED_DIGEST}" != "${CURRENT_DIGEST}" ]; then
+    fail "refusing to remove ${APP}
     The bundle at the recorded path no longer matches its marker. Its executable
     digest is ${CURRENT_DIGEST}, the marker records ${MARKED_DIGEST:-<empty>}.
     Something replaced the bundle after it was built, so this script cannot prove the
     directory is still the one it created. Refusing."
-    fi
-    printf '  header, path and executable digest all match - safe to replace\n'
-  else
-    printf '  header and path match (no executable present yet) - safe to replace\n'
   fi
+  printf '  header, path and executable digest all match - safe to replace\n'
 else
   printf '  no existing bundle at %s\n' "${APP}"
 fi
