@@ -311,6 +311,67 @@ halves had ever run. They still have not: **0 executions of the workflow wiring 
 Also not shown and therefore not claimed: the **dry-run signature-check asymmetry** fix. Intel still
 requires a non-dry run in this draft.
 
+## 4b. Verification must span the producer-to-consumer boundary
+
+### The limit of what my tests actually proved
+
+My corrected unit tests build their fixture through `toMacosEvidence()` — the same mapping the
+workflow uses. That closes the schema mismatch, and it is **still not sufficient**. Those tests
+exercise **one** link in a five-link chain. They prove a pure function maps outcomes to evidence
+correctly. They prove nothing about whether the workflow emits those outcomes, whether the job
+forwards them, whether the evidence describes the bytes a user downloads, or whether publication
+actually consults it.
+
+**A green policy unit test is not a verified release gate.** I have already demonstrated that
+failure mode once: 34 passing tests against wiring that would have rejected every good build.
+
+### Two kinds of evidence that must not be conflated
+
+| | **Raw check outcome** | **Artifact-bound trust evidence** |
+|---|---|---|
+| What it is | `success` / `failure` / `skipped` from a workflow step | A statement that *specific bytes* were signed, hardened and notarized |
+| Binds to | A job having run | A **digest** of a named artifact |
+| Example | `signatureOutcome=success` | `sha256:<digest>` for `Muster-1.23.3.dmg`, plus `notarized=accepted` **for that digest** |
+| Failure mode if substituted | **A green check on unrelated bytes passes** — the swap R1 exists to catch | none, if actually bound |
+
+**Rule: a raw outcome may only be promoted to trust evidence by a step that hashed the artifact it
+examined, and the digest must travel with the evidence into the publication decision.** Emitting
+`notarized=accepted` without the digest it applies to is the hardcoded-literal defect I already fixed
+once; binding it is what makes it evidence rather than an assertion.
+
+### Required verification matrix — five boundaries
+
+Each row needs a test that would **fail if that link were broken**. None can be satisfied by a unit
+test of the decision function alone.
+
+| # | Boundary | Must be proven | Test shape that can prove it |
+|---|---|---|---|
+| **B1** | check → job output | The trust step's outputs are actually declared in `outputs:` and not dropped | Parse the workflow YAML; assert every `steps.<id>.outcome` the policy reads is declared as a job output |
+| **B2** | job output → policy input | `needs.<job>.outputs.trust` is populated and parses; JSON survives GitHub's output encoding | Feed a realistic `needs` object through the real publish-step expression; assert non-empty, and assert a **missing/blank** field fails closed |
+| **B3** | **artifact identity** | Evidence names a digest, and that digest equals the digest of the asset actually uploaded | Assert evidence carries a digest; recompute SHA-256 from the staged artifact and compare. **The binding assertion** |
+| **B4** | publication guard | Publication actually reads the trust field and blocks on failure | Assert the publish step's condition references the trust output; assert an untrusted draft cannot reach `release-payload` |
+| **B5** | dry-run mutation denial | Every mutation of a dry-run flag is denied | The **nine mutation boundaries**, each asserting a non-dry publication attempt is rejected |
+
+**B3 is the one no unit test can fake.** If the digest in the evidence does not match the digest of
+the bytes being published, the gate is decorative regardless of how many tests pass.
+
+### Properties that must survive all of the above
+
+- **Failure-closed.** Absent, unparseable, unknown or partial evidence **blocks** publication. There
+  must be no path where missing data yields a pass.
+- **Dry-run cannot publish, mirror or notarize** — enforced by the existing workflow `if:` guards
+  *and* independently by the policy. Two barriers, neither described as the only one.
+- **All-included-architecture rule preserved.** While the mirror inventory includes Intel, verified
+  Intel is required. Staging a draft and promoting to the public mirror remain **separate gates**;
+  satisfying one must never imply the other.
+- **No silent artifact dropping** to satisfy a gate.
+
+### Status of this verification
+
+**None of B1–B5 has been executed.** The 34-case scratch receipt covers a fraction of B2's logic in
+isolation. **B1–B5 are Freebuff's to build and run on a frozen candidate**, together with the
+existing offline workflow-guard checks, which must be rerun rather than assumed.
+
 ## 5. Scope of the proposal
 
 | File | Change | Status |
