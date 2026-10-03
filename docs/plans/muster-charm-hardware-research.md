@@ -12,18 +12,20 @@ Every substantive claim is labelled. Do not mix the categories.
 | **[OFFICIAL]** | Stated in the manufacturer's own documentation or store. Source and fetch date given. |
 | **[ESTIMATE]** | My reasoning or a third-party figure. **Not verified.** May be wrong. |
 | **[RECOMMENDATION]** | My judgement. Not a measurement. |
-| **[MEASURED]** | An actual measurement I performed. |
+| **[NOT MEASURED]** | A value I did **not** measure. No hardware has been bought or tested. |
+| **[MEASUREMENT PLAN]** | The specified procedure for obtaining a value later. |
 
-> **There are currently ZERO [MEASURED] values in this document.** No hardware has been
-> bought, flashed, or measured. Any battery or runtime figure below is an [ESTIMATE] or an
-> open question, and is labelled as such. This is the single most important caveat here.
+> **There are ZERO [NOT MEASURED] results in this document, by definition.** No hardware has
+> been bought, flashed, or measured. Every runtime, current-draw or endurance figure below is
+> either an [ESTIMATE] or an open question awaiting the [MEASUREMENT PLAN] in §7.1. Nothing in
+> this document is an experimental result.
 
 ## Scope and prohibitions
 
 Per `Muster_Sub_Agent_Operating_Loop.md` → *Agent 4: Hardware Research Agent*:
 
 - **Must not** start hardware before the software MVP. This note authorises no purchase, assembly, or flashing.
-- **Must not** claim full local AI on ESP32. See §5.1 — this is a capability boundary, stated workload by workload.
+- **Must not** claim full local AI on ESP32. See §5.1 — addressed workload by workload, as an engineering expectation rather than a claimed measurement.
 - **Must not** recommend expensive hardware without reason. §4 sequences cheapest-first and says why.
 
 **Product intent, restated so it is not lost:** Charm is a **portable pocket/keychain companion** with an **interactive mascot on a screen**, that **listens** and **speaks**. A screen is central to the product, not optional. Screenless boards appear in this document only as an **optional voice test rig** (§4.3) — a way to de-risk audio cheaply — and are explicitly **not** the approved product direction.
@@ -119,10 +121,12 @@ This replaces the earlier absolute claim. Each workload is assessed separately, 
 | Keyword spotting / wake word ("hey Muster") | **[RECOMMENDATION]** Feasible on-device | 240 MHz dual-core LX7 with vector instructions, 512 KB SRAM + 8 MB PSRAM — the conventional envelope for TinyML keyword spotting. |
 | Small fixed-vocabulary intent classifier | **[RECOMMENDATION]** Feasible on-device | Same envelope; a few hundred KB of model fits comfortably. |
 | Small audio-event classifier (smoke, doorbell, etc.) | **[RECOMMENDATION]** Feasible on-device | Same envelope. |
-| Speech-to-text of any useful fidelity | **[RECOMMENDATION]** Not viable locally | Even aggressive quantised streaming ASR exceeds 512 KB SRAM. |
-| Any conversational language model | **[RECOMMENDATION]** **Not viable locally** | The part has no accelerator and no GPU, and offers 512 KB SRAM / 8 MB PSRAM. |
+| Speech-to-text of useful fidelity | **[RECOMMENDATION]** **Not demonstrated or supported for the proposed workload** on this part | Aggressive quantised streaming ASR is widely reported to exceed 512 KB SRAM. *No measurement was performed here, and this is not presented as a hard silicon limit.* |
+| Conversational language model | **[RECOMMENDATION]** **Not demonstrated or supported for the proposed workload** on this part | The part has no accelerator or GPU and offers 512 KB SRAM / 8 MB PSRAM. *This is an engineering expectation, not a measured or vendor-stated limit; no benchmark was run.* |
 
-**[RECOMMENDATION]** The honest framing: Charm can do *wake* and *classify*, but not *transcribe* or *reason*. Anything that reads like conversation happens on the user's own machine, or on an optional remote executor (§6). "Local AI on ESP32" is only true in the keyword/classifier sense.
+**[RECOMMENDATION]** The honest framing: on the evidence available here, Charm can reasonably be expected to do *wake* and *classify*, and is **not demonstrated or supported for the proposed workload** when it comes to *transcribing* or *reasoning*. Anything that reads like conversation should be planned to happen on the user's own machine, or on an optional remote executor (§6).
+
+**This is an expectation, not a measurement.** No benchmark was run, and this document does not claim to establish a hard silicon limit — only that no evidence was found supporting these workloads on this part, and that the team should not plan on them without measuring.
 
 ### 5.2 Voice processing — the strongest part of this board
 
