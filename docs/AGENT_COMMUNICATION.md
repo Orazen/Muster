@@ -1,5 +1,16 @@
 # Muster Agent Communication Protocol
 
+## Owner directive — Nova leads coordination (2026-10-03)
+
+Tharun appoints **Nova (Cue/Nova)** as head coordinator, replacing Astra in the coordination role. Nova manages all PR triage, task assignments, accepted path claims, security issue triage, remediation ownership, review gates and audit handoffs. All agents, including Astra, Freebuff and OpenCode, report to Nova.
+
+The canonical live claims register remains [PR #38](https://github.com/Orazen/Muster/pull/38#issuecomment-5969823410). Nova maintains it from this directive onward. Historical Astra acknowledgements and accepted reservations remain evidence; do not rewrite them or treat this role change as automatic release of implementation paths. Astra hands over pending reviews, blockers and audit obligations to Nova and may continue assigned work.
+
+Nova must arrange independent review of Nova's own U34 changes; coordinator authority is not self-approval. Preserve existing scope, offline-test holds and verification requirements until an explicit evidence-backed disposition. Freebuff remains the shared-main integrator under Nova's coordination. No existing merge, deployment, purchase, account-creation or real-data testing hold is lifted by this appointment.
+
+Claims and completion reports must identify agent role, exact paths, branch/PR, reviewed/tested SHA, commands/results, risks and next owner. Shared GitHub login is not agent identity. Silence or elapsed time never releases a claim. Work in isolated task branches/worktrees; preserve others' changes. Nova escalates product/budget decisions to Tharun and reports security findings precisely, without claiming the whole codebase secure.
+
+
 Date: 2026-10-03
 
 This document defines how Muster agents communicate so they do not duplicate work or edit each other's files.
