@@ -198,7 +198,19 @@ export function EmailOtpCodeForm(props: {
  * verify. Additive — the other sign-in methods on the page are untouched,
  * and success lands exactly where the pairing path lands (a hard navigation
  * that picks the fresh session cookie up like every other method). */
-export function EmailOtpSignIn({ next }: { next: string }) {
+/**
+ * `onVerified` runs once the server has confirmed the code and set a session cookie, BEFORE the page
+ * navigates. It is a prop rather than an import on purpose: importing the page that owns the referral
+ * concern would drag react-router into this module and break its node-environment unit test. The
+ * caller owns the concern; this component only guarantees the ordering.
+ */
+export function EmailOtpSignIn({
+  next,
+  onVerified,
+}: {
+  next: string;
+  onVerified?: () => Promise<void>;
+}) {
   const [stage, setStage] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -285,6 +297,9 @@ export function EmailOtpSignIn({ next }: { next: string }) {
       }
       // The session cookie is set — reload auth state the same way the
       // pairing path does.
+      // Awaited BEFORE navigating: assigning location.href aborts an in-flight request, so anything
+      // that has to reach the server has to finish first.
+      await onVerified?.();
       window.location.href = next;
     } catch {
       setError("Could not reach the server. Please try again.");

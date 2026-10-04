@@ -449,6 +449,106 @@ test("the pairing page sends a visitor to sign-in and keeps the local next targe
   await expect(page.getByRole("button", { name: "Copy code", exact: true })).toBeEnabled();
 });
 
+// ── Referral ref: preserved across navigation, redeemed only after a session ───
+
+test("a referral survives the hand-off from sign-up to sign-in and is redeemed only after sign-in", async ({ harness, openAuth }) => {
+  const page = await openAuth(harness.cloudUrl);
+  const codes: string[] = [];
+  await page.route(`${harness.cloudUrl}/api/referral/redeem`, async (route) => {
+    codes.push(route.request().postDataJSON().code);
+    await route.fulfill({ status: 200, json: { ok: true } });
+  });
+
+  await page.goto(`${harness.cloudUrl}/sign-up?ref=REF-42&next=${encodeURIComponent("/pair")}`);
+  // Nothing may be redeemed before there is a session: the server answers 401 and the code is lost.
+  expect(codes).toEqual([]);
+
+  // The visitor already has an account, so the referral must follow them to sign-in rather than
+  // being dropped at the boundary.
+  await page.getByRole("link", { name: "Sign in", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`ref=REF-42`));
+  expect(codes).toEqual([]);
+
+  await signIn(page, harness);
+  await expect.poll(() => codes).toEqual(["REF-42"]);
+  // A safe next is still honoured: the referral must not swallow the destination.
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`);
+});
+
+test("a rejected referral is reported and still reaches the workspace", async ({ harness, openAuth }) => {
+  const page = await openAuth(harness.cloudUrl, { expectedHttpErrors: [{ path: "/api/referral/redeem", status: 400, count: 1 }] });
+  await page.route(`${harness.cloudUrl}/api/referral/redeem`, (route) =>
+    route.fulfill({ status: 400, json: { error: "that referral code isn't valid" } }),
+  );
+  await page.goto(`${harness.cloudUrl}/sign-in?ref=BAD-1&next=${encodeURIComponent("/pair")}`);
+  await signIn(page, harness);
+  // The whole point: a referral is a bonus, not an entitlement. A rejected code must not strand
+  // someone who has just signed in.
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`);
+  await expect(page.getByRole("button", { name: "Copy code", exact: true })).toBeEnabled();
+});
+
+// ── Capability failure, visible retry, repeated failure, successful recovery ────
+
+test("a failed session discovery stays recoverable across two failures and a retry reveals methods without a reload", async ({ harness, openAuth }) => {
+  const page = await openAuth(harness.cloudUrl, {
+    expectedHttpErrors: [
+      { path: "/api/auth/get-session", status: 503, count: 2 },
+      { path: "/api/auth-capabilities", status: 503, count: 2 },
+    ],
+  });
+  let failing = true;
+  await page.route(`${harness.cloudUrl}/api/auth/get-session`, (route) =>
+    failing
+      ? route.fulfill({ status: 503, json: { error: "session store unavailable" } })
+      : route.continue(),
+  );
+  await page.route(`${harness.cloudUrl}/api/auth-capabilities`, (route) =>
+    failing
+      ? route.fulfill({ status: 503, json: { error: "capabilities unavailable" } })
+      : route.continue(),
+  );
+
+  await page.goto(`${harness.cloudUrl}/sign-in?next=${encodeURIComponent("/pair")}`);
+  // A genuine failure is VISIBLE, with a retry control rather than a dead page.
+  const retry = page.getByRole("button", { name: "Check sign-in again", exact: true });
+  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(retry).toBeVisible();
+
+  // A second failure must leave the visitor recoverable: still on the page, retry still offered.
+  await retry.click();
+  await expect(retry).toBeVisible();
+
+  // Successful recovery makes the available methods visible with NO reload.
+  failing = false;
+  await retry.click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  const signInButton = page.getByRole("button", { name: "Sign in with email", exact: true });
+  await expect(signInButton).toBeVisible();
+  await signIn(page, harness);
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`);
+});
+
+test("a capability-only failure hides optional flows without claiming the session is broken", async ({ harness, openAuth }) => {
+  // Documenting the real contract rather than the assumed one: /api/auth-capabilities failures are
+  // swallowed on purpose, so no session error and no retry control appears - the UI simply stops
+  // offering flows it cannot vouch for. A test that expected a visible retry here would be asserting
+  // a behaviour the code deliberately does not have.
+  const page = await openAuth(harness.cloudUrl, {
+    expectedHttpErrors: [{ path: "/api/auth-capabilities", status: 503, count: 1 }],
+  });
+  await page.route(`${harness.cloudUrl}/api/auth-capabilities`, (route) =>
+    route.fulfill({ status: 503, json: { error: "capabilities unavailable" } }),
+  );
+  await page.goto(`${harness.cloudUrl}/sign-in?next=${encodeURIComponent("/pair")}`);
+  await showPassword(page);
+  await expect(page.getByRole("button", { name: "Sign in with email", exact: true })).toBeVisible();
+  // The OTP form is capability-gated, so it must be absent rather than offered and broken.
+  await expect(page.getByRole("button", { name: "Check sign-in again", exact: true })).toHaveCount(0);
+  await signIn(page, harness);
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`);
+});
+
 test("a real displayed pairing code signs the desktop into the same account at 320px", async ({ harness, openAuth }) => {
   const cloud = await openAuth(harness.cloudUrl, { width: 320 });
   await cloud.goto(`${harness.cloudUrl}/sign-in?next=%2Fpair`);

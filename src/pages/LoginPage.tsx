@@ -7,6 +7,7 @@ import { AuthShell, authCardBox, authInputCls, authButtonCls } from "@/component
 import { AuthPasswordField } from "@/components/AuthPasswordField";
 import { GoogleSignIn } from "@/components/GoogleSignIn";
 import { EmailOtpSignIn } from "@/components/EmailOtpSignIn";
+import { redeemReferral, withReferral } from "./SignupPage";
 import { authDestination } from "@/lib/auth-navigation";
 
 /** Account sign-in and device connection share a page, but remain separate actions. */
@@ -15,6 +16,9 @@ export function LoginPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = authDestination(params.get("next"));
+  // A referral that arrived on the sign-up link and followed the visitor here. Redeemed only after
+  // a session exists, and never in a way that can block sign-in.
+  const ref = params.get("ref");
   const [error, setError] = useState("");
   const submitting = useRef(false);
 
@@ -55,6 +59,7 @@ export function LoginPage() {
         setError(result.error);
         return;
       }
+      await redeemReferral(ref);
       navigate(next);
     } catch {
       setError("Could not reach the server. Please try again.");
@@ -98,7 +103,7 @@ export function LoginPage() {
 
   return (
     <AuthShell title="Your day, with Muster." subtitle="Sign in to your workspace. Your next good idea starts here."
-      footer={<>New to Muster? <Link to={`/sign-up?next=${encodeURIComponent(next)}`} className="auth-link">Create an account</Link></>}>
+      footer={<>New to Muster? <Link to={withReferral("/sign-up", next, ref)} className="auth-link">Create an account</Link></>}>
       <div className="auth-stack">
         {sessionError && <div className="auth-notice auth-error" role="alert">
           <p>{sessionError}</p>
@@ -145,7 +150,7 @@ export function LoginPage() {
         <GoogleSignIn next={next} onError={setError} />
 
         {(googleConfigured || desktopOAuthHandoff) && <div className="auth-divider">or use your email</div>}
-        {capabilities.emailOtp && <EmailOtpSignIn next={next} />}
+        {capabilities.emailOtp && <EmailOtpSignIn next={next} onVerified={async () => { await redeemReferral(ref); }} />}
         <details className={`auth-password-option${capabilities.emailOtp ? "" : " auth-password-default"}`} open={capabilities.emailOtp ? undefined : true}>
           <summary hidden={!capabilities.emailOtp}>Use a password instead</summary>
         <form onSubmit={(e) => void handleEmailSignIn(e)} className="auth-form">
