@@ -125,6 +125,7 @@ export type VisibleErrorCode =
   | "credential_leak"
   | "settings_not_allowlisted"
   | "corrupt"
+  | "transport_error"
   | "schema_version";
 
 export class DriveVisibleError extends Error {
@@ -166,6 +167,9 @@ export function assertPersonaIdsSane(personas: readonly SoulDocument["personas"]
 
 const CREDENTIAL_KEY_SET = new Set<string>(CREDENTIAL_KEYS.map((k) => k.toLowerCase()));
 
+/** A decoded JSON document, before any schema has had a chance to strip anything from it. */
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
 /**
  * Fails when any of `keys` is credential-shaped. Takes the KEY SET rather than a document so it
  * can be exercised directly, and so the document walk and the rule stay separately testable.
@@ -179,6 +183,82 @@ export function assertNoCredentialKeys(keys: readonly string[], fileName: string
       `${fileName} would contain credential-shaped keys: ${[...new Set(offending)].join(", ")}`,
       "credential_leak",
     );
+  }
+}
+
+/**
+ * Collects EVERY object key at any depth of a decoded raw document, then applies the credential
+ * rule to the whole set.
+ *
+ * This runs on the RAW value, before any schema parses it, and that ordering is the entire point.
+ * These schemas are ordinary zod objects, so an unknown key is STRIPPED rather than rejected: a
+ * hand-added `apiKey` would be dropped by the parse and the document would then validate cleanly.
+ * That is safe in the direction that matters - the secret can never be written back out - but it
+ * means validation ACCEPTED a file that was carrying a credential, and the acceptance was silent.
+ * A person who pasted a key into `tasks.json` would be told the file was fine.
+ *
+ * Rejecting first turns that into an honest error naming the offending path. Keys are matched,
+ * never values, so prose containing the word "state" is still not a false positive, and no
+ * documented schema field collides with the credential list (checked, not assumed).
+ */
+/**
+ * Collects EVERY object key at any depth of a decoded raw document, then applies the credential
+ * rule to the whole set.
+ *
+ * This runs on the RAW value, before any schema parses it, and that ordering is the entire point.
+ * These schemas are ordinary zod objects, so an unknown key is STRIPPED rather than rejected: a
+ * hand-added `apiKey` would be dropped by the parse and the document would then validate cleanly.
+ * That is safe in the direction that matters - the secret can never be written back out - but it
+ * means validation ACCEPTED a file that was carrying a credential, and the acceptance was silent.
+ * A person who pasted a key into `tasks.json` would be told the file was fine.
+ *
+ * Rejecting first turns that into an honest error naming the offending keys. Keys are matched, never
+ * values, so prose containing the word "state" is still not a false positive, and no documented
+ * schema field collides with the credential list (checked against the schemas, not assumed).
+ *
+ * Containers are separated from primitives by PARSING rather than by a representation check. That
+ * is not fastidiousness: a string has enumerable index keys, so treating "anything with keys" as a
+ * container makes the walk recurse forever on a one-character string. An earlier version of this
+ * function did exactly that and blew the stack on ordinary text.
+ */
+export function assertNoCredentialKeysInRaw(value: JsonValue, fileName: string): void {
+  const keys: string[] = [];
+  collectJsonKeys(value, keys);
+  assertNoCredentialKeys(keys, fileName);
+}
+
+/** Any JSON container. Primitives and null fail this schema, which is the only discriminator used. */
+type JsonContainer = JsonValue[] | { readonly [key: string]: JsonValue };
+
+const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.null(),
+    z.boolean(),
+    z.number(),
+    z.string(),
+    z.array(JsonValueSchema),
+    z.record(z.string(), JsonValueSchema),
+  ]),
+);
+
+const JsonContainerSchema: z.ZodType<JsonContainer> = z.lazy(() =>
+  z.union([z.array(JsonValueSchema), z.record(z.string(), JsonValueSchema)]),
+);
+
+/** Keys of a JSON container, or null when the value is a primitive or null. */
+function jsonContainerKeys(node: JsonValue): Array<[string, JsonValue]> | null {
+  const parsed = JsonContainerSchema.safeParse(node);
+  if (!parsed.success) return null;
+  if (Array.isArray(parsed.data)) return parsed.data.map((item, index) => [String(index), item]);
+  return Object.entries(parsed.data);
+}
+
+function collectJsonKeys(node: JsonValue, into: string[]): void {
+  const entries = jsonContainerKeys(node);
+  if (entries === null) return;
+  for (const [key, child] of entries) {
+    into.push(key);
+    collectJsonKeys(child, into);
   }
 }
 
@@ -585,6 +665,17 @@ export function parseVisibleFile(key: VisibleFileKey, raw: string): FileParseRes
     return { ok: false, fileName, reason: "invalid JSON" };
   }
 
+  // Before any schema: an unknown key would otherwise be stripped and the credential would pass
+  // validation silently.
+  try {
+    // SAFETY: JSON.parse returned successfully, so `decoded` is a JSON value. The assertion only
+    // restates that for the walk; it does not assume any structure.
+    assertNoCredentialKeysInRaw(decoded as JsonValue, fileName);
+  } catch (error) {
+    if (error instanceof DriveVisibleError) return { ok: false, fileName, reason: error.message };
+    throw error;
+  }
+
   if (key === "memory") {
     const parsed = MemoryDocumentSchema.safeParse(decoded);
     if (!parsed.success) return { ok: false, fileName, reason: parsed.error.issues[0]?.message ?? "schema mismatch" };
@@ -786,19 +877,30 @@ export async function findOrCreateVisibleFolder(
   return { id: chosen.id, created: false, duplicates: ordered.slice(1).map((f) => f.id) };
 }
 
-/** Ensures `Muster/backups/` exists. Placing it here changes nothing about the encrypted format. */
+/**
+ * Ensures `Muster/backups/` exists. Placing it here changes nothing about the encrypted format.
+ *
+ * Selection is DETERMINISTIC and duplicate-aware, exactly like the visible folder, because this
+ * helper is the one that will hold the verified copy of `muster-workspace-v2.enc`. Picking
+ * `matches[0]` would have made the destination depend on whatever order Drive happened to list in,
+ * so two runs could write the same backup into two different folders and an operator inspecting the
+ * folder would not know which one was authoritative. Earliest `createdTime` wins, unknown age sorts
+ * last, ties break on `id`, and every loser is reported by exact id so the duplicates can be removed
+ * deliberately rather than guessed at.
+ */
 export async function findOrCreateBackupsFolder(
   client: VisibleDriveClient,
   visibleFolderId: string,
-): Promise<{ id: string; created: boolean }> {
+): Promise<{ id: string; created: boolean; duplicates: string[] }> {
   const matches = await listOrThrow(client, {
     q: `mimeType = '${FOLDER_MIME}' and name = '${VISIBLE_BACKUPS_DIR}' and '${escapeDriveQuery(visibleFolderId)}' in parents and trashed = false`,
-    fields: "files(id,name,parents,mimeType)",
+    fields: "files(id,name,parents,mimeType,createdTime)",
   });
-  const found = matches[0];
-  if (found) return { id: found.id, created: false };
+  const ordered = orderForSelection(matches);
+  const chosen = ordered[0];
+  if (chosen) return { id: chosen.id, created: false, duplicates: ordered.slice(1).map((f) => f.id) };
   const created = await createOrThrow(client, VISIBLE_BACKUPS_DIR, visibleFolderId);
-  return { id: created.id, created: true };
+  return { id: created.id, created: true, duplicates: [] };
 }
 
 // ── Writing ────────────────────────────────────────────────────────────────────
@@ -818,9 +920,9 @@ export class PartialWriteError extends DriveVisibleError {
   constructor(
     message: string,
     readonly wrote: readonly string[],
-    readonly cause: DriveVisibleError,
+    readonly cause: Error,
   ) {
-    super(message, cause.code);
+    super(message, cause instanceof DriveVisibleError ? cause.code : "transport_error");
     this.name = "PartialWriteError";
   }
 }
@@ -927,16 +1029,19 @@ export async function writeVisibleFiles(
       wrote.push(fileName);
     }
   } catch (error) {
-    if (error instanceof DriveVisibleError) {
-      throw new PartialWriteError(
-        wrote.length === 0
-          ? `visible folder write failed before any file was written: ${error.message}`
-          : `visible folder write failed after ${wrote.length} file(s) (${wrote.join(", ")}); they were NOT rolled back: ${error.message}`,
-        wrote,
-        error,
-      );
-    }
-    throw error;
+    // EVERY error is wrapped, not only the ones this module raised. An adapter or transport fault
+    // that was never mapped to a DriveVisibleError would otherwise escape with the written-file
+    // list discarded - so a caller that had already replaced three files would be told only that
+    // something failed, and could not tell a partial write from one that never started. The
+    // original error is kept as `cause` so nothing about the failure is lost in the wrapping.
+    if (!(error instanceof Error)) throw error;
+    throw new PartialWriteError(
+      wrote.length === 0
+        ? `visible folder write failed before any file was written: ${error.message}`
+        : `visible folder write failed after ${wrote.length} file(s) (${wrote.join(", ")}); they were NOT rolled back: ${error.message}`,
+      wrote,
+      error,
+    );
   }
   return { wrote, unchanged };
 }
@@ -946,6 +1051,21 @@ export async function writeVisibleFiles(
  * reader will use, so a render bug cannot ship a file the reader would reject.
  */
 function assertRenderedBodyIsUsable(key: VisibleFileKey, body: string, fileName: string): void {
+  // A credential is checked first and keeps its own code. Reporting it as `corrupt` would file a
+  // security event under a data-integrity label, and the two call for different responses: one needs
+  // the key rotated, the other needs the file repaired.
+  if (key !== "soul") {
+    let decoded: JsonValue = null;
+    try {
+      // SAFETY: JSON.parse returned successfully, so `body` decoded to a JSON value. Unparseable
+      // bodies fall through to null, which walks to no keys and lets the round-trip check report
+      // the real problem rather than a credential error.
+      decoded = JSON.parse(body) as JsonValue;
+    } catch {
+      decoded = null;
+    }
+    assertNoCredentialKeysInRaw(decoded, fileName);
+  }
   const parsed = parseVisibleFile(key, body);
   if (!parsed.ok) {
     throw new DriveVisibleError(`${fileName} did not round-trip: ${parsed.reason}`, "corrupt");

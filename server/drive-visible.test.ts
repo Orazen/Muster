@@ -501,6 +501,33 @@ describe("write and conflict behaviour", () => {
     expect(error?.code).toBe("consent_revoked");
   });
 
+  it("preserves the written-file list when the adapter fails with an error it never mapped", async () => {
+    // Not a DriveVisibleError: an adapter or transport fault the module does not recognise. It must
+    // still report what was already written, or a caller cannot tell a partial write from one that
+    // never started - and the original error must survive for diagnosis.
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    const good = renderVisibleFiles(documents());
+    const order = [VISIBLE_FILE_NAMES.soul, VISIBLE_FILE_NAMES.tasks];
+    const original = new Error("socket hang up");
+    let seen = 0;
+    const inner = drive.createFile.bind(drive);
+    drive.createFile = async (name, parent, body) => {
+      seen += 1;
+      if (seen === 2) throw original;
+      return inner(name, parent, body);
+    };
+    const partial = { [order[0]!]: good[order[0]!], [order[1]!]: good[order[1]!] };
+    const error = await writeVisibleFiles(drive, folder.id, partial).then(
+      () => null,
+      (reason: PartialWriteError) => reason,
+    );
+    expect(error).toBeInstanceOf(PartialWriteError);
+    expect(error?.wrote).toEqual([VISIBLE_FILE_NAMES.soul]);
+    expect(error?.code).toBe("transport_error");
+    expect(error?.cause).toBe(original);
+  });
+
   it("reports a deletion race as not_found rather than as success", async () => {
     const drive = new FakeDrive();
     const folder = await findOrCreateVisibleFolder(drive);
@@ -513,6 +540,92 @@ describe("write and conflict behaviour", () => {
 });
 
 // ── settings.json allowlist ────────────────────────────────────────────────────
+
+// ── raw credential rejection (before schema stripping) ─────────────────────────
+
+describe("raw credential rejection", () => {
+  type TaskRecord = ReturnType<typeof buildTasksDocument>["tasks"][number];
+  /** A nested JSON value for the depth fixtures; closed, so no open dictionary is needed. */
+  type NestedJson = { nested: NestedJson } | { leaf: string } | { apiKey: string };
+  type ThreadRecord = ReturnType<typeof buildSessionsDocument>["threads"][number];
+  const sampleTask = { id: "task-1", title: "Ship", status: "open", updatedAt: 1724000000000 } as const;
+  const tasksDoc = (): ReturnType<typeof buildTasksDocument> => buildTasksDocument([sampleTask]);
+  const firstTask = (): TaskRecord => tasksDoc().tasks[0] ?? sampleTask;
+
+  it("refuses a credential-shaped key at the top level instead of stripping it silently", () => {
+    // The schema would strip this and validate cleanly, so a person who pasted a key into the file
+    // would be told it was fine. It must be refused, and the reason must name the key.
+    const raw = JSON.stringify({ ...tasksDoc(), apiKey: "sk-live-1" });
+    expect(parseVisibleFile("tasks", raw)).toMatchObject({ ok: false, reason: expect.stringContaining("apiKey") });
+  });
+
+  it("refuses a credential-shaped key nested inside a record, which a top-level check would miss", () => {
+    const raw = JSON.stringify({ ...tasksDoc(), tasks: [{ ...firstTask(), meta: { providerKey: "pk-1" } }] });
+    expect(parseVisibleFile("tasks", raw)).toMatchObject({ ok: false, reason: expect.stringContaining("providerKey") });
+  });
+
+  it("refuses a credential-shaped key nested inside an array element", () => {
+    const sessionsDoc = buildSessionsDocument([
+      { threadId: "t-1", title: "Launch prep", messages: [{ id: "m-1", role: "user", kind: "text", at: 1724000000000, text: "hello", parentId: null }] },
+    ]);
+    const thread: ThreadRecord = sessionsDoc.threads[0] ?? { threadId: "t-1", title: "Launch prep", messages: [] };
+    const raw = JSON.stringify({
+      ...sessionsDoc,
+      threads: [{ ...thread, messages: [{ id: "m", role: "user", kind: "text", at: 1, text: "hi", parentId: null, accessToken: "at-1" }] }],
+    });
+    expect(parseVisibleFile("sessions", raw)).toMatchObject({ ok: false, reason: expect.stringContaining("accessToken") });
+  });
+
+  it("does not treat ordinary prose that mentions a credential word as a credential", () => {
+    const raw = JSON.stringify({ ...tasksDoc(), tasks: [{ ...firstTask(), title: "rotate the apiKey and reset the password" }] });
+    expect(parseVisibleFile("tasks", raw).ok).toBe(true);
+  });
+
+  it("terminates on string values instead of recursing through their indices", () => {
+    // A string has enumerable index keys, so a walk that treats "has keys" as "is a container"
+    // recurses forever on a one-character string. This is a reproduced stack overflow, not a
+    // hypothetical: an earlier version of the walk hung on ordinary text.
+    const single = JSON.stringify({ ...tasksDoc(), tasks: [{ ...firstTask(), title: "x" }] });
+    expect(parseVisibleFile("tasks", single).ok).toBe(true);
+
+    // Deep nesting must terminate too.
+    let deep: NestedJson = { leaf: "v" };
+    for (let i = 0; i < 200; i += 1) deep = { nested: deep };
+    expect(parseVisibleFile("tasks", JSON.stringify({ ...tasksDoc(), extra: deep })).ok).toBe(true);
+  });
+
+  it("finds a credential however deeply it is buried", () => {
+    let deep: NestedJson = { apiKey: "sk-deep-1" };
+    for (let i = 0; i < 50; i += 1) deep = { nested: deep };
+    const raw = JSON.stringify({ ...tasksDoc(), blob: deep });
+    expect(parseVisibleFile("tasks", raw)).toMatchObject({ ok: false, reason: expect.stringContaining("apiKey") });
+  });
+
+  it("keeps every documented schema field legal, so the gate cannot reject a valid document", () => {
+    for (const key of VISIBLE_FILE_KEYS) {
+      if (key === "soul") continue;
+      expect(parseVisibleFile(key, JSON.stringify(documents()[key])).ok, `${key} must stay parseable`).toBe(true);
+    }
+  });
+
+  it("cannot write bytes that retain a field validation discarded", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    // A hand-crafted body whose extra field the reader would strip. Writing it unchanged would put a
+    // field on Drive that no read path agrees exists.
+    await expect(
+      writeVisibleFiles(drive, folder.id, {
+        [VISIBLE_FILE_NAMES.tasks]: JSON.stringify({ ...tasksDoc(), apiKey: "sk-live-1" }),
+      }),
+    ).rejects.toMatchObject({ code: "credential_leak" });
+    expect(drive.writes).toBe(0);
+
+    // And the rendered form of a valid document carries no credential field at all.
+    for (const body of Object.values(renderVisibleFiles(documents()))) {
+      expect(body).not.toMatch(/apiKey|accessToken|password/i);
+    }
+  });
+});
 
 describe("settings allowlist", () => {
   it("keeps allowlisted keys", () => {
@@ -691,6 +804,40 @@ describe("folder discovery", () => {
     expect(first.created).toBe(true);
     expect(second.created).toBe(false);
     expect(second.id).toBe(first.id);
+  });
+
+  // This helper is the destination for the verified copy of muster-workspace-v2.enc, so which
+  // folder it picks has to be a decision rather than a side effect of Drive's listing order.
+  it("picks the same backups/ folder regardless of listing order, and reports the rest by id", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    const older = drive.seedFolder("backups", folder.id, "2024-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+    const newer = drive.seedFolder("backups", folder.id, "2025-01-01T00:00:00.000Z", "2024-01-01T00:00:00.000Z");
+    const first = await findOrCreateBackupsFolder(drive, folder.id);
+    const second = await findOrCreateBackupsFolder(drive, folder.id);
+    // Older by CREATION wins even though it was edited most recently.
+    expect(first.id).toBe(older);
+    expect(second.id).toBe(older);
+    expect(first.duplicates).toEqual([newer]);
+  });
+
+  it("sorts an unknown-age backups/ folder last rather than adopting it", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    const dated = drive.seedFolder("backups", folder.id, "2024-01-01T00:00:00.000Z");
+    const undated = drive.seedFolder("backups", folder.id);
+    const chosen = await findOrCreateBackupsFolder(drive, folder.id);
+    expect(chosen.id).toBe(dated);
+    expect(chosen.duplicates).toEqual([undated]);
+  });
+
+  it("ignores a backups/ folder that lives outside Muster/", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    const stranger = drive.seedFolder("backups", "root", "2020-01-01T00:00:00.000Z");
+    const chosen = await findOrCreateBackupsFolder(drive, folder.id);
+    expect(chosen.id).not.toBe(stranger);
+    expect(chosen.created).toBe(true);
   });
 });
 
