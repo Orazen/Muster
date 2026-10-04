@@ -58,6 +58,13 @@ export type VisibleFileKey = keyof typeof VISIBLE_FILE_NAMES;
  */
 const PERSONA_MARKER = /^<!-- muster-persona (.+) -->$/;
 
+/**
+ * The body boundary. It marks the FIRST line of human content and names the persona it belongs to,
+ * so generated formatting and user content can never be confused - not even when a genuine first
+ * body line happens to look exactly like the heading this module writes.
+ */
+const PERSONA_BODY_MARKER = /^<!-- muster-body (.+) -->$/;
+
 /** The five keys, in contract order. Written out so `satisfies` checks it against the
  *  name table rather than an assertion asserting it. Exported so call sites need no assertion. */
 export const VISIBLE_FILE_KEYS = ["soul", "memory", "sessions", "tasks", "settings"] as const satisfies readonly VisibleFileKey[];
@@ -357,28 +364,8 @@ export function buildSettingsDocument(settings: SettingsProjection["settings"]):
 }
 
 /**
- * soul.md stays readable Markdown rather than JSON, because a person is meant to open and edit
- * it. The version marker is an HTML comment so it survives a Markdown reader untouched.
- */
-/**
- * Byte-exact round-trip contract for soul.md.
- *
- * For each persona the renderer emits EXACTLY these five slots, newline-joined, and appends the
- * body verbatim with no trimming:
- *
- *     <!-- muster-persona ID -->
- *     ## ID
- *     <one blank line>
- *     <body, byte for byte>
- *     <one trailing blank line>
- *
- * The parser removes exactly what was added - the heading when it is the generated one, the blank
- * line that follows it, and one trailing blank line - and nothing else. No `trim()`, so leading
- * indentation, trailing spaces and blank lines inside the body survive unchanged. A body that would
- * not survive this contract is refused at render time rather than written lossy.
- *
- * Refusing marker-shaped lines (see `assertBodyIsRenderable`) is what keeps the contract total: a
- * literal marker in a body would otherwise read back as a second persona.
+ * soul.md stays readable Markdown rather than JSON, because a person is meant to open and edit it.
+ * The version marker is an HTML comment so it survives a Markdown reader untouched.
  */
 export function renderSoulMarkdown(document: SoulDocument): string {
   assertPersonaIdsSane(document.personas);
@@ -388,13 +375,18 @@ export function renderSoulMarkdown(document: SoulDocument): string {
     out += `<!-- muster-persona ${persona.botId} -->\n`;
     out += `## ${persona.botId}\n`;
     out += "\n";
+    out += `<!-- muster-body ${persona.botId} -->\n`;
     out += persona.markdown;
     out += "\n\n";
   }
   return out;
 }
 
-/** A body containing a persona-marker line could never round-trip, so it is refused, not escaped. */
+/**
+ * A body line that reads as a persona marker or as a body boundary could never round-trip, so it is
+ * refused rather than escaped. Escaping would invent syntax a person editing the file has to know
+ * about; refusing makes the file unwritable instead, which fails loudly at the point of the mistake.
+ */
 function assertBodyIsRenderable(botId: string, markdown: string): void {
   for (const line of markdown.split("\n")) {
     if (PERSONA_MARKER.test(line)) {
@@ -404,59 +396,80 @@ function assertBodyIsRenderable(botId: string, markdown: string): void {
         "corrupt",
       );
     }
+    if (PERSONA_BODY_MARKER.test(line)) {
+      throw new DriveVisibleError(
+        `${botId}'s soul body contains a line that reads as a body boundary ` +
+          `(${line.trim()}); it would truncate the body on the next read`,
+        "corrupt",
+      );
+    }
   }
 }
 
-/**
- * Splits on persona MARKERS, never on heading shape. Everything between two markers is that
- * persona's body verbatim — internal `## ` headings and fenced code included — except for the
- * decorative `## <botId>` heading this module writes, which is stripped so the round trip is exact.
- * Text before the first marker is ignored rather than guessed at.
- */
-/**
- * Splits on persona MARKERS, never on heading shape, and removes exactly the lines the renderer
- * added so the body is returned byte for byte.
- *
- * Heading handling is deliberately narrow: the generated heading is removed ONLY when the first line
- * is exactly `## <the persona's own id>`. A person who deletes the generated heading keeps their real
- * first heading (`## Voice`) as content, instead of having it silently deleted.
- *
- * `strayContent` is returned so the caller can REJECT a document that has versioned, non-empty
- * content but no persona markers. That is malformed input, not an empty workspace, and reporting it as
- * `[]` would let a truncated or hand-mangled file read as "nothing to restore".
- */
 /** Named so the round-trip contract is a stated type, not an anonymous shape. */
 export interface SoulSplitResult {
   personas: SoulDocument["personas"];
   /** True when versioned content appeared outside any persona marker. */
   strayContent: boolean;
+  /** Structural defects that make the document malformed rather than merely empty. */
+  problems: string[];
 }
 
+/**
+ * Splits on the persona marker and the explicit body boundary, never on heading shape.
+ *
+ * Everything between a persona marker and its `<!-- muster-body ID -->` boundary is generated
+ * formatting and is discarded WITHOUT BEING INSPECTED. Everything after the boundary is the body,
+ * byte for byte. The boundary - not a heading - is what locates the start of the content, which is
+ * what makes these two cases correct instead of ambiguous:
+ *
+ *   - a genuine first body line of `## <its own botId>` survives, because it is after the boundary
+ *     and therefore content, not a heading that could be mistaken for the generated one;
+ *   - a person who deletes the generated heading keeps their real first heading, because deleting
+ *     prelude changes nothing: the boundary is still where the content starts.
+ *
+ * The boundary NAMES its persona. A block whose boundary names a different bot is reported rather
+ * than silently swallowing the content after it, which is what a copied-and-not-renamed block does.
+ *
+ * A persona block with NO boundary is reported in `problems` and its content is not returned. The
+ * alternative - falling back to "strip `## <own id>` if present" - reintroduces exactly the
+ * ambiguity the boundary exists to remove, and would pick one of two answers without saying which.
+ *
+ * `strayContent` reports versioned, non-empty content outside any persona marker, so the caller can
+ * REJECT a document that is malformed rather than let a truncated file read as "nothing to restore".
+ */
 export function splitSoulMarkdownDetailed(text: string): SoulSplitResult {
   const personas: SoulDocument["personas"] = [];
-  let currentBotId: string | null = null;
-  let body: string[] = [];
+  const problems: string[] = [];
   let strayContent = false;
   let seenMarker = false;
+  let pendingBotId: string | null = null;
+  let body: string[] = [];
+  let boundarySeen = false;
 
   const flush = (): void => {
-    if (currentBotId === null) return;
-    let rest = body;
-    // Remove the generated heading only on an exact match with this persona's id.
-    if (rest[0] === `## ${currentBotId}`) {
-      rest = rest.slice(1);
-      // The renderer put exactly one blank line after the heading.
-      if (rest[0] === "") rest = rest.slice(1);
+    if (pendingBotId === null) return;
+    const botId = pendingBotId;
+    pendingBotId = null;
+    if (!boundarySeen) {
+      problems.push(
+        `persona ${botId} has no <!-- muster-body ${botId} --> boundary, so the start of its body ` +
+          `cannot be told from generated formatting; refusing to guess`,
+      );
+      body = [];
+      boundarySeen = false;
+      return;
     }
-    // The renderer put exactly one trailing blank line.
+    let rest = body;
+    // The renderer puts exactly one trailing blank line after the body.
     if (rest.length > 0 && rest[rest.length - 1] === "") rest = rest.slice(0, -1);
-    personas.push({ botId: currentBotId, markdown: rest.join("\n") });
-    currentBotId = null;
+    personas.push({ botId, markdown: rest.join("\n") });
     body = [];
+    boundarySeen = false;
   };
 
-  // The renderer terminates the file with one newline. Removing that terminator FIRST is what
-  // makes "drop exactly one trailing blank line" mean the generated one, rather than accidentally
+  // The renderer terminates the file with one newline. Removing that terminator FIRST is what makes
+  // "drop exactly one trailing blank line" mean the generated one, rather than accidentally
   // consuming the terminator and leaving a stray newline attached to the body.
   const withoutTerminator = text.endsWith("\n") ? text.slice(0, -1) : text;
 
@@ -465,10 +478,28 @@ export function splitSoulMarkdownDetailed(text: string): SoulSplitResult {
     if (marker?.[1]) {
       flush();
       seenMarker = true;
-      currentBotId = marker[1].trim();
+      pendingBotId = marker[1].trim();
+      boundarySeen = false;
       continue;
     }
-    if (currentBotId !== null) {
+    if (pendingBotId !== null) {
+      if (!boundarySeen) {
+        const boundary = PERSONA_BODY_MARKER.exec(line);
+        if (boundary) {
+          const named = boundary[1]?.trim() ?? "";
+          if (named !== pendingBotId) {
+            problems.push(
+              `persona ${pendingBotId} has a body boundary naming ${named}; the block was probably ` +
+                `copied from another bot and not renamed`,
+            );
+          }
+          boundarySeen = true;
+          continue;
+        }
+        // Generated prelude. Discarded without inspection so that deleting, renaming or reordering
+        // it cannot change how the body is read.
+        continue;
+      }
       body.push(line);
       continue;
     }
@@ -478,7 +509,7 @@ export function splitSoulMarkdownDetailed(text: string): SoulSplitResult {
     strayContent = true;
   }
   flush();
-  return { personas, strayContent };
+  return { personas, strayContent, problems };
 }
 
 /** Convenience wrapper for callers that only want the personas. */
@@ -517,7 +548,10 @@ function parseSoul(raw: string): FileParseResult {
   if (schemaVersion > VISIBLE_SCHEMA_VERSION) {
     return { ok: false, fileName, reason: `schemaVersion ${schemaVersion} is newer than ${VISIBLE_SCHEMA_VERSION}` };
   }
-  const { personas, strayContent } = splitSoulMarkdownDetailed(raw);
+  const { personas, strayContent, problems } = splitSoulMarkdownDetailed(raw);
+  if (problems.length > 0) {
+    return { ok: false, fileName, reason: problems[0] ?? "malformed soul.md" };
+  }
   // Versioned, non-empty content with no persona markers is MALFORMED. An intentionally empty
   // document is one that carries the version marker and nothing else, which parses to no personas.
   if (strayContent) {

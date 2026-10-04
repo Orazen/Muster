@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   CREDENTIAL_KEYS,
   PartialWriteError,
+  splitSoulMarkdownDetailed,
   DriveVisibleError,
   FOLDER_MIME,
   VISIBLE_BACKUPS_DIR,
@@ -260,10 +261,13 @@ describe("visible folder contract", () => {
   it("reports a malformed soul.md rather than inventing personas from headings", () => {
     // No marker at all: headings must NOT be read as personas.
     expect(splitSoulMarkdown("<!-- muster-visible schemaVersion=1 -->\n\n## bot-9\n\nbody\n")).toEqual([]);
-    // Marker with no body is a real, empty persona rather than a silent drop.
-    expect(splitSoulMarkdown("<!-- muster-visible schemaVersion=1 -->\n<!-- muster-persona bot-9 -->\n## bot-9\n")).toEqual([
-      { botId: "bot-9", markdown: "" },
-    ]);
+    // Boundary with no body after it is a real, empty persona rather than a silent drop.
+    expect(
+      splitSoulMarkdown(
+        "<!-- muster-visible schemaVersion=1 -->\n<!-- muster-persona bot-9 -->\n## bot-9\n\n" +
+          "<!-- muster-body bot-9 -->\n",
+      ),
+    ).toEqual([{ botId: "bot-9", markdown: "" }]);
   });
 
   it("treats sessions.json as conversation history, not authentication state", () => {
@@ -278,6 +282,8 @@ describe("visible folder contract", () => {
 // ── soul.md data preservation (consolidated) ─────────────────────────────────
 
 describe("soul.md preservation", () => {
+  const boundary = (id: string): string => `<!-- muster-body ${id} -->`;
+
   it("round trips bodies byte for byte, including indentation and trailing whitespace", () => {
     const bodies = [
       { botId: "bot-1", markdown: "    four space indent\n\n  two spaces  " },
@@ -291,22 +297,90 @@ describe("soul.md preservation", () => {
     expect(splitSoulMarkdown(renderSoulMarkdown(original))).toEqual(bodies);
   });
 
-  it("keeps a genuine first heading when the generated one was deleted", () => {
-    // Person deleted the decorative '## bot-1' line; '## Voice' is now first and must survive.
-    const handEdited = "<!-- muster-visible schemaVersion=1 -->\n<!-- muster-persona bot-1 -->\n## Voice\n\nTerse.\n\n";
+  // ── the collision this block exists to close ────────────────────────────────
+  it("keeps a genuine first body line that is exactly the heading it would have generated", () => {
+    // Before the boundary marker this was indistinguishable from the generated heading: the parser
+    // had to choose one of two answers. Now the boundary locates the content, so both survive.
+    const bodies = [
+      { botId: "bot-7", markdown: "## bot-7\n\nTerse." },
+      { botId: "bot-8", markdown: "## bot-8" },
+    ];
+    const original = buildSoulDocument(bodies);
+    expect(splitSoulMarkdown(renderSoulMarkdown(original))).toEqual(bodies);
+
+    // And the same collision after a person deletes the decorative heading by hand.
+    const handEdited =
+      "<!-- muster-visible schemaVersion=1 -->\n" +
+      "<!-- muster-persona bot-7 -->\n" +
+      "<!-- muster-body bot-7 -->\n" +
+      "## bot-7\n\nTerse.\n\n";
+    expect(splitSoulMarkdown(handEdited)).toEqual([{ botId: "bot-7", markdown: "## bot-7\n\nTerse." }]);
+  });
+
+  it("keeps a genuine first heading after the decorative heading is deleted", () => {
+    // Person deleted the decorative '## bot-1' line and its blank. The boundary still marks the
+    // start of content, so '## Voice' is content rather than something to strip.
+    const handEdited =
+      "<!-- muster-visible schemaVersion=1 -->\n" +
+      "<!-- muster-persona bot-1 -->\n" +
+      "<!-- muster-body bot-1 -->\n" +
+      "## Voice\n\nTerse.\n\n";
     expect(splitSoulMarkdown(handEdited)).toEqual([{ botId: "bot-1", markdown: "## Voice\n\nTerse." }]);
+
+    // The blank left behind where the heading was sits BEFORE the boundary, so it is prelude and
+    // changes nothing.
+    const leftoverBlank = handEdited.replace(
+      "<!-- muster-persona bot-1 -->\n",
+      "<!-- muster-persona bot-1 -->\n\n",
+    );
+    expect(splitSoulMarkdown(leftoverBlank)).toEqual([{ botId: "bot-1", markdown: "## Voice\n\nTerse." }]);
+
+    // A blank AFTER the boundary is the body's own leading blank line, and byte-exactness keeps it.
+    const leadingBlank = handEdited.replace(
+      "<!-- muster-body bot-1 -->\n",
+      "<!-- muster-body bot-1 -->\n\n",
+    );
+    expect(splitSoulMarkdown(leadingBlank)).toEqual([{ botId: "bot-1", markdown: "\n## Voice\n\nTerse." }]);
   });
 
-  it("keeps a body whose first line is its own heading shape", () => {
-    const original = buildSoulDocument([{ botId: "bot-9", markdown: "## Voice\n\nTerse." }]);
-    expect(splitSoulMarkdown(renderSoulMarkdown(original))).toEqual(original.personas);
+  it("reports a persona block whose boundary was removed instead of guessing", () => {
+    // With the whole prelude gone there is genuinely no boundary left. Falling back to "strip
+    // '## <own id>' if present" would pick one of two answers silently, so it is reported.
+    const noBoundary =
+      "<!-- muster-visible schemaVersion=1 -->\n<!-- muster-persona bot-1 -->\n## bot-1\n\nTerse.\n\n";
+    expect(splitSoulMarkdownDetailed(noBoundary)).toMatchObject({
+      personas: [],
+      problems: [expect.stringContaining("no <!-- muster-body bot-1 --> boundary")],
+    });
+    expect(parseVisibleFile("soul", noBoundary)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("refusing to guess"),
+    });
   });
 
-  it("refuses to render a body containing a literal persona marker", () => {
-    const trap = buildSoulDocument([
-      { botId: "bot-1", markdown: "before\n<!-- muster-persona sneaky -->\nafter" },
+  it("reports a boundary that names a different bot rather than absorbing what follows", () => {
+    const copied =
+      "<!-- muster-visible schemaVersion=1 -->\n" +
+      "<!-- muster-persona bot-1 -->\n" +
+      "## bot-1\n\n" +
+      "<!-- muster-body bot-2 -->\n" +
+      "Terse.\n\n";
+    expect(splitSoulMarkdownDetailed(copied).problems).toEqual([
+      expect.stringContaining("boundary naming bot-2"),
     ]);
-    expect(() => renderSoulMarkdown(trap)).toThrowError(/reads as a persona marker/);
+  });
+
+  it("refuses to render a body containing a literal persona marker or body boundary", () => {
+    expect(() =>
+      renderSoulMarkdown(
+        buildSoulDocument([{ botId: "bot-1", markdown: "before\n<!-- muster-persona sneaky -->\nafter" }]),
+      ),
+    ).toThrowError(/reads as a persona marker/);
+    expect(() =>
+      renderSoulMarkdown(
+        buildSoulDocument([{ botId: "bot-1", markdown: "before\n<!-- muster-body bot-1 -->\nafter" }]),
+      ),
+    ).toThrowError(/reads as a body boundary/);
   });
 
   it("rejects an invalid or duplicated persona id on both write and read", () => {
@@ -322,8 +396,14 @@ describe("soul.md preservation", () => {
       ),
     ).toThrowError(/more than once/);
 
-    const dup = "<!-- muster-visible schemaVersion=1 -->\n<!-- muster-persona bot-1 -->\n## bot-1\n\na\n\n<!-- muster-persona bot-1 -->\n## bot-1\n\nb\n\n";
-    expect(parseVisibleFile("soul", dup)).toMatchObject({ ok: false, reason: expect.stringContaining("more than once") });
+    const dup =
+      "<!-- muster-visible schemaVersion=1 -->\n" +
+      "<!-- muster-persona bot-1 -->\n## bot-1\n\n<!-- muster-body bot-1 -->\na\n\n" +
+      "<!-- muster-persona bot-1 -->\n## bot-1\n\n<!-- muster-body bot-1 -->\nb\n\n";
+    expect(parseVisibleFile("soul", dup)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("more than once"),
+    });
   });
 
   it("rejects versioned non-empty content with no markers, but accepts an intentionally empty file", () => {
@@ -333,6 +413,12 @@ describe("soul.md preservation", () => {
     });
     const empty = parseVisibleFile("soul", "<!-- muster-visible schemaVersion=1 -->\n");
     expect(empty.ok).toBe(true);
+  });
+
+  it("exposes the boundary in the rendered file so the boundary is auditable by eye", () => {
+    const rendered = renderSoulMarkdown(buildSoulDocument([{ botId: "bot-1", markdown: "Terse." }]));
+    expect(rendered).toContain(boundary("bot-1"));
+    expect(rendered.split("\n").filter((line) => line === boundary("bot-1"))).toHaveLength(1);
   });
 });
 
