@@ -35,11 +35,11 @@ concurrency:
   group: macos-local-app-bundle-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # Fresh, runner-owned output for every run. The packaging script fences writes to
-  # the workspace by default, so the packaging step below makes the one recorded
-  # scope decision that relaxes location only.
-  BUNDLE_OUT: ${{ runner.temp }}/muster-mac-bundle
+# Deliberately no workflow-level `env`. GitHub's context-availability table
+# excludes `runner` from workflow-level and job-level `env`, so a top-level
+# `BUNDLE_OUT: ${{ runner.temp }}/...` resolves to an empty `runner.temp` and the
+# consumers below would build into `/muster-mac-bundle`. The path is resolved in
+# the step-level precondition instead, where `runner` actually exists.
 
 jobs:
   package:
@@ -48,6 +48,33 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
+
+      # Fresh, runner-owned output for every run. The packaging script fences writes
+      # to the workspace by default, so the packaging step below makes the one
+      # recorded scope decision that relaxes location only.
+      #
+      # Resolved in step scope, where `runner` is available, from two independent
+      # spellings: the expression and $RUNNER_TEMP. The run fails if either is
+      # empty or if the pair disagrees, so an unresolved expression cannot silently
+      # send the build outside the runner's own temp directory. The verified value
+      # is exported once; both consuming steps read it from there rather than
+      # restating the path, so the assertion and the consumption cannot drift.
+      - name: Resolve and verify the runner-owned output path
+        env:
+          EXPRESSION_OUT: ${{ runner.temp }}/muster-mac-bundle
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          [ -n "${RUNNER_TEMP:-}" ] || fail "RUNNER_TEMP is empty; there is no runner-owned temp directory to build into."
+          [ -n "${EXPRESSION_OUT:-}" ] || fail "the runner expression did not resolve at step scope."
+
+          expected="$RUNNER_TEMP/muster-mac-bundle"
+          [ -n "$expected" ] || fail "the resolved output path is empty."
+          [ "$EXPRESSION_OUT" = "$expected" ] || fail "resolved output path is unexpected: got '$EXPRESSION_OUT', expected '$expected'."
+
+          echo "  BUNDLE_OUT=$expected"
+          echo "BUNDLE_OUT=$expected" >> "$GITHUB_ENV"
 
       - name: Show the toolchain
         run: swift --version
