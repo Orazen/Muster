@@ -32,6 +32,7 @@
 // real content silently attached to it — data loss with no error anywhere. So
 // the producer refuses to render it instead.
 
+import { z } from "zod";
 import { exportSoulMd, type BotPersonaFields } from "./soul-md.ts";
 
 /** Mirrors the parser's schema version; bumped only by a deliberate format change. */
@@ -144,8 +145,36 @@ export interface MemoryBotInput {
   topics?: readonly MemoryTopicInput[];
 }
 
+const nonEmptyIdSchema = z.string().min(1);
+const validTimestampSchema = z.number().refine((n) => !Number.isNaN(n));
+
+function assertNonEmptyId(id: string, fieldName: string, container: string): void {
+  const result = nonEmptyIdSchema.safeParse(id);
+  if (!result.success) {
+    throw new DriveProjectionError(
+      `${container} cannot render empty ${fieldName}: the parser requires a non-empty string`,
+    );
+  }
+}
+
+function assertValidTimestamp(ts: number, fieldName: string, container: string): void {
+  const result = validTimestampSchema.safeParse(ts);
+  if (!result.success) {
+    throw new DriveProjectionError(
+      `${container} cannot render ${fieldName} with NaN timestamp: the parser requires a valid number`,
+    );
+  }
+}
+
 /** Serializes `memory.json`. Absent optionals become their schema defaults, never `undefined`. */
 export function produceMemoryJson(bots: readonly MemoryBotInput[]): string {
+  for (const bot of bots) {
+    assertNonEmptyId(bot.botId, "botId", "memory.json");
+    for (const topic of bot.topics ?? []) {
+      assertNonEmptyId(topic.name, "topic name", "memory.json");
+    }
+  }
+
   const document = {
     schemaVersion: VISIBLE_SCHEMA_VERSION,
     kind: "memory",
@@ -178,6 +207,14 @@ export interface SessionThreadInput {
 
 /** Serializes `sessions.json`. */
 export function produceSessionsJson(threads: readonly SessionThreadInput[]): string {
+  for (const thread of threads) {
+    assertNonEmptyId(thread.threadId, "threadId", "sessions.json");
+    for (const message of thread.messages ?? []) {
+      assertNonEmptyId(message.id, "message ID", "sessions.json");
+      assertValidTimestamp(message.at, "message.at", "sessions.json");
+    }
+  }
+
   const document = {
     schemaVersion: VISIBLE_SCHEMA_VERSION,
     kind: "sessions",
@@ -207,6 +244,13 @@ export interface TaskInput {
 
 /** Serializes `tasks.json`. */
 export function produceTasksJson(tasks: readonly TaskInput[]): string {
+  for (const task of tasks) {
+    assertNonEmptyId(task.id, "task ID", "tasks.json");
+    if (task.updatedAt !== undefined) {
+      assertValidTimestamp(task.updatedAt, "task.updatedAt", "tasks.json");
+    }
+  }
+
   const document = {
     schemaVersion: VISIBLE_SCHEMA_VERSION,
     kind: "tasks",

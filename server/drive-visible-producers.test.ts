@@ -570,4 +570,40 @@ describe("serialization invariants", () => {
       }
     }
   });
+
+  describe("refusal of parser-incompatible identifier and timestamp edge cases", () => {
+    it("refuses empty botId in memoryBots", () => {
+      expect(() => produceMemoryJson([{ botId: "" }])).toThrow(DriveProjectionError);
+    });
+
+    it("refuses empty topic name in memoryTopics", () => {
+      expect(() => produceMemoryJson([{ botId: "b1", topics: [{ name: "", text: "foo" }] }])).toThrow(
+        DriveProjectionError,
+      );
+    });
+
+    it("refuses empty threadId in threads", () => {
+      expect(() => produceSessionsJson([{ threadId: "" }])).toThrow(DriveProjectionError);
+    });
+
+    it("refuses empty message ID in messages", () => {
+      expect(() =>
+        produceSessionsJson([{ threadId: "t1", messages: [{ id: "", role: "user", at: 1000 }] }]),
+      ).toThrow(DriveProjectionError);
+    });
+
+    it("refuses NaN timestamp in message.at", () => {
+      expect(() =>
+        produceSessionsJson([{ threadId: "t1", messages: [{ id: "m1", role: "user", at: Number.NaN }] }]),
+      ).toThrow(DriveProjectionError);
+    });
+
+    it("refuses empty task ID in tasks", () => {
+      expect(() => produceTasksJson([{ id: "" }])).toThrow(DriveProjectionError);
+    });
+
+    it("refuses NaN timestamp in task.updatedAt", () => {
+      expect(() => produceTasksJson([{ id: "task-1", updatedAt: Number.NaN }])).toThrow(DriveProjectionError);
+    });
+  });
 });
