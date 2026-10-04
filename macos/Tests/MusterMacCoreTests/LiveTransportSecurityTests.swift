@@ -212,6 +212,67 @@ final class LiveTransportSecurityTests: XCTestCase {
         XCTAssertEqual(error as? MusterTransportError, .redirectRefused, file: file, line: line)
     }
 
+    /// The server only returns the slim transcript when the client asks. Omitting
+    /// `?messages=` makes GET /api/bots send every bot's whole transcript with screen
+    /// captures inline as base64 PNGs. `roster(messages:)` takes a page size and must
+    /// forward it.
+    func testRosterSendsTheTranscriptPageItWasGiven() async throws {
+        let source = try await origin { _ in .reply(200, [:], Data(#"{"bots":[],"groups":[]}"#.utf8)) }
+        let transport = try transport(source)
+
+        _ = try await transport.roster(messages: 50)
+        XCTAssertEqual(source.received.last?.path, "/api/bots?messages=50",
+                       "roster must forward the page size; without ?messages the server returns every message with inline base64 screen captures")
+
+        _ = try await transport.roster(messages: 0)
+        XCTAssertEqual(source.received.last?.path, "/api/bots?messages=0",
+                       "roster(messages: 0) must still send the parameter rather than falling back to the unpaginated shape")
+    }
+
+    /// Sending the parameter is only half the claim: if the model could not decode the
+    /// slim shape this would trade an oversized response for a failed one. `png` and
+    /// `mime` are optional and `hasImage`/`hasMore` already exist, so the shape was
+    /// designed for and never wired on the native side. Bot fields mirror the shape
+    /// Fixtures.fleetJSON documents as the live /api/bots?messages=0 wire.
+    ///
+    /// The screen message here must be `kind: "screen"`. `slimMessage()` on the
+    /// server only strips `png`/`mime` and sets `hasImage` when the message is a
+    /// screen, so a `kind: "text"` message paired with `hasImage` is a shape the
+    /// server cannot emit — asserting against it would have passed while leaving
+    /// the real screen path unverified. Text is covered by its own separate message.
+    func testSlimTranscriptShapeDecodesWithoutInlineImageBytes() async throws {
+        let slim = """
+        {"bots":[{"id":"bot-1","threadId":"t-1","name":"Scout","title":"Scout",
+          "description":"Research","notifications":true,"unread":false,"color":"blue",
+          "modelSelection":{"instanceId":"ghost","model":"sonnet"},
+          "createdAt":1723000000000,"busy":false,
+          "messages":[{"id":"m-1","role":"bot","kind":"screen","at":1724000000000,
+                       "hasImage":true},
+                      {"id":"m-2","role":"user","kind":"text","at":1724000005000,
+                       "text":"done"}],
+          "hasMore":true}],"groups":[]}
+        """.replacingOccurrences(of: "\n", with: "")
+        let source = try await origin { _ in .reply(200, [:], Data(slim.utf8)) }
+        let roster = try await transport(source).roster(messages: 50)
+
+        let bot = try XCTUnwrap(roster.bots.first, "slim roster decoded no bots")
+        XCTAssertEqual(bot.id, "bot-1")
+        let messages = try XCTUnwrap(bot.messages, "slim roster decoded no messages")
+        XCTAssertEqual(messages.count, 2)
+
+        let flagged = try XCTUnwrap(messages.first { $0.hasImage == true })
+        XCTAssertEqual(flagged.kind, .screen,
+                       "the server only sets hasImage on a screen message; a text message never carries it")
+        XCTAssertNil(flagged.png, "the slim shape must not carry inline image bytes")
+        XCTAssertNil(flagged.mime, "the slim shape must not carry an inline mime type")
+        XCTAssertEqual(bot.hasMore, true, "the slim shape reports further pages")
+
+        let spoken = try XCTUnwrap(messages.first { $0.kind == .text })
+        XCTAssertEqual(spoken.id, "m-2")
+        XCTAssertEqual(spoken.text, "done", "text coverage is carried separately from the screen message")
+        XCTAssertNil(spoken.hasImage, "a text message carries no screen flag")
+    }
+
     func testUnprotected307ControlForwardsPasswordAndCookieAcrossOrigins() async throws {
         let target = try await origin { _ in .reply(200, [:], Data("{}".utf8)) }
         let location = "http://localhost:\(target.port)/capture"
