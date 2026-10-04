@@ -1,0 +1,405 @@
+// Focused tests for the visible Drive projection contract.
+//
+// Everything runs against an injected fake Drive client: no network, no OAuth, no real Google
+// account, no real Drive, no user data. Nothing here is real-Drive or device acceptance.
+
+import { describe, expect, it } from "vitest";
+import {
+  CREDENTIAL_KEYS,
+  DriveVisibleError,
+  FOLDER_MIME,
+  VISIBLE_BACKUPS_DIR,
+  VISIBLE_FILE_KEYS,
+  VISIBLE_FILE_NAMES,
+  VISIBLE_SCHEMA_VERSION,
+  assertNoCredentialKeys,
+  buildMemoryDocument,
+  buildSessionsDocument,
+  buildSettingsDocument,
+  buildSoulDocument,
+  buildTasksDocument,
+  findOrCreateBackupsFolder,
+  findOrCreateVisibleFolder,
+  parseVisibleFile,
+  parseVisibleFiles,
+  projectSettings,
+  renderVisibleFiles,
+  splitSoulMarkdown,
+  writeVisibleFiles,
+  type DriveFileRef,
+  type DriveListArgs,
+  type VisibleDriveClient,
+  type VisibleDocuments,
+} from "./drive-visible.js";
+
+// ── A fake Drive ───────────────────────────────────────────────────────────────
+
+interface FakeOptions {
+  /** Fail the next `times` calls, to exercise the refusal paths. */
+  failWith?: { status: number; message?: string; times?: number };
+}
+
+class FakeDrive implements VisibleDriveClient {
+  private counter = 0;
+  private files = new Map<string, DriveFileRef & { body: string }>();
+  /** Counts writes, so "unchanged" can be proven not to churn revisions. */
+  writes = 0;
+  private failure: { status: number; message?: string; times: number } | undefined;
+
+  constructor(options: FakeOptions = {}) {
+    // `times` must default to 1: an unset value compared with `> 0` is false, the guard
+    // would never fire, and a failure-path test would silently pass.
+    this.failure = options.failWith ? { ...options.failWith, times: options.failWith.times ?? 1 } : undefined;
+  }
+
+  private guard(): void {
+    if (this.failure && this.failure.times > 0) {
+      this.failure.times -= 1;
+      throw Object.assign(new Error(this.failure.message ?? "drive failure"), { code: this.failure.status });
+    }
+  }
+
+  private add(name: string, parent: string, mimeType: string, body = ""): DriveFileRef & { body: string } {
+    const id = `id-${++this.counter}`;
+    const ref = { id, name, parents: [parent], mimeType, body };
+    this.files.set(id, ref);
+    return ref;
+  }
+
+  /** Seeds a duplicate folder, as happens after a manual copy in Drive. */
+  seedFolder(name: string, parent: string, modifiedTime?: string): string {
+    const ref = this.add(name, parent, FOLDER_MIME);
+    if (modifiedTime) this.files.set(ref.id, { ...ref, modifiedTime });
+    return ref.id;
+  }
+
+  async listFiles({ q }: DriveListArgs): Promise<DriveFileRef[]> {
+    this.guard();
+    const unescape = (s: string) => s.replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+    const nameMatch = /name = '((?:[^'\\]|\\.)*)'/.exec(q);
+    const parentMatch = /'((?:[^'\\]|\\.)*)' in parents/.exec(q);
+    const wantedName = nameMatch ? unescape(nameMatch[1] ?? "") : null;
+    const wantedParent = parentMatch ? unescape(parentMatch[1] ?? "") : null;
+    const foldersOnly = q.includes(FOLDER_MIME);
+
+    return [...this.files.values()]
+      .filter((f) => (foldersOnly ? f.mimeType === FOLDER_MIME : true))
+      .filter((f) => (wantedName ? f.name === wantedName : true))
+      .filter((f) => (wantedParent ? f.parents.includes(wantedParent) : true))
+      .map(({ id, name, parents, mimeType }) => ({ id, name, parents, mimeType }));
+  }
+
+  async createFolder(name: string, parentId: string): Promise<DriveFileRef> {
+    this.guard();
+    const { id, name: n, parents, mimeType } = this.add(name, parentId, FOLDER_MIME);
+    return { id, name: n, parents, mimeType };
+  }
+
+  async createFile(name: string, parentId: string, body: string): Promise<DriveFileRef> {
+    this.guard();
+    const { id, name: n, parents, mimeType } = this.add(name, parentId, "text/plain", body);
+    this.writes += 1;
+    return { id, name: n, parents, mimeType };
+  }
+
+  async getFile(id: string): Promise<{ body: string; md5Checksum?: string }> {
+    this.guard();
+    const file = this.files.get(id);
+    if (!file) throw Object.assign(new Error("not found"), { code: 404 });
+    return { body: file.body, md5Checksum: `md5-${file.body.length}` };
+  }
+
+  async updateFile(id: string, body: string, previousChecksum?: string): Promise<DriveFileRef> {
+    this.guard();
+    const file = this.files.get(id);
+    if (!file) throw Object.assign(new Error("not found"), { code: 404 });
+    // Drive rejects a stale precondition with 412; the fake does the same.
+    if (previousChecksum && `md5-${file.body.length}` !== previousChecksum) {
+      throw Object.assign(new Error("conditionNotMet"), { code: 412 });
+    }
+    file.body = body;
+    this.writes += 1;
+    return { id, name: file.name, parents: file.parents, mimeType: file.mimeType };
+  }
+
+  /** Simulates a file changing underneath us between list and update. */
+  corrupt(id: string): void {
+    const file = this.files.get(id);
+    if (file) file.body = `${file.body}\n// edited elsewhere`;
+  }
+}
+
+const documents = (): VisibleDocuments => ({
+  soul: buildSoulDocument([{ botId: "bot-1", markdown: "# Soul\n\nI am Scout.\n\n## Voice\n\nTerse." }]),
+  memory: buildMemoryDocument([
+    { botId: "bot-1", text: "Prefers mornings", truncated: false, topics: [{ name: "work", text: "ship it" }] },
+  ]),
+  sessions: buildSessionsDocument([
+    {
+      threadId: "t-1",
+      title: "Launch prep",
+      messages: [{ id: "m-1", role: "user", kind: "text", at: 1724000000000, text: "hello", parentId: null }],
+    },
+  ]),
+  tasks: buildTasksDocument([{ id: "task-1", title: "Ship", status: "open", updatedAt: 1724000000000 }]),
+  settings: buildSettingsDocument(projectSettings({ theme: "dark", autosave: true }).settings),
+});
+
+// ── Contract: layout, versioning, round trip ───────────────────────────────────
+
+describe("visible folder contract", () => {
+  it("declares the ratified layout", () => {
+    expect(VISIBLE_FILE_NAMES).toEqual({
+      soul: "soul.md",
+      memory: "memory.json",
+      sessions: "sessions.json",
+      tasks: "tasks.json",
+      settings: "settings.json",
+    });
+    expect(VISIBLE_BACKUPS_DIR).toBe("backups");
+  });
+
+  it("stamps every live file with the schema version", () => {
+    const files = renderVisibleFiles(documents());
+    for (const key of VISIBLE_FILE_KEYS) {
+      const body = files[VISIBLE_FILE_NAMES[key]];
+      if (body === undefined) throw new Error(`missing ${key}`);
+      if (key === "soul") expect(body).toContain(`schemaVersion=${VISIBLE_SCHEMA_VERSION}`);
+      else expect(JSON.parse(body).schemaVersion).toBe(VISIBLE_SCHEMA_VERSION);
+    }
+  });
+
+  it("round trips save and read without losing records", () => {
+    const parsed = parseVisibleFiles(renderVisibleFiles(documents()));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.soul.personas[0]?.botId).toBe("bot-1");
+    expect(parsed.memory.bots[0]?.topics[0]?.name).toBe("work");
+    expect(parsed.sessions.threads[0]?.messages[0]?.text).toBe("hello");
+    expect(parsed.tasks.tasks[0]?.status).toBe("open");
+  });
+
+  it("keeps soul.md readable Markdown rather than JSON", () => {
+    const body = renderVisibleFiles(documents())[VISIBLE_FILE_NAMES.soul] ?? "";
+    expect(body).toContain("## bot-1");
+    expect(body).toContain("I am Scout.");
+    expect(() => JSON.parse(body)).toThrow();
+  });
+
+  it("splits a hand-edited soul.md back into personas", () => {
+    const edited = "<!-- muster-visible schemaVersion=1 -->\n\n## bot-9\n\nI was edited here.\n";
+    const result = parseVisibleFile("soul", edited);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(splitSoulMarkdown(edited)).toEqual([{ botId: "bot-9", markdown: "I was edited here." }]);
+  });
+
+  it("treats sessions.json as conversation history, not authentication state", () => {
+    const parsed = parseVisibleFiles(renderVisibleFiles(documents()));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(Object.keys(parsed.sessions).sort()).toEqual(["kind", "schemaVersion", "threads"]);
+    expect(Object.keys(parsed.sessions.threads[0] ?? {}).sort()).toEqual(["messages", "threadId", "title"]);
+  });
+});
+
+// ── settings.json allowlist ────────────────────────────────────────────────────
+
+describe("settings allowlist", () => {
+  it("keeps allowlisted keys", () => {
+    const projected = projectSettings({ theme: "dark", locale: "en-GB" });
+    expect(projected.settings).toEqual({ theme: "dark", locale: "en-GB" });
+    expect(projected.dropped).toEqual([]);
+  });
+
+  it("drops a non-allowlisted key and NAMES it, so a drop is never silent", () => {
+    const projected = projectSettings({ theme: "dark", somethingElse: 1, anotherThing: "x" });
+    expect(projected.settings).toEqual({ theme: "dark" });
+    expect(projected.dropped).toEqual(["anotherThing", "somethingElse"]);
+  });
+
+  it("refuses a credential outright rather than merely dropping it", () => {
+    expect(() => projectSettings({ theme: "dark", refreshToken: "secret" })).toThrowError(/credential-shaped keys/);
+  });
+
+  it("drops a nested credential container and NAMES it, so it cannot pass silently", () => {
+    // `providers` is not itself a credential key, so it is dropped rather than refused — but
+    // it must be reported, and nothing from inside it may reach the rendered file.
+    const projected = projectSettings({ theme: "dark", providers: "sk-x" });
+    expect(projected.settings).toEqual({ theme: "dark" });
+    expect(projected.dropped).toEqual(["providers"]);
+    expect(JSON.stringify(projected.settings)).not.toContain("sk-x");
+  });
+
+  it("renders only the allowlisted keys it was actually given", () => {
+    const body = JSON.stringify(buildSettingsDocument(projectSettings({ theme: "dark", locale: "en-GB" }).settings));
+    expect(body).toContain("theme");
+    expect(body).toContain("locale");
+    expect(body).not.toContain("startupView"); // allowlisted, but not supplied
+    expect(body).not.toContain("apiKey");
+  });
+
+  it("refuses a hand-edited settings.json carrying a credential or a non-allowlisted key", () => {
+    const withCredential = JSON.stringify({
+      schemaVersion: VISIBLE_SCHEMA_VERSION,
+      kind: "settings",
+      settings: { theme: "dark", refreshToken: "stolen" },
+    });
+    expect(parseVisibleFile("settings", withCredential)).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("credential"),
+    });
+
+    const withStray = JSON.stringify({
+      schemaVersion: VISIBLE_SCHEMA_VERSION,
+      kind: "settings",
+      settings: { theme: "dark", somethingElse: 1 },
+    });
+    expect(parseVisibleFile("settings", withStray)).toMatchObject({
+      reason: expect.stringContaining("outside the allowlist"),
+    });
+  });
+});
+
+// ── Credential exclusion ───────────────────────────────────────────────────────
+
+describe("credential exclusion", () => {
+  it("refuses every declared credential-shaped key", () => {
+    for (const key of CREDENTIAL_KEYS) {
+      expect(() => assertNoCredentialKeys([key.toLowerCase()], "x.json")).toThrowError(/credential-shaped keys/);
+    }
+  });
+
+  it("catches a credential key among many, not only a lone one", () => {
+    expect(() => assertNoCredentialKeys(["id", "name", "createdAt", "refreshToken"], "x.json")).toThrowError(
+      DriveVisibleError,
+    );
+  });
+
+  it("does not treat ordinary prose containing the word state as a leak", () => {
+    expect(() => assertNoCredentialKeys(["markdown"], "soul.md")).not.toThrow();
+    const body = renderVisibleFiles(documents())[VISIBLE_FILE_NAMES.soul] ?? "";
+    expect(body).toContain("I am Scout.");
+  });
+
+  it("blocks a write whose bytes would not survive the reader", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    await expect(
+      writeVisibleFiles(drive, folder.id, { [VISIBLE_FILE_NAMES.tasks]: "{ not json" }),
+    ).rejects.toMatchObject({ code: "corrupt" });
+    expect(drive.writes).toBe(0);
+  });
+});
+
+// ── Folder discovery and idempotent creation ───────────────────────────────────
+
+describe("folder discovery", () => {
+  it("creates Muster/ on first use", async () => {
+    const drive = new FakeDrive();
+    const result = await findOrCreateVisibleFolder(drive);
+    expect(result.created).toBe(true);
+    expect(result.duplicates).toEqual([]);
+  });
+
+  it("adopts the existing folder on repeat onboarding instead of creating another", async () => {
+    const drive = new FakeDrive();
+    const first = await findOrCreateVisibleFolder(drive);
+    const second = await findOrCreateVisibleFolder(drive);
+    expect(second.created).toBe(false);
+    expect(second.id).toBe(first.id);
+  });
+
+  it("adopts the oldest duplicate and REPORTS the rest rather than hiding them", async () => {
+    const drive = new FakeDrive();
+    drive.seedFolder("Muster", "root", "2026-01-01T00:00:00.000Z");
+    drive.seedFolder("Muster", "root", "2026-09-01T00:00:00.000Z");
+    const result = await findOrCreateVisibleFolder(drive);
+    expect(result.duplicates).toHaveLength(1);
+    expect(result.created).toBe(false);
+  });
+
+  it("places backups/ under Muster/ and does not recreate it", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    const first = await findOrCreateBackupsFolder(drive, folder.id);
+    const second = await findOrCreateBackupsFolder(drive, folder.id);
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.id).toBe(first.id);
+  });
+});
+
+// ── Failure modes and honest state ─────────────────────────────────────────────
+
+describe("failure modes", () => {
+  it("reports revoked consent distinctly from throttling", async () => {
+    const revoked = new FakeDrive({ failWith: { status: 401, message: "insufficientPermissions" } });
+    await expect(findOrCreateVisibleFolder(revoked)).rejects.toMatchObject({ code: "consent_revoked" });
+
+    const throttled = new FakeDrive({ failWith: { status: 429, message: "rateLimitExceeded" } });
+    await expect(findOrCreateVisibleFolder(throttled)).rejects.toMatchObject({ code: "throttled" });
+  });
+
+  it("surfaces a concurrent edit as a conflict rather than overwriting it", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    const target = await drive.createFile(VISIBLE_FILE_NAMES.tasks, folder.id, "first");
+    drive.corrupt(target.id);
+    await expect(drive.updateFile(target.id, "second", "md5-wrong")).rejects.toMatchObject({ code: 412 });
+  });
+
+  it("refuses to guess when the same file name exists twice", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    await drive.createFile(VISIBLE_FILE_NAMES.tasks, folder.id, "a");
+    await drive.createFile(VISIBLE_FILE_NAMES.tasks, folder.id, "b");
+    await expect(writeVisibleFiles(drive, folder.id, renderVisibleFiles(documents()))).rejects.toMatchObject({
+      code: "duplicate_folder",
+    });
+  });
+
+  it("writes only what changed, so a no-op sync does not churn revisions", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    const files = renderVisibleFiles(documents());
+
+    const first = await writeVisibleFiles(drive, folder.id, files);
+    expect(first.wrote.sort()).toEqual(Object.values(VISIBLE_FILE_NAMES).sort());
+    const afterFirst = drive.writes;
+
+    const second = await writeVisibleFiles(drive, folder.id, files);
+    expect(second.wrote).toEqual([]);
+    expect(second.unchanged.sort()).toEqual(Object.values(VISIBLE_FILE_NAMES).sort());
+    expect(drive.writes).toBe(afterFirst);
+  });
+
+  it("reports a corrupt file instead of treating it as restored", () => {
+    const files = renderVisibleFiles(documents());
+    files[VISIBLE_FILE_NAMES.tasks] = "{not json";
+    expect(parseVisibleFiles(files)).toMatchObject({ ok: false, fileName: "tasks.json", reason: "invalid JSON" });
+  });
+
+  it("reports a missing file rather than silently restoring an empty workspace", () => {
+    const files = renderVisibleFiles(documents());
+    delete files[VISIBLE_FILE_NAMES.memory];
+    expect(parseVisibleFiles(files)).toMatchObject({ ok: false, fileName: "memory.json" });
+  });
+
+  it("refuses a schema version newer than it understands instead of guessing", () => {
+    const files = renderVisibleFiles(documents());
+    files[VISIBLE_FILE_NAMES.tasks] = JSON.stringify({
+      schemaVersion: VISIBLE_SCHEMA_VERSION + 1,
+      kind: "tasks",
+      tasks: [],
+    });
+    expect(parseVisibleFiles(files)).toMatchObject({ ok: false, reason: /newer than/ });
+  });
+
+  it("rejects a soul.md with no version marker rather than assuming one", () => {
+    expect(parseVisibleFile("soul", "## bot-1\n\nno marker here\n")).toMatchObject({
+      ok: false,
+      reason: "missing schemaVersion marker",
+    });
+  });
+});
