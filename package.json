@@ -92,7 +92,7 @@
     "remark-gfm": "^4.0.1",
     "shiki": "^4.4.3",
     "tailwind-merge": "^3.7.0",
-    "undici": "8.11.2",
+    "undici": "7.30.0",
     "vaultgram": "github:tharunramagiri/vaultgram",
     "zod": "4.6.5"
   },
