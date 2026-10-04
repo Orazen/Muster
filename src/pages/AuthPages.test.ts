@@ -76,6 +76,20 @@ describe("passwordless sign-in contracts", () => {
     expect(markup).toContain("Please try again later.");
     expect(markup).not.toContain('id="otp-email"');
     expect(markup).not.toContain("or use your email");
+    expect(markup).toContain("Check sign-in again</button>");
+  });
+
+  it("does not duplicate session recovery or add retry when another sign-in method is available", () => {
+    const sessionFailure = renderPage(LoginPage, {}, "/sign-in", "Temporary sign-in check failure");
+    expect(sessionFailure.match(/Check sign-in again/g)).toHaveLength(1);
+
+    const googleMarkup = renderPage(LoginPage, { socialProviders: ["google"] });
+    expect(googleMarkup).toContain("Continue with Google above.");
+    expect(googleMarkup).not.toContain("Check sign-in again</button>");
+
+    const pairingMarkup = renderPage(LoginPage, { cloudPairing: true });
+    expect(pairingMarkup).toContain("Connect this app with a pairing code below.");
+    expect(pairingMarkup).not.toContain("Check sign-in again</button>");
   });
 
   it("preserves direct Google and desktop handoff as a single choice", () => {

@@ -16,6 +16,7 @@ export function LoginPage() {
   const next = authDestination(params.get("next"));
   const [error, setError] = useState("");
   const submitting = useRef(false);
+  const [retryBusy, setRetryBusy] = useState(false);
 
   // OAuth failures bounce back here as /sign-in?authError=<code> (the server
   // rewrites better-auth's /api/auth/error). state_mismatch is by far the
@@ -32,6 +33,19 @@ export function LoginPage() {
   // desktop pairing bridge: code typed from muster.today/pair
   const [pairCode, setPairCode] = useState("");
   const [pairBusy, setPairBusy] = useState(false);
+
+  async function handleRetrySession() {
+    if (retryBusy) return;
+    setError("");
+    setRetryBusy(true);
+    try {
+      await retrySession();
+    } catch {
+      setError("Could not check sign-in. Please try again.");
+    } finally {
+      setRetryBusy(false);
+    }
+  }
 
   async function handlePair() {
     if (submitting.current) return;
@@ -70,7 +84,9 @@ export function LoginPage() {
       <div className="auth-stack">
         {sessionError && <div className="auth-notice auth-error" role="alert">
           <p>{sessionError}</p>
-          <button type="button" className="auth-link" onClick={() => void retrySession()}>Check sign-in again</button>
+          <button type="button" className="auth-link" disabled={retryBusy} onClick={() => void handleRetrySession()}>
+            {retryBusy ? "Checking..." : "Check sign-in again"}
+          </button>
         </div>}
         {authErrorHint && (
           <div role="alert" className="auth-notice auth-error">
@@ -115,12 +131,19 @@ export function LoginPage() {
         {capabilities.emailOtp && (googleConfigured || desktopOAuthHandoff) && <div className="auth-divider">or use your email</div>}
         {capabilities.emailOtp && <EmailOtpSignIn next={next} />}
         {!authLoading && !capabilities.emailOtp && (
-          <p className="auth-notice" role="status">
-            Email code sign-in is currently unavailable.
-            {(googleConfigured || desktopOAuthHandoff) ? " Continue with Google above." :
-              capabilities.cloudPairing ? " Connect this app with a pairing code below." :
-                " Please try again later."}
-          </p>
+          <div className="auth-notice" role="status">
+            <p>
+              Email code sign-in is currently unavailable.
+              {(googleConfigured || desktopOAuthHandoff) ? " Continue with Google above." :
+                capabilities.cloudPairing ? " Connect this app with a pairing code below." :
+                  " Please try again later."}
+            </p>
+            {!sessionError && !googleConfigured && !desktopOAuthHandoff && !capabilities.cloudPairing && (
+              <button type="button" className="auth-link" disabled={retryBusy} onClick={() => void handleRetrySession()}>
+                {retryBusy ? "Checking..." : "Check sign-in again"}
+              </button>
+            )}
+          </div>
         )}
 
         {capabilities.cloudPairing && (

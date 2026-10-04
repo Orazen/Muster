@@ -66,17 +66,18 @@ const test = baseTest.extend<{
   },
 });
 
-async function showPassword(page: Page) {
-  const switcher = page.getByText("Use a password instead", { exact: true });
-  if (await switcher.count() && !await page.getByLabel("Password", { exact: true }).isVisible()) await switcher.click();
-  await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
-}
-
-async function signIn(page: Page, harness: Harness) {
-  await showPassword(page);
-  await page.getByLabel("Email address", { exact: true }).fill(harness.email);
-  await page.getByLabel("Password", { exact: true }).fill(harness.password);
-  await page.getByRole("button", { name: "Sign in with email", exact: true }).click();
+/**
+ * Creates a signed-in cloud session out of band, so a test that only needs an
+ * authenticated page never has to drive the sign-in UI. The password form was
+ * removed from the product in this change; the API route it used is still the
+ * harness's own fixture session, and using it keeps every assertion below about
+ * the behaviour actually under test.
+ */
+async function signInViaApi(page: Page, harness: Harness, origin = harness.cloudUrl) {
+  const response = await page.request.post(`${origin}/api/auth/sign-in/email`, {
+    data: { email: harness.email, password: harness.password },
+  });
+  expect(response.status(), "Harness fixture session must be creatable").toBe(200);
 }
 
 async function overrideCapabilities(page: Page, origin: string, patch: Partial<AuthCapabilities>) {
@@ -103,9 +104,8 @@ for (const width of [320, 390, 768, 1440]) {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByRole("button", { name: "Continue with Google", exact: true })).toBeVisible();
     await expect(page.getByLabel("Email address for a sign-in code", { exact: true })).toBeVisible();
-    await expect(page.getByLabel("Password", { exact: true })).not.toBeVisible();
-    await showPassword(page);
-    await expect(page.getByRole("button", { name: "Sign in with email", exact: true })).toBeVisible();
+    await expect(page.getByLabel("Password", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Email me a code", exact: true })).toBeVisible();
     await expectFits(page, width);
     const moving = await page.locator(".auth-shell").evaluate((shell) => shell.getAnimations({ subtree: true })
       .filter((animation) => animation.playState === "running" && animation.effect?.getComputedTiming().duration !== 0).length);
@@ -155,13 +155,22 @@ test("the welcome layout keeps signup and recovery reachable on a small screen",
   await expect(page.getByRole("heading", { name: "Your day, with Muster.", exact: true })).toBeVisible();
 });
 
-test("unconfigured optional methods leave the password path available", async ({ harness, openAuth }) => {
+test("unconfigured optional methods explain the gap and keep an in-page recovery", async ({ harness, openAuth }) => {
   const page = await openAuth(harness.cloudUrl);
-  await overrideCapabilities(page, harness.cloudUrl, { socialProviders: [], desktopOAuth: false, emailOtp: false });
+  await overrideCapabilities(page, harness.cloudUrl, { socialProviders: [], desktopOAuth: false, emailOtp: false, cloudPairing: false });
   await page.goto(`${harness.cloudUrl}/sign-in`);
-  await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
+  // The shell also renders an sr-only role="status" live region, so scope the
+  // assertion to the notice that actually carries the message.
+  await expect(page.getByRole("status").filter({ hasText: "currently unavailable" }))
+    .toContainText("Email code sign-in is currently unavailable.");
+  await expect(page.getByRole("status").filter({ hasText: "currently unavailable" }))
+    .toContainText("Please try again later.");
   await expect(page.getByRole("button", { name: "Continue with Google", exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Email address for a sign-in code", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Password", { exact: true })).toHaveCount(0);
+  // Capability lookup failed, so no method is offered. The page must still be
+  // recoverable in place rather than stranding the visitor on a dead end.
+  await expect(page.getByRole("button", { name: "Check sign-in again", exact: true })).toBeVisible();
 });
 
 for (const outcome of ["reject", "refuse"] as const) {
@@ -203,10 +212,27 @@ test("existing session continues to its local next target without another sign-i
   expect(signInRequests).toBe(0);
 });
 
-test("password sign-in rejects an external next destination", async ({ harness, openAuth }) => {
+test("sign-in rejects an external next destination", async ({ harness, openAuth }) => {
+  const sendPath = "/api/auth/email-otp/send-verification-otp";
+  const verifyPath = "/api/auth/sign-in/email-otp";
   const page = await openAuth(harness.cloudUrl);
+  await overrideCapabilities(page, harness.cloudUrl, { emailOtp: true });
+  await page.route(harness.cloudUrl + sendPath, async (route) => {
+    await route.fulfill({ json: { success: true } });
+  });
+  await page.route(harness.cloudUrl + verifyPath, async (route: Route) => {
+    // Synthetic acceptance on top of a real harness fixture session. No mail
+    // delivery or provider OTP validation is claimed by this test.
+    const response = await route.fetch({ url: `${harness.cloudUrl}/api/auth/sign-in/email`,
+      postData: JSON.stringify({ email: harness.email, password: harness.password }) });
+    expect(response.status()).toBe(200);
+    await route.fulfill({ response });
+  });
   await page.goto(`${harness.cloudUrl}/sign-in?next=${encodeURIComponent("/a/..//example.invalid/account")}`);
-  await signIn(page, harness);
+  await page.getByLabel("Email address for a sign-in code", { exact: true }).fill(harness.email);
+  await page.getByRole("button", { name: "Email me a code", exact: true }).click();
+  await page.getByLabel("6-digit code", { exact: true }).fill("111111");
+  await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
   await expect(page).toHaveURL(`${harness.cloudUrl}/app`);
   const session = await page.request.get(`${harness.cloudUrl}/api/auth/get-session`);
   expect((await session.json()).user.email).toBe(harness.email);
@@ -435,9 +461,8 @@ test("an in-flight OTP send freezes its address and submits only once", async ({
 
 test("a real displayed pairing code signs the desktop into the same account at 320px", async ({ harness, openAuth }) => {
   const cloud = await openAuth(harness.cloudUrl, { width: 320 });
-  await cloud.goto(`${harness.cloudUrl}/sign-in?next=%2Fpair`);
-  await signIn(cloud, harness);
-  await expect(cloud).toHaveURL(`${harness.cloudUrl}/pair`);
+  await signInViaApi(cloud, harness);
+  await cloud.goto(`${harness.cloudUrl}/pair`);
   const code = cloud.getByLabel("Pairing code", { exact: true });
   await expect(code).toHaveValue(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/);
   await expectFits(cloud, 320);
