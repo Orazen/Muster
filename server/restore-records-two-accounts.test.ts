@@ -16,8 +16,8 @@
 //      folders — checked against the transport's own stores, not a route's claims;
 //   3. each account's catalog names ITSELF and offers only its own records,
 //      newest first, and building it moved no bytes (one list, no download);
-//   4. the catalog names the credential and grant files, and the bytes that were
-//      uploaded contain neither account's OAuth tokens nor the installation
+//   4. the catalog names excluded root files and directories, and the bytes that
+//      were uploaded contain neither account's OAuth tokens nor the installation
 //      secret;
 //   5. Zoe cannot SELECT Ada's record — no staging tree, no pending restore;
 //   6. and Ada can still select her own older record, because a test where
@@ -49,7 +49,7 @@ const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const PASSPHRASE = "correct-horse-battery";
 
 const catalogSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(2),
   accountId: z.string().min(1),
   drive: z.object({ state: z.string(), grantGeneration: z.number().int().nullable() }),
   records: z.array(z.object({
@@ -63,6 +63,7 @@ const catalogSchema = z.object({
   truncated: z.boolean(),
   excludes: z.object({
     files: z.array(z.string()),
+    directories: z.array(z.string()),
     botFields: z.array(z.string()),
     disabledBotFields: z.array(z.string()),
     taskFields: z.array(z.string()),
@@ -277,11 +278,20 @@ describe.skipIf(process.platform === "win32")("an account can only see and selec
     expect(adaCatalog.snapshots.map((row) => row.id)).toEqual([adaSecond, adaFirst]);
   });
 
-  it("names the credentials and grants a restore will not bring back, and the uploaded bytes carry none of them", async () => {
+  it("names excluded root files and directories, and the uploaded bytes carry none of their canaries", async () => {
     const catalog = await catalogOf(ada.cookie);
     // The exclusion, read from the bundle module's own list rather than copied
     // into a second place that could be forgotten.
-    expect(catalog.excludes.files).toEqual(["auth.db", "auth.secret", "config.json"]);
+    expect(catalog.version).toBe(2);
+    expect(catalog.excludes.files).toEqual([
+      "auth.db",
+      "auth.secret",
+      "claim-codes.json",
+      "config.json",
+      "pairing-codes.json",
+      "user-keys.json",
+    ]);
+    expect(catalog.excludes.directories).toEqual(["vm-secrets"]);
     expect(catalog.excludes.botFields).toContain("alwaysAllow");
     expect(catalog.excludes.botFields).toContain("autoApprove");
     expect(catalog.excludes.disabledBotFields).toEqual(["composio", "browser"]);

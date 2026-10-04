@@ -10,7 +10,7 @@
 // it could not honour as a selection, and — the drift case — that the exclusion
 // it publishes is the exclusion the bundle scan actually enforces.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -30,6 +30,8 @@ import {
   RESTORE_DROPPED_BOT_FIELDS,
   RESTORE_DROPPED_GROUP_FIELDS,
   RESTORE_DROPPED_TASK_FIELDS,
+  RESTORE_EXCLUDED_ROOT_DIRECTORIES,
+  RESTORE_EXCLUDED_ROOT_FILES,
   SUBSET_ROOT_FILES,
   buildPayloadV2,
 } from "./workspace-bundle-v2.ts";
@@ -62,6 +64,7 @@ describe("the restore catalog answers for one account", () => {
   it("names the account it is about, and offers only what that account listed", () => {
     const catalog = catalogFor(ADA, [row("snap-1"), row("snap-2")]);
     expect(catalog.version).toBe(RESTORE_CATALOG_VERSION);
+    expect(RESTORE_CATALOG_VERSION).toBe(2);
     expect(catalog.accountId).toBe(ADA);
     expect(catalog.drive).toEqual({ state: "connected", grantGeneration: 7 });
     expect(catalog.records.map((record) => record.id)).toEqual(["snap-1", "snap-2"]);
@@ -163,11 +166,16 @@ describe("the catalog reports the credential and grant exclusion", () => {
   let dataDir = "";
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), "omb-restore-catalog-"));
-    // A data directory holding exactly the three entries the exclusion names,
-    // with recognisable contents, so the scan below can be checked against it.
-    writeFileSync(join(dataDir, "auth.db"), "canary-auth-db");
-    writeFileSync(join(dataDir, "auth.secret"), "canary-auth-secret");
-    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ telegramSync: { botToken: "canary-bot-token" } }));
+    // Synthetic secret-bearing root entries, so both the file and directory
+    // report can be checked against the unchanged subset scan.
+    writeFileSync(join(dataDir, "auth.db"), "catalog-canary-auth-db");
+    writeFileSync(join(dataDir, "auth.secret"), "catalog-canary-auth-secret");
+    writeFileSync(join(dataDir, "claim-codes.json"), "catalog-canary-claim-codes");
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ telegramSync: { botToken: "catalog-canary-bot-token" } }));
+    writeFileSync(join(dataDir, "pairing-codes.json"), "catalog-canary-pairing-codes");
+    writeFileSync(join(dataDir, "user-keys.json"), "catalog-canary-user-keys");
+    mkdirSync(join(dataDir, "vm-secrets"), { recursive: true });
+    writeFileSync(join(dataDir, "vm-secrets", "nested-secret.json"), "catalog-canary-vm-secrets-nested");
     writeFileSync(join(dataDir, "bots.json"), "[]");
   });
   afterEach(() => {
@@ -177,14 +185,24 @@ describe("the catalog reports the credential and grant exclusion", () => {
   it("names the credential and grant files, taken from the bundle module's own list", () => {
     // Not a hand-copied list. A second copy of these names is a second thing to
     // forget to update, and this one is a promise made to a user.
-    expect(RESTORE_EXCLUSIONS.files).toEqual(["auth.db", "auth.secret", "config.json"]);
+    expect(RESTORE_EXCLUSIONS.files).toEqual([...RESTORE_EXCLUDED_ROOT_FILES]);
+    expect(RESTORE_EXCLUSIONS.files).toEqual([
+      "auth.db",
+      "auth.secret",
+      "claim-codes.json",
+      "config.json",
+      "pairing-codes.json",
+      "user-keys.json",
+    ]);
+    expect(RESTORE_EXCLUSIONS.directories).toEqual([...RESTORE_EXCLUDED_ROOT_DIRECTORIES]);
+    expect(RESTORE_EXCLUSIONS.directories).toEqual(["vm-secrets"]);
     expect(RESTORE_EXCLUSIONS.botFields).toEqual([...RESTORE_DROPPED_BOT_FIELDS]);
     expect(RESTORE_EXCLUSIONS.disabledBotFields).toEqual([...RESTORE_DISABLED_BOT_FIELDS]);
     expect(RESTORE_EXCLUSIONS.taskFields).toEqual([...RESTORE_DROPPED_TASK_FIELDS]);
     expect(RESTORE_EXCLUSIONS.groupFields).toEqual([...RESTORE_DROPPED_GROUP_FIELDS]);
   });
 
-  it("agrees with the scan: the named files are skipped, and none is in the subset", () => {
+  it("agrees with the scan: the named files and directories are skipped, and none is in the subset", () => {
     // The drift guard. RESTORE_EXCLUDED_ROOT_FILES is only a truthful report
     // while those names are outside SUBSET_ROOT_FILES; moving one in would put
     // a credential or a grant into a portable record, and this case is what
@@ -192,15 +210,33 @@ describe("the catalog reports the credential and grant exclusion", () => {
     for (const file of RESTORE_EXCLUSIONS.files) {
       expect(SUBSET_ROOT_FILES.has(file), `${file} is inside the portable subset`).toBe(false);
     }
-    const payload = buildPayloadV2({ dataDir, appVersion: "1.12.3" });
-    const skipped = new Map(payload.skipped.map((entry) => [entry.path, entry.reason]));
-    for (const file of RESTORE_EXCLUSIONS.files) {
-      expect(skipped.get(file), `${file} was not skipped by the scan`).toBe("outside-subset");
+    for (const directory of RESTORE_EXCLUSIONS.directories) {
+      expect(SUBSET_ROOT_FILES.has(directory), `${directory} is inside the portable subset`).toBe(false);
     }
-    // And the canaries are nowhere in the payload the scan produced.
-    const serialised = JSON.stringify(payload);
-    for (const canary of ["canary-auth-db", "canary-auth-secret", "canary-bot-token"]) {
-      expect(serialised).not.toContain(canary);
+    const payload = buildPayloadV2({ dataDir, appVersion: "1.12.3" });
+    expect(payload.skipped.filter((entry) => entry.reason === "outside-subset")).toEqual([
+      { path: "auth.db", reason: "outside-subset" },
+      { path: "auth.secret", reason: "outside-subset" },
+      { path: "claim-codes.json", reason: "outside-subset" },
+      { path: "config.json", reason: "outside-subset" },
+      { path: "pairing-codes.json", reason: "outside-subset" },
+      { path: "user-keys.json", reason: "outside-subset" },
+      { path: "vm-secrets", reason: "outside-subset" },
+    ]);
+    const catalog = catalogFor(ADA, [row("snap-1")]);
+    const serialisedPayload = JSON.stringify(payload);
+    const serialisedCatalog = JSON.stringify(catalog);
+    for (const canary of [
+      "catalog-canary-auth-db",
+      "catalog-canary-auth-secret",
+      "catalog-canary-claim-codes",
+      "catalog-canary-bot-token",
+      "catalog-canary-pairing-codes",
+      "catalog-canary-user-keys",
+      "catalog-canary-vm-secrets-nested",
+    ]) {
+      expect(serialisedPayload).not.toContain(canary);
+      expect(serialisedCatalog).not.toContain(canary);
     }
   });
 

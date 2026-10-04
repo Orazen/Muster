@@ -507,8 +507,8 @@ export const SUBSET_ROOT_FILES = new Set([
   "social.json",
 ]);
 
-/** The data-directory entries a portable record must never carry, named so a
- * user can be told what will not come back before they choose one.
+/** The data-directory root files a portable record must never carry, named so
+ * a user can be told what will not come back before they choose one.
  *
  * These are not excluded by a special case: `scanSubset` skips every root entry
  * that is not in `SUBSET_ROOT_FILES`, so this list is a *report* of an
@@ -518,16 +518,25 @@ export const SUBSET_ROOT_FILES = new Set([
  * (which would be a serious regression) the disjointness case in the catalog
  * suite fails, instead of the document quietly going stale.
  *
- *   auth.db     - sessions, the per-user Drive/Calendar grants, account rows
- *   auth.secret - the installation signing secret a v1 key was derived from
- *   config.json - provider keys and every transport token (Drive refresh
- *                 token, Telegram bot token), i.e. every grant
+ *   auth.db          - sessions, per-user grants and account rows
+ *   auth.secret      - the installation signing secret a v1 key was derived from
+ *   claim-codes.json - account claim codes
+ *   config.json      - provider keys and transport tokens, i.e. every grant
+ *   pairing-codes.json - account pairing codes
+ *   user-keys.json   - user-held key material
  */
 export const RESTORE_EXCLUDED_ROOT_FILES = [
   "auth.db",
   "auth.secret",
+  "claim-codes.json",
   "config.json",
+  "pairing-codes.json",
+  "user-keys.json",
 ] as const;
+
+/** Root directories excluded by the same root-only subset scan. The scan
+ * reports a directory as one skipped entry and does not walk its contents. */
+export const RESTORE_EXCLUDED_ROOT_DIRECTORIES = ["vm-secrets"] as const;
 
 const SOCIAL_FILE_NAME = "social.json";
 

@@ -135,8 +135,14 @@ function writeFixture(root: string, transcript = true): Fixture {
   writeFileSync(join(dataDir, "memory", "rota.md"), memoryBody);
   writeFileSync(join(dataDir, "workspaces", "bot-1", "MEMORY.md"), "# MEMORY\n\nbot notes\n");
   writeFileSync(join(dataDir, "workspaces", "bot-1", "memory", "topic.md"), "# Topic\n\nbot topic\n");
+  writeFileSync(join(dataDir, "auth.db"), "canary-auth-db");
   writeFileSync(join(dataDir, "auth.secret"), AUTH_SECRET);
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ provider: "none" }));
+  writeFileSync(join(dataDir, "claim-codes.json"), "canary-claim-codes");
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ provider: "canary-config-provider-secret" }));
+  writeFileSync(join(dataDir, "pairing-codes.json"), "canary-pairing-codes");
+  writeFileSync(join(dataDir, "user-keys.json"), "canary-user-keys");
+  mkdirSync(join(dataDir, "vm-secrets"), { recursive: true });
+  writeFileSync(join(dataDir, "vm-secrets", "nested-secret.json"), "canary-vm-secrets-nested");
   if (transcript) {
     writeTranscript(join(dataDir, "messages.db"), [
       { threadId: BOT_THREAD, messages: BOT_MESSAGES, activeLeafId: "m2" },
@@ -261,7 +267,7 @@ describe("workspace bundle v2", () => {
       messages: 5,
       threads: 2,
       totalBytes: expect.any(Number),
-      skipped: 3,
+      skipped: 8,
       skippedTruncated: false,
       transcriptMethod: "vacuum-into",
       payloadBytes: sealed.byteLength,
@@ -276,11 +282,27 @@ describe("workspace bundle v2", () => {
     // every file the scan walked past is named with a reason — including the
     // transcript database, which is not a manifest file
     expect(payload.skipped).toEqual([
+      { path: "auth.db", reason: "outside-subset" },
       { path: "auth.secret", reason: "outside-subset" },
+      { path: "claim-codes.json", reason: "outside-subset" },
       { path: "config.json", reason: "outside-subset" },
       { path: "messages.db", reason: "outside-subset" },
+      { path: "pairing-codes.json", reason: "outside-subset" },
+      { path: "user-keys.json", reason: "outside-subset" },
+      { path: "vm-secrets", reason: "outside-subset" },
     ]);
-    expect(JSON.stringify(payload)).not.toContain(AUTH_SECRET);
+    const serialised = JSON.stringify(payload);
+    for (const canary of [
+      "canary-auth-db",
+      AUTH_SECRET,
+      "canary-claim-codes",
+      "canary-config-provider-secret",
+      "canary-pairing-codes",
+      "canary-user-keys",
+      "canary-vm-secrets-nested",
+    ]) {
+      expect(serialised).not.toContain(canary);
+    }
     // the bundle was built from files that no longer exist
     rmSync(join(fixture.dataDir, "auth.secret"));
     rmSync(join(fixture.dataDir, "messages.db"));
