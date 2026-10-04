@@ -987,4 +987,28 @@ describe("failure modes", () => {
       reason: "missing schemaVersion marker",
     });
   });
+
+  it("rejects a soul.md whose body mentions a version but whose top-level marker is absent", () => {
+    // The regression the unanchored search allowed: prose alone used to satisfy the version check, so
+    // deleting the header did not make the document unparseable.
+    const raw =
+      "<!-- muster-persona bot-1 -->\n## bot-1\n\nProse that reads schemaVersion=1 in passing.\n";
+    expect(parseVisibleFile("soul", raw)).toMatchObject({
+      ok: false,
+      reason: "missing schemaVersion marker",
+    });
+  });
+
+  it("accepts prose mentioning the version once a genuine marker opens the document", () => {
+    // Built through the renderer so the document is the contract's own shape, boundary included: the
+    // anchored header must reject impostors without rejecting real files that talk about versions.
+    const rendered = renderSoulMarkdown(
+      buildSoulDocument([{ botId: "bot-1", markdown: "Prose that reads schemaVersion=1 in passing." }]),
+    );
+    expect(rendered.startsWith("<!-- muster-visible schemaVersion=1 -->\n")).toBe(true);
+    expect(parseVisibleFile("soul", rendered)).toMatchObject({
+      ok: true,
+      document: { schemaVersion: 1, kind: "soul" },
+    });
+  });
 });

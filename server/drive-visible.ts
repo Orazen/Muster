@@ -666,7 +666,12 @@ export type FileParseResult = { ok: true; document: VisibleDocument } | { ok: fa
 
 function parseSoul(raw: string): FileParseResult {
   const fileName = VISIBLE_FILE_NAMES.soul;
-  const match = /schemaVersion=(\d+)/.exec(raw);
+  // Anchored to the document start deliberately. An unanchored `schemaVersion=(\d+)` search let any
+  // version-like token buried in persona prose satisfy the version check, so a document whose required
+  // top-level marker had been removed still passed it. Only the contract's own first line counts —
+  // exactly what renderSoulMarkdown writes, trailing newline included — so ordinary body text that
+  // happens to mention the token can neither open nor substitute for the header.
+  const match = /^<!-- muster-visible schemaVersion=(\d+) -->\n/.exec(raw);
   if (!match) return { ok: false, fileName, reason: "missing schemaVersion marker" };
   const schemaVersion = Number(match[1]);
   if (schemaVersion > VISIBLE_SCHEMA_VERSION) {
