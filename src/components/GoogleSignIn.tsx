@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { stashReferral, useAuth } from "@/lib/auth";
+import { clearStashedReferral, stashReferral, useAuth } from "@/lib/auth";
 import { authDestination } from "@/lib/auth-navigation";
 
 /** Shared account entry for web and Electron. Starting OAuth is not proof of
@@ -84,8 +84,9 @@ export function GoogleSignIn({ next, ref, onError }: { next: string; ref?: strin
         // Hold the referral across the redirect. The OAuth return carries only the callback path,
         // so without this a first-account Google signup from a referral link silently drops the
         // code on the one path most likely to be a new account. Redeemed later, and only once a
-        // session is confirmed.
-        stashReferral(ref ?? null);
+        // session is confirmed. The destination and this attempt's id ride along with it, because
+        // the error route strips both from the URL and a retry has to be able to put them back.
+        stashReferral(ref ?? null, next, String(currentAttempt));
         const result = await signInWithProvider("google");
         if (currentAttempt === attempt.current && result.error) onError(result.error);
         return;
@@ -96,7 +97,7 @@ export function GoogleSignIn({ next, ref, onError }: { next: string; ref?: strin
       await signOut();
       if (currentAttempt !== attempt.current) return;
       // Same reason as the web path: the handoff returns to the workspace, not to an auth page.
-      stashReferral(ref ?? null);
+      stashReferral(ref ?? null, next, String(currentAttempt));
       // Mint the per-attempt binding first: the local server keeps the PKCE
       // verifier and only releases it to the proven finish exchange. The
       // challenge rides the start URL; the state comes back on the finish
@@ -157,7 +158,14 @@ export function GoogleSignIn({ next, ref, onError }: { next: string; ref?: strin
     </button>
     {waiting && <div className="auth-handoff-status" role="status">
       <p className="auth-hint">Complete sign-in in the window that opened, then return here.</p>
-      <button className="auth-link" type="button" onClick={() => { cancelAttempt(); setWaiting(false); }}>Cancel waiting</button>
+      <button className="auth-link" type="button" onClick={() => {
+        // The visitor is walking away from this attempt, so nothing here is going to come back
+        // and confirm a session. Without this the referral would sit in this tab's storage until
+        // some later, unrelated sign-in confirmed one and spent it for them.
+        cancelAttempt();
+        clearStashedReferral();
+        setWaiting(false);
+      }}>Cancel waiting</button>
     </div>}
     {pairFallback && <div className="auth-handoff-status" role="status">
       <p className="auth-hint">Finish sign-in in your browser, then use its pairing code to connect this app.</p>

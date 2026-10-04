@@ -568,8 +568,24 @@ test("a Google first-account signup carries the referral across the return and r
   await page.getByRole("button", { name: "Continue with Google", exact: true }).click();
 
   // The carry: the code is held for the duration of the redirect, because the OAuth return carries
-  // only the callback path and nothing else would still know it existed.
-  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("muster.referral"))).toBe("REF-G");
+  // only the callback path and nothing else would still know it existed. The stash is a record now
+  // (ref + destination + attempt + expiry), so read the code back out of it.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const raw = sessionStorage.getItem("muster.referral");
+        if (!raw) return "";
+        try {
+          // SAFETY: this key is written only by stashReferral in src/lib/auth.tsx, which
+          // serialises a schema-validated record whose `ref` is a non-empty string.
+          const record = JSON.parse(raw) as { ref?: string };
+          return record.ref ?? "";
+        } catch {
+          return "";
+        }
+      }),
+    )
+    .toBe("REF-G");
   expect(codes).toEqual([]);
 
   // The return itself: session already established, landing on `next`, no `ref` in the URL. That is

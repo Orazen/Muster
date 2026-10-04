@@ -2,14 +2,40 @@ import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AuthCapabilities } from "@/lib/auth";
+import { clearStashedReferral, stashReferral, type AuthCapabilities } from "@/lib/auth";
 import { LoginPage } from "./LoginPage";
 import { SignupPage } from "./SignupPage";
 
-const mocks = vi.hoisted(() => ({ useAuth: vi.fn() }));
-// SSR checks page markup only; it does not verify real provider or session behavior.
+const mocks = vi.hoisted(() => {
+  // `auth.tsx` reads `window.location.origin` as it evaluates, and the referral stash lives in
+  // `sessionStorage`; both must exist before that module is imported, which `vi.hoisted` is the
+  // only ordering that guarantees in a file whose environment is node.
+  const store = new Map<string, string>();
+  Object.defineProperty(globalThis, "window", {
+    value: { location: { origin: "http://127.0.0.1:5199" } },
+    configurable: true,
+    writable: true,
+  });
+  Object.defineProperty(globalThis, "sessionStorage", {
+    value: {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value); },
+      removeItem: (key: string) => { store.delete(key); },
+    },
+    configurable: true,
+    writable: true,
+  });
+  return { useAuth: vi.fn() };
+});
+
+// SSR checks page markup only; it does not verify real provider or session behavior. Everything
+// except the session hook stays real: the OAuth-error referral restore under test lives in this
+// module, and mocking it would mean asserting against the mock rather than the behaviour.
 // oxlint-disable-next-line anti-slop/no-module-mocking -- isolate browser/auth I/O from Node-only markup tests
-vi.mock("@/lib/auth", () => ({ useAuth: mocks.useAuth }));
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  useAuth: mocks.useAuth,
+}));
 
 const baseCapabilities: AuthCapabilities = {
   emailVerification: false,
@@ -21,7 +47,11 @@ const baseCapabilities: AuthCapabilities = {
   pairingCloudUrl: null,
 };
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  // A stash is tab-scoped state; leaving one behind would let it satisfy the next test's page.
+  clearStashedReferral();
+});
 
 interface ContextOverrides {
   /** Mirrors a failed /api/auth-capabilities read: capabilities stay at their initial value. */
@@ -150,6 +180,24 @@ describe("auth form contracts", () => {
     const next = "/app?view=approvals#latest";
     const markup = renderPage(LoginPage, {}, `/sign-in?next=${encodeURIComponent(next)}`);
     expect(markup).toContain(`href="/sign-up?next=${encodeURIComponent(next)}"`);
+  });
+
+  // Regression: the OAuth failure route rewrites the return down to `authError=<code>`, so the URL
+  // this page renders from carries neither the referral nor the destination. Both were stashed by
+  // the attempt that redirected, so the page has to put them back — reading the empty query string
+  // alone was what dropped the code and sent every retry to the default destination.
+  it("restores the referral and destination the OAuth error route stripped from the URL", () => {
+    stashReferral("REF-9", "/pair", "attempt-1");
+    const markup = renderPage(LoginPage, {}, "/sign-in?authError=state_mismatch");
+    expect(markup).toContain("That sign-in expired");
+    // `&` is entity-escaped by renderToStaticMarkup, so the separator arrives as `&amp;`.
+    expect(markup).toContain(`href="/sign-up?next=${encodeURIComponent("/pair")}&amp;ref=REF-9"`);
+  });
+
+  it("restores nothing when the failed attempt never carried a referral", () => {
+    const markup = renderPage(LoginPage, {}, "/sign-in?authError=state_mismatch");
+    expect(markup).toContain(`href="/sign-up?next=${encodeURIComponent("/app")}"`);
+    expect(markup).not.toContain("&amp;ref=");
   });
 
   it("hides the one-time-code path unless the server advertises it", () => {

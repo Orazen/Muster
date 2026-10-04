@@ -28,12 +28,21 @@ vi.hoisted(() => {
   });
 });
 
-const { redeemReferral, requestCapabilities, stashReferral, takeStashedReferral, REFERRAL_DEADLINE_MS } =
-  await import("./auth");
+const {
+  redeemReferral,
+  requestCapabilities,
+  stashReferral,
+  peekStashedReferral,
+  takeStashedReferral,
+  clearStashedReferral,
+  REFERRAL_DEADLINE_MS,
+  REFERRAL_STASH_TTL_MS,
+} = await import("./auth");
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  stashReferral(null);
+  vi.useRealTimers();
+  clearStashedReferral();
 });
 
 function stubFetch(resolve: () => Promise<Response>) {
@@ -138,11 +147,82 @@ describe("a referral survives exactly one OAuth redirect", () => {
 
   it("is dropped, not reused, when the caller clears it", () => {
     stashReferral("REF-9");
-    stashReferral(null);
+    clearStashedReferral();
     expect(takeStashedReferral()).toBeNull();
   });
 
   it("holds nothing when there was no referral to carry", () => {
     expect(takeStashedReferral()).toBeNull();
+  });
+});
+
+// Regression 1. The OAuth failure route rewrites the return down to `authError=<code>`, so the URL
+// the retry renders from carries neither the referral nor the destination. Both were stashed by the
+// attempt that redirected, so both have to come back — and stashing again with no URL ref must not
+// overwrite what is already held. That overwrite was the defect: it dropped the referral and sent
+// the retry to the default destination.
+describe("an OAuth failure does not lose the referral or the destination", () => {
+  it("restores both from the stash when the error URL has neither", () => {
+    stashReferral("REF-9", "/w/42/board", "attempt-1");
+    // What LoginPage reads after the rewrite: no `ref`, no `next` in the query string.
+    expect(peekStashedReferral()).toEqual({
+      ref: "REF-9",
+      next: "/w/42/board",
+      attempt: "attempt-1",
+    });
+  });
+
+  it("keeps a live referral when the retry stashes a null over it", () => {
+    stashReferral("REF-9", "/w/42/board", "attempt-1");
+    // The retry computes no URL ref, so it writes null — which must leave the held value alone.
+    stashReferral(null, null, "attempt-2");
+    expect(takeStashedReferral()).toBe("REF-9");
+    expect(peekStashedReferral()).toBeNull();
+  });
+
+  it("rebinds to the newest attempt instead of leaving a superseded one named", () => {
+    stashReferral("REF-9", "/w/42/board", "attempt-1");
+    // The retry carries the restored code, so it writes a fresh record naming its own attempt.
+    stashReferral("REF-9", "/w/42/board", "attempt-2");
+    expect(peekStashedReferral()?.attempt).toBe("attempt-2");
+  });
+
+  it("restores without spending, so the retry can still redeem it", () => {
+    stashReferral("REF-9", "/w/42/board", "attempt-1");
+    expect(peekStashedReferral()).toEqual({
+      ref: "REF-9",
+      next: "/w/42/board",
+      attempt: "attempt-1",
+    });
+    // A restore must leave the code in place: consuming it here would leave the retry with a
+    // destination and nothing to redeem when the session finally confirms.
+    expect(takeStashedReferral()).toBe("REF-9");
+  });
+});
+
+// Regression 2. A desktop handoff the visitor abandoned used to leave a live stash in this tab, so
+// an unrelated later session that confirmed one would spend a code nobody in that session had seen.
+// Both bounds close it: an explicit cancel drops it, and one whose window passed never reads back.
+describe("an abandoned attempt's referral cannot be spent by a later session", () => {
+  it("is gone the moment the attempt is cancelled", () => {
+    stashReferral("REF-9", "/w/42/board", "attempt-1");
+    clearStashedReferral();
+    expect(peekStashedReferral()).toBeNull();
+    expect(takeStashedReferral()).toBeNull();
+  });
+
+  it("never reads back after its bounded lifetime has passed", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    stashReferral("REF-9", "/w/42/board", "attempt-1");
+    vi.setSystemTime(Date.now() + REFERRAL_STASH_TTL_MS + 1000);
+    expect(peekStashedReferral()).toBeNull();
+    expect(takeStashedReferral()).toBeNull();
+  });
+
+  it("is still live inside its bounded lifetime", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    stashReferral("REF-9", "/w/42/board", "attempt-1");
+    vi.setSystemTime(Date.now() + REFERRAL_STASH_TTL_MS - 1000);
+    expect(takeStashedReferral()).toBe("REF-9");
   });
 });

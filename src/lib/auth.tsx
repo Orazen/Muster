@@ -1,4 +1,5 @@
 import { createAuthClient } from "better-auth/client";
+import { z } from "zod";
 import { createContext, useContext, useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { createSessionRecovery, INITIAL_SESSION, SESSION_UNAVAILABLE, type SessionPayload } from "./session-recovery";
 import { authDestination } from "./auth-navigation";
@@ -77,8 +78,9 @@ export interface RedeemReferralOptions {
  *    one, so an early call would attribute the referral to nobody and lose it.
  *  - **Never blocks sign-in.** Every outcome is returned so a caller can report it without failing,
  *    and the whole call is bounded by {@link REFERRAL_DEADLINE_MS}.
- *  - **A rejection is reported, not swallowed.** An invalid code is indistinguishable from no call
- *    only if the response is discarded; it is not.
+ *  - **Best-effort, and never a gate.** Every outcome is returned so a caller *can* act on it, but
+ *    the current callers discard it: redemption does not block navigation, and a rejection is not
+ *    surfaced anywhere in the UI. Claiming more than that would describe code that does not exist.
  */
 export async function redeemReferral(
   ref: string | null,
@@ -127,27 +129,127 @@ export async function redeemReferral(
  *
  * That file is outside this slice's claim, so the pair is defined beside the redemption it serves
  * and the move to `auth-navigation.ts` is proposed rather than made.
+ *
+ * A stash holds the referral, the destination it came with, and the attempt that wrote it, and it
+ * expires. The destination is part of the record because the OAuth error route rewrites the URL
+ * down to `authError=<code>`, so a retry that read only the URL would have lost both the code and
+ * where the visitor was going. The expiry is what stops a stash outliving its attempt: a desktop
+ * handoff the visitor abandoned would otherwise sit here until some unrelated later session in
+ * this tab confirmed a session and spent a code nobody in that session ever saw.
  */
 const REFERRAL_STASH_KEY = "muster.referral";
 
-export function stashReferral(ref: string | null): void {
+/** How long a held referral stays live. Long enough to survive a Google chooser that had to be
+ *  reopened, short enough that a stash cannot outlive the attempt that created it. */
+export const REFERRAL_STASH_TTL_MS = 10 * 60 * 1000;
+
+/** Decoded at this module's I/O boundary rather than narrowed with runtime `typeof` checks: the
+ *  stored value is external input, so it is parsed into the domain shape or it is not a referral.
+ *  Anything malformed fails closed to absent — unreadable means not redeemable. */
+const referralStashSchema = z.object({
+  ref: z.string().min(1),
+  next: z.string().nullish(),
+  attempt: z.string().nullish(),
+  expiresAt: z.number(),
+});
+
+type ReferralStash = { ref: string; next: string | null; attempt: string | null; expiresAt: number };
+
+function dropReferralStash(): void {
   try {
-    if (ref) globalThis.sessionStorage?.setItem(REFERRAL_STASH_KEY, ref);
-    else globalThis.sessionStorage?.removeItem(REFERRAL_STASH_KEY);
+    globalThis.sessionStorage?.removeItem(REFERRAL_STASH_KEY);
+  } catch {
+    // storage unavailable: there is nothing here to drop
+  }
+}
+
+/** Reads the stash only if it is decodable and still within its window. A record that is either
+ *  malformed or overdue is dropped rather than left to be read again. */
+function readReferralStash(): ReferralStash | null {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(REFERRAL_STASH_KEY);
+    if (!raw) return null;
+    const decoded = referralStashSchema.safeParse(JSON.parse(raw));
+    if (!decoded.success || decoded.data.expiresAt <= Date.now()) {
+      dropReferralStash();
+      return null;
+    }
+    return {
+      ref: decoded.data.ref,
+      next: decoded.data.next ?? null,
+      attempt: decoded.data.attempt ?? null,
+      expiresAt: decoded.data.expiresAt,
+    };
+  } catch {
+    dropReferralStash();
+    return null;
+  }
+}
+
+/**
+ * Writes a referral for the attempt about to start.
+ *
+ * A `null` `ref` means the URL carried no code, which on an OAuth retry is expected: the error
+ * route drops `ref` from the URL. Treating that as "clear the stash" is what lost the referral the
+ * previous attempt had already held, so a null leaves a live stash alone. Only
+ * {@link clearStashedReferral} removes one that has not expired.
+ */
+export function stashReferral(
+  ref: string | null,
+  next: string | null = null,
+  attempt: string | null = null,
+): void {
+  try {
+    if (!ref) {
+      // Reading is the cleanup: an expired record is dropped, a live one is left intact.
+      readReferralStash();
+      return;
+    }
+    const record: ReferralStash = {
+      ref,
+      next,
+      attempt,
+      expiresAt: Date.now() + REFERRAL_STASH_TTL_MS,
+    };
+    globalThis.sessionStorage?.setItem(REFERRAL_STASH_KEY, JSON.stringify(record));
   } catch {
     // storage unavailable (private mode): the referral is lost, not leaked
   }
 }
 
-/** Consumes the stashed referral: reading removes it, so a stash is one redirect old. */
+/** The held referral, its destination, and the attempt that wrote it, without consuming it. An
+ *  expired or malformed record reads as absent, because restoring a code that can no longer be
+ *  spent only revives a dead one. */
+export function peekStashedReferral(): {
+  ref: string;
+  next: string | null;
+  attempt: string | null;
+} | null {
+  const stash = readReferralStash();
+  return stash ? { ref: stash.ref, next: stash.next, attempt: stash.attempt } : null;
+}
+
+/** Consumes the stashed referral: reading removes it, so a stash is spent at most once — and an
+ *  expired one is never spent at all. */
 export function takeStashedReferral(): string | null {
-  try {
-    const stashed = globalThis.sessionStorage?.getItem(REFERRAL_STASH_KEY);
-    globalThis.sessionStorage?.removeItem(REFERRAL_STASH_KEY);
-    return stashed || null;
-  } catch {
-    return null;
-  }
+  const stash = readReferralStash();
+  if (!stash) return null;
+  dropReferralStash();
+  return stash.ref;
+}
+
+/**
+ * Explicitly ends a held referral. This is the **cancel** path: a visitor who walked away from an
+ * attempt must not have that attempt's referral redeemed for them by a later session that has
+ * nothing to do with it.
+ *
+ * A handoff that merely *failed* while the visitor is still trying does **not** clear here —
+ * dropping it would take the referral away from the retry that still needs it, and that retry is
+ * exactly the case the error path has to survive. Those are bounded by
+ * {@link REFERRAL_STASH_TTL_MS} instead.
+ */
+export function clearStashedReferral(): void {
+  dropReferralStash();
 }
 
 /** Coerces one server payload into capabilities. `null` means the server could not answer with the

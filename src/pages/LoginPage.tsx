@@ -7,7 +7,7 @@ import { AuthShell, authCardBox, authInputCls, authButtonCls } from "@/component
 import { AuthPasswordField } from "@/components/AuthPasswordField";
 import { GoogleSignIn } from "@/components/GoogleSignIn";
 import { EmailOtpSignIn } from "@/components/EmailOtpSignIn";
-import { redeemReferral } from "@/lib/auth";
+import { peekStashedReferral, redeemReferral } from "@/lib/auth";
 import { withReferral } from "./SignupPage";
 import { authDestination } from "@/lib/auth-navigation";
 
@@ -16,19 +16,25 @@ export function LoginPage() {
   const { capabilities, signIn, user, loading: authLoading, signOut, sessionError, retrySession, capabilitiesError, retryCapabilities } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const next = authDestination(params.get("next"));
-  // A referral that arrived on the sign-up link and followed the visitor here. Redeemed only after
-  // a session exists, and never in a way that can block sign-in.
-  const ref = params.get("ref");
-  const [error, setError] = useState("");
-  const [recheckingCaps, setRecheckingCaps] = useState(false);
-  const submitting = useRef(false);
-
   // OAuth failures bounce back here as /sign-in?authError=<code> (the server
   // rewrites better-auth's /api/auth/error). state_mismatch is by far the
   // common one: the state cookie lives 5 minutes, so a Google chooser left
   // open past that expires the attempt — the fix is simply trying again.
+  //
+  // That rewrite is the reason the referral has to come back from the stash: the
+  // error URL carries only the code, so reading `ref`/`next` from it alone left
+  // the retry with no code to re-stash and no destination but the default. The
+  // attempt that redirected stashed both before it went, so restore them here —
+  // only on an error return, never on an ordinary arrival.
   const authError = params.get("authError");
+  const restored = authError ? peekStashedReferral() : null;
+  const next = authDestination(params.get("next") ?? restored?.next ?? null);
+  // A referral that arrived on the sign-up link and followed the visitor here. Redeemed only after
+  // a session exists, and never in a way that can block sign-in.
+  const ref = params.get("ref") ?? restored?.ref ?? null;
+  const [error, setError] = useState("");
+  const [recheckingCaps, setRecheckingCaps] = useState(false);
+  const submitting = useRef(false);
   const authErrorHint =
     authError === "state_mismatch"
       ? "That sign-in expired. Please try again."
