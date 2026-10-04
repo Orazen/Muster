@@ -33,7 +33,9 @@ overrides:
   "@xmldom/xmldom@<0.8.15": "0.8.15"
   "sharp@<0.35.4": ">=0.35.4"
   "js-yaml@<4.3.2": ">=4.3.2"
-  # This Miniflare version pins 7.29.0; 7.29.1 fixes its six Undici advisories.
+  # The committed lockfile resolves Miniflare 5.20260930.0-alpha, but this
+  # selector targets absent 5.20260923.0-alpha and is therefore unmatched.
+  # Confirm the exact graph selector against the lockfile before updating it.
   "miniflare@5.20260923.0-alpha>undici": "7.29.1"
   # Configuration only: tracks the newest published http-cache-semantics, which
   # satisfies cacheable-request's declared `^4.0.0`.
