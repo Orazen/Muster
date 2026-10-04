@@ -49,6 +49,135 @@ const NO_CAPABILITIES: AuthCapabilities = {
   emailOtp: false,
 };
 
+/**
+ * How long a referral redemption may take before it is abandoned.
+ *
+ * A referral is a bonus, not an entitlement, so it must never be able to hold an already-authenticated
+ * user on an auth page. The old code awaited `fetch` with no bound: a request that was accepted but
+ * never settled left the caller awaiting forever, which is worse than a rejection — a rejection at
+ * least returned. The deadline converts "never settles" into the ordinary `unreachable` outcome.
+ *
+ * Two independent bounds are used rather than one. An `AbortSignal` stops an implementation that
+ * honours it; a real fetch does, but nothing guarantees the fetch on the other end of the seam does,
+ * and a race whose only bound is a signal the transport ignores is a bound on nothing.
+ */
+export const REFERRAL_DEADLINE_MS = 2000;
+
+export type ReferralOutcome = "skipped" | "redeemed" | "rejected" | "unreachable";
+
+export interface RedeemReferralOptions {
+  /** Injectable so a stalled-response test does not have to wait out the real deadline. */
+  readonly deadlineMs?: number;
+}
+
+/**
+ * Redeems a referral code, and only ever after a session is confirmed.
+ *
+ *  - **After a session.** The server answers `401 sign in before redeeming a referral code` without
+ *    one, so an early call would attribute the referral to nobody and lose it.
+ *  - **Never blocks sign-in.** Every outcome is returned so a caller can report it without failing,
+ *    and the whole call is bounded by {@link REFERRAL_DEADLINE_MS}.
+ *  - **A rejection is reported, not swallowed.** An invalid code is indistinguishable from no call
+ *    only if the response is discarded; it is not.
+ */
+export async function redeemReferral(
+  ref: string | null,
+  options: RedeemReferralOptions = {},
+): Promise<ReferralOutcome> {
+  if (!ref) return "skipped";
+  const deadlineMs = options.deadlineMs ?? REFERRAL_DEADLINE_MS;
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), deadlineMs);
+  let expire: () => void = () => undefined;
+  const expired = new Promise<void>((resolve) => { expire = resolve; });
+  const expiryTimer = setTimeout(expire, deadlineMs);
+  try {
+    type Settled = { timedOut: true } | { timedOut: false; response: Response | null };
+    const request: Promise<Settled> = fetch("/api/referral/redeem", {
+      method: "POST", headers: { "content-type": "application/json" },
+      credentials: "include", body: JSON.stringify({ code: ref }),
+      signal: controller.signal,
+    }).then(
+      (response): Settled => ({ timedOut: false, response }),
+      (): Settled => ({ timedOut: false, response: null }),
+    );
+    const settled = await Promise.race<Settled>([
+      request,
+      expired.then((): Settled => ({ timedOut: true })),
+    ]);
+    if (settled.timedOut) return "unreachable";
+    if (settled.response === null) return "unreachable";
+    return settled.response.ok ? "redeemed" : "rejected";
+  } catch {
+    return "unreachable";
+  } finally {
+    clearTimeout(abortTimer);
+    clearTimeout(expiryTimer);
+  }
+}
+
+/**
+ * Holds a referral across the OAuth round trip.
+ *
+ * `src/lib/auth-navigation.ts` already owns the identical problem for pairing codes
+ * (`stashPairReturn`) and its reasoning applies unchanged: the return path must not carry it in a
+ * query string, so the value is stashed for the duration of one redirect instead. `ref` here rides
+ * the same-tab `sessionStorage`, which survives the redirect `signIn.social` performs and is
+ * scoped to the tab that started it.
+ *
+ * That file is outside this slice's claim, so the pair is defined beside the redemption it serves
+ * and the move to `auth-navigation.ts` is proposed rather than made.
+ */
+const REFERRAL_STASH_KEY = "muster.referral";
+
+export function stashReferral(ref: string | null): void {
+  try {
+    if (ref) globalThis.sessionStorage?.setItem(REFERRAL_STASH_KEY, ref);
+    else globalThis.sessionStorage?.removeItem(REFERRAL_STASH_KEY);
+  } catch {
+    // storage unavailable (private mode): the referral is lost, not leaked
+  }
+}
+
+/** Consumes the stashed referral: reading removes it, so a stash is one redirect old. */
+export function takeStashedReferral(): string | null {
+  try {
+    const stashed = globalThis.sessionStorage?.getItem(REFERRAL_STASH_KEY);
+    globalThis.sessionStorage?.removeItem(REFERRAL_STASH_KEY);
+    return stashed || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Coerces one server payload into capabilities. `null` means the server could not answer with the
+ *  shape — which the caller surfaces as a capability error rather than as "no optional flows". */
+export async function requestCapabilities(
+  origin: string,
+  get: (url: string, init?: RequestInit) => Promise<Response>,
+): Promise<AuthCapabilities | null> {
+  try {
+    const res = await get(`${origin}/api/auth-capabilities`, { credentials: "include" });
+    if (!res.ok) return null;
+    // SAFETY: /api/auth-capabilities serves the AuthCapabilities shape or a non-2xx status
+    // (rejected above); every field below is coerced individually, so an unexpected payload only
+    // hides optional flows rather than breaking the sign-in page.
+    const data = (await res.json()) as Partial<AuthCapabilities>;
+    return {
+      emailVerification: Boolean(data.emailVerification),
+      passwordReset: Boolean(data.passwordReset),
+      socialProviders: Array.isArray(data.socialProviders) ? data.socialProviders : [],
+      googleOnlySignup: Boolean(data.googleOnlySignup),
+      cloudPairing: Boolean(data.cloudPairing),
+      desktopOAuth: Boolean(data.desktopOAuth),
+      pairingCloudUrl: data.pairingCloudUrl ?? null,
+      emailOtp: Boolean(data.emailOtp),
+    };
+  } catch {
+    return null;
+  }
+}
+
 interface AuthContextType {
   user: AuthUser | null;
   session: AuthSession | null;
@@ -56,6 +185,11 @@ interface AuthContextType {
   sessionError: string | null;
   retrySession: () => Promise<boolean>;
   capabilities: AuthCapabilities;
+  /** The capability endpoint could not be read, so optional flows are hidden for an unknown
+   *  reason. Distinct from "this server has no optional flows": that is a fact about the server,
+   *  this is a failure to find out, and a user can do something about it. */
+  capabilitiesError: boolean;
+  retryCapabilities: () => Promise<boolean>;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signUp: (name: string, email: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
@@ -72,6 +206,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const { user, session } = auth;
   const loading = auth.status === "loading";
   const [capabilities, setCapabilities] = useState<AuthCapabilities>(NO_CAPABILITIES);
+  const [capabilitiesError, setCapabilitiesError] = useState(false);
 
   // Bind the account before newly mounted workspace passive effects start
   // their API requests; a replaced binding fences requests from the old user.
@@ -85,35 +220,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /** Ask the server which optional flows exist, so the UI never offers a
    *  button that cannot work — a "forgot password" link that silently drops
-   *  the mail is worse than no link. */
-  async function fetchCapabilities() {
-    try {
-      const base = window.location.origin;
-      const res = await fetch(`${base}/api/auth-capabilities`, { credentials: "include" });
-      if (!res.ok) return;
-      // SAFETY: /api/auth-capabilities serves the AuthCapabilities shape or a
-      // non-2xx status (rejected above); every field below is coerced
-      // individually, so an unexpected payload only hides optional flows.
-      const data = (await res.json()) as Partial<AuthCapabilities>;
-      setCapabilities({
-        emailVerification: Boolean(data.emailVerification),
-        passwordReset: Boolean(data.passwordReset),
-        socialProviders: Array.isArray(data.socialProviders) ? data.socialProviders : [],
-        googleOnlySignup: Boolean(data.googleOnlySignup),
-        cloudPairing: Boolean(data.cloudPairing),
-        desktopOAuth: Boolean(data.desktopOAuth),
-        pairingCloudUrl: data.pairingCloudUrl ?? null,
-        emailOtp: Boolean(data.emailOtp),
-      });
-    } catch {
-      // Server too old or unreachable — leave every optional flow hidden.
+   *  the mail is worse than no link.
+   *
+   *  A failure used to return early and leave the page permanently silent: the
+   *  flows stayed hidden with no way to tell a server that has none from a
+   *  request that never arrived. Now a failure is recorded and surfaced, so the
+   *  page can offer a retry instead of a wrong answer. */
+  async function fetchCapabilities(): Promise<boolean> {
+    const loaded = await requestCapabilities(window.location.origin, (url, init) => fetch(url, init));
+    if (!loaded) {
+      setCapabilitiesError(true);
+      return false;
     }
+    setCapabilities(loaded);
+    setCapabilitiesError(false);
+    return true;
   }
+
+  // A referral carried through Google's OAuth return arrives here: the redirect lands on the
+  // workspace, not on an auth page, so nothing there can redeem it. The session is the gate the
+  // server requires, so this is the first point at which redemption is both possible and correct.
+  const confirmed = auth.status === "ready" && Boolean(auth.user);
+  useEffect(() => {
+    if (!confirmed) return;
+    const stashed = takeStashedReferral();
+    if (!stashed) return;
+    // An auth page carrying this same code in its own URL owns it for this page load and redeems
+    // it after the sign-in it just performed. Redeeming here too would spend the same code twice,
+    // so the stash is dropped rather than left to fire later against a code already used.
+    if (new URLSearchParams(window.location.search).get("ref") === stashed) return;
+    void redeemReferral(stashed);
+  }, [confirmed]);
 
   async function retrySession() {
     void fetchCapabilities();
     const checked = await recovery.refresh();
     return checked?.status === "ready" && Boolean(checked.user);
+  }
+
+  /** The visible retry behind the capability failure notice. Resolves true only when the server
+   *  actually answered, which is the condition under which optional flows become visible again. */
+  async function retryCapabilities(): Promise<boolean> {
+    return fetchCapabilities();
   }
 
   async function signIn(email: string, password: string): Promise<{ error?: string }> {
@@ -215,6 +363,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sessionError: auth.status === "unavailable" ? SESSION_UNAVAILABLE : null,
         retrySession,
         capabilities,
+        capabilitiesError,
+        retryCapabilities,
         signIn,
         signUp,
         signOut,

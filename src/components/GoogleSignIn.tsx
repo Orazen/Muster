@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { useAuth } from "@/lib/auth";
+import { stashReferral, useAuth } from "@/lib/auth";
 import { authDestination } from "@/lib/auth-navigation";
 
 /** Shared account entry for web and Electron. Starting OAuth is not proof of
  * a session: the provider callback (or a confirmed local session) completes it. */
-export function GoogleSignIn({ next, onError }: { next: string; onError: (message: string) => void }) {
+export function GoogleSignIn({ next, ref, onError }: { next: string; ref?: string | null; onError: (message: string) => void }) {
   const { capabilities, signInWithProvider, signOut } = useAuth();
   const [pending, setPending] = useState(false);
   const [waiting, setWaiting] = useState(false);
@@ -81,6 +81,11 @@ export function GoogleSignIn({ next, onError }: { next: string; onError: (messag
     onError("");
     try {
       if (!handoff) {
+        // Hold the referral across the redirect. The OAuth return carries only the callback path,
+        // so without this a first-account Google signup from a referral link silently drops the
+        // code on the one path most likely to be a new account. Redeemed later, and only once a
+        // session is confirmed.
+        stashReferral(ref ?? null);
         const result = await signInWithProvider("google");
         if (currentAttempt === attempt.current && result.error) onError(result.error);
         return;
@@ -90,6 +95,8 @@ export function GoogleSignIn({ next, onError }: { next: string; onError: (messag
       // snapshot is not sufficient to decide whether a cookie exists.
       await signOut();
       if (currentAttempt !== attempt.current) return;
+      // Same reason as the web path: the handoff returns to the workspace, not to an auth page.
+      stashReferral(ref ?? null);
       // Mint the per-attempt binding first: the local server keeps the PKCE
       // verifier and only releases it to the proven finish exchange. The
       // challenge rides the start URL; the state comes back on the finish

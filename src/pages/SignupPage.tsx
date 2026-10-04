@@ -1,44 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { useAuth } from "@/lib/auth";
+import { redeemReferral, useAuth } from "@/lib/auth";
 import { AuthShell, authInputCls, authButtonCls } from "@/components/AuthShell";
 
 import { GoogleSignIn } from "@/components/GoogleSignIn";
 import { AuthPasswordField } from "@/components/AuthPasswordField";
 import { authDestination, AUTH_PASSWORD_MIN_LENGTH } from "@/lib/auth-navigation";
-
-/**
- * Redeems a referral code, and only ever after a session is confirmed.
- *
- * Three properties are deliberate:
- *
- *  - **After a session.** The server answers `401 sign in before redeeming a referral code` without
- *    one, so an early call would attribute the referral to nobody and lose it.
- *  - **Never blocks sign-in.** A referral is a bonus, not an entitlement. A rejected code, a server
- *    that cannot allocate, or an unreachable network must not strand someone who has just created an
- *    account. Every outcome is returned so a caller can report it without failing.
- *  - **A rejection is reported, not swallowed.** The previous version discarded the response
- *    entirely, so an invalid code was indistinguishable from a redeemed one and nobody could tell a
- *    lost referral from a working one.
- *
- * Exported from this page because it is where the referral concern already lived. It belongs in a
- * shared auth helper beside `authDestination`; that file is not in this slice's claim, so the move is
- * proposed rather than made here.
- */
-export type ReferralOutcome = "skipped" | "redeemed" | "rejected" | "unreachable";
-
-export async function redeemReferral(ref: string | null): Promise<ReferralOutcome> {
-  if (!ref) return "skipped";
-  try {
-    const response = await fetch("/api/referral/redeem", {
-      method: "POST", headers: { "content-type": "application/json" },
-      credentials: "include", body: JSON.stringify({ code: ref }),
-    });
-    return response.ok ? "redeemed" : "rejected";
-  } catch {
-    return "unreachable";
-  }
-}
 
 /** Builds a query string that keeps `ref` alongside `next`, so a referral survives navigation. */
 export function withReferral(path: string, next: string, ref: string | null): string {
@@ -54,7 +21,7 @@ export function withReferral(path: string, next: string, ref: string | null): st
  * The old version was Google-only: deployments without OAuth creds showed
  * an operator-facing env-var note and no way to create an account at all. */
 export function SignupPage() {
-  const { capabilities, signUp, sessionError, retrySession } = useAuth();
+  const { capabilities, signUp, sessionError, retrySession, capabilitiesError, retryCapabilities } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = authDestination(params.get("next"));
@@ -64,6 +31,7 @@ export function SignupPage() {
   const [password, setPassword] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
   const [rechecking, setRechecking] = useState(false);
+  const [recheckingCaps, setRecheckingCaps] = useState(false);
   const googleConfigured = capabilities.socialProviders.includes("google");
 
   async function continueToWorkspace() {
@@ -118,7 +86,15 @@ export function SignupPage() {
           </div>
         )}
 
-        <GoogleSignIn next={next} onError={setError} />
+        {capabilitiesError && <div className="auth-notice auth-error" role="alert">
+          <p>Could not load which sign-in methods this server offers. Google sign-in and one-time-code sign-in are hidden until it answers.</p>
+          <button type="button" className="auth-link" disabled={recheckingCaps} onClick={() => {
+            setRecheckingCaps(true);
+            void retryCapabilities().finally(() => setRecheckingCaps(false));
+          }}>{recheckingCaps ? "Checking…" : "Check again"}</button>
+        </div>}
+
+        <GoogleSignIn next={next} ref={params.get("ref")} onError={setError} />
 
         {(googleConfigured || capabilities.desktopOAuth) && <div className="auth-divider">or use your email</div>}
         <form onSubmit={(e) => void handleEmailSignUp(e)} className="auth-form">

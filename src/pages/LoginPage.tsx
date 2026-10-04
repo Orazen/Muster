@@ -7,12 +7,13 @@ import { AuthShell, authCardBox, authInputCls, authButtonCls } from "@/component
 import { AuthPasswordField } from "@/components/AuthPasswordField";
 import { GoogleSignIn } from "@/components/GoogleSignIn";
 import { EmailOtpSignIn } from "@/components/EmailOtpSignIn";
-import { redeemReferral, withReferral } from "./SignupPage";
+import { redeemReferral } from "@/lib/auth";
+import { withReferral } from "./SignupPage";
 import { authDestination } from "@/lib/auth-navigation";
 
 /** Account sign-in and device connection share a page, but remain separate actions. */
 export function LoginPage() {
-  const { capabilities, signIn, user, loading: authLoading, signOut, sessionError, retrySession } = useAuth();
+  const { capabilities, signIn, user, loading: authLoading, signOut, sessionError, retrySession, capabilitiesError, retryCapabilities } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = authDestination(params.get("next"));
@@ -20,6 +21,7 @@ export function LoginPage() {
   // a session exists, and never in a way that can block sign-in.
   const ref = params.get("ref");
   const [error, setError] = useState("");
+  const [recheckingCaps, setRecheckingCaps] = useState(false);
   const submitting = useRef(false);
 
   // OAuth failures bounce back here as /sign-in?authError=<code> (the server
@@ -147,7 +149,15 @@ export function LoginPage() {
           </div>
         )}
 
-        <GoogleSignIn next={next} onError={setError} />
+        {capabilitiesError && <div className="auth-notice auth-error" role="alert">
+          <p>Could not load which sign-in methods this server offers. Google sign-in and one-time-code sign-in are hidden until it answers.</p>
+          <button type="button" className="auth-link" disabled={recheckingCaps} onClick={() => {
+            setRecheckingCaps(true);
+            void retryCapabilities().finally(() => setRecheckingCaps(false));
+          }}>{recheckingCaps ? "Checking…" : "Check again"}</button>
+        </div>}
+
+        <GoogleSignIn next={next} ref={ref} onError={setError} />
 
         {(googleConfigured || desktopOAuthHandoff) && <div className="auth-divider">or use your email</div>}
         {capabilities.emailOtp && <EmailOtpSignIn next={next} onVerified={async () => { await redeemReferral(ref); }} />}

@@ -23,9 +23,18 @@ const baseCapabilities: AuthCapabilities = {
 
 beforeEach(() => vi.clearAllMocks());
 
-function renderPage(Page: ComponentType, capabilities: Partial<AuthCapabilities> = {}, path = "/sign-in", sessionError: string | null = null) {
+interface ContextOverrides {
+  /** Mirrors a failed /api/auth-capabilities read: capabilities stay at their initial value. */
+  readonly capabilitiesError?: boolean;
+  readonly retryCapabilities?: () => Promise<boolean>;
+}
+
+function renderPage(Page: ComponentType, capabilities: Partial<AuthCapabilities> = {}, path = "/sign-in", sessionError: string | null = null, overrides: ContextOverrides = {}) {
   mocks.useAuth.mockReturnValue({
     capabilities: { ...baseCapabilities, ...capabilities },
+    capabilitiesError: false,
+    retryCapabilities: vi.fn(() => Promise.resolve(true)),
+    ...overrides,
     user: null,
     session: null,
     loading: false,
@@ -182,4 +191,39 @@ it("makes email codes primary while keeping the password choice discoverable", (
   const markup = renderPage(LoginPage, { emailOtp: true });
   expect(markup.indexOf('id="otp-email"')).toBeLessThan(markup.indexOf('id="password"'));
   expect(markup).toMatch(/<details class="auth-password-option"><summary>Use a password instead/);
+});
+
+// A capability read that fails is not the same claim as "this server offers no optional flows":
+// the first is something we could not find out, the second is a fact. The page must say which,
+// because the only difference a user can act on is the one that offers a retry.
+describe("capability failure is visible and recoverable", () => {
+  it.each([LoginPage, SignupPage])("%s offers a retry and withholds methods it could not confirm", (Page) => {
+    const markup = renderPage(Page, {}, "/sign-in", null, { capabilitiesError: true });
+    expect(markup).toContain("Could not load which sign-in methods this server offers");
+    expect(markup).toContain("Check again</button>");
+    expect(markup).not.toContain("Continue with Google");
+    expect(markup).not.toContain('id="otp-email"');
+  });
+
+  it.each([LoginPage, SignupPage])("%s shows the methods again once the retry succeeds", (Page) => {
+    const failed = renderPage(Page, {}, "/sign-in", null, { capabilitiesError: true });
+    expect(failed).not.toContain("Continue with Google");
+    expect(failed).not.toContain("Email me a code");
+
+    const recovered = renderPage(
+      Page,
+      { socialProviders: ["google"], emailOtp: true },
+      "/sign-in",
+      null,
+      { capabilitiesError: false },
+    );
+    expect(recovered).toContain("Continue with Google");
+    expect(recovered).not.toContain("Check again</button>");
+  });
+
+  it("does not nag when the server simply has no optional flows", () => {
+    const markup = renderPage(LoginPage, {}, "/sign-in", null, { capabilitiesError: false });
+    expect(markup).not.toContain("Check again</button>");
+    expect(markup).toContain("Sign in with email");
+  });
 });
