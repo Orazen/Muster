@@ -130,6 +130,33 @@ export class DriveVisibleError extends Error {
   }
 }
 
+/**
+ * A persona id must be a single non-empty token. It travels inside a marker line, so a newline or a
+ * stray space would make the boundary ambiguous and could let one persona masquerade as two.
+ * Duplicate ids are rejected because two entries for one bot would silently overwrite each other on
+ * the next write, which is data loss rather than a merge.
+ */
+const PERSONA_ID = /^\S(?:.*\S)?$/;
+
+export class DuplicatePersonaError extends DriveVisibleError {
+  constructor(readonly botId: string) {
+    super(`soul.md lists ${botId} more than once; two entries for one bot would silently overwrite each other`, "corrupt");
+    this.name = "DuplicatePersonaError";
+  }
+}
+
+export function assertPersonaIdsSane(personas: readonly SoulDocument["personas"][number][]): void {
+  const seen = new Set<string>();
+  for (const persona of personas) {
+    if (!PERSONA_ID.test(persona.botId) || persona.botId.trim() === "") {
+      throw new DriveVisibleError(`invalid persona id ${JSON.stringify(persona.botId)}`, "corrupt");
+    }
+    if (seen.has(persona.botId)) throw new DuplicatePersonaError(persona.botId);
+    seen.add(persona.botId);
+  }
+}
+
+
 const CREDENTIAL_KEY_SET = new Set<string>(CREDENTIAL_KEYS.map((k) => k.toLowerCase()));
 
 /**
@@ -210,6 +237,15 @@ export function projectSettings(upstream: Readonly<Record<string, string | numbe
 
 const versioned = z.object({ schemaVersion: z.number().int().positive() });
 
+/**
+ * UNKNOWN-KEY POLICY: these schemas are ordinary zod objects, so a key the reader does not know is
+ * STRIPPED on parse rather than rejected. That is deliberate and safe in this direction: a person
+ * adding `{"theme":"dark","apiKey":"sk-..."}` to settings.json cannot get the credential back out,
+ * because `settings.json` additionally enforces the allowlist and refuses credentials outright
+ * (see `parseSettings`), and for the other documents an unknown key is dropped before it can ever be
+ * re-rendered. Stripping is therefore a privacy-preserving normalisation, not silent acceptance of
+ * bad data: the value is never written back.
+ */
 export const SoulDocumentSchema = versioned.extend({
   kind: z.literal("soul"),
   /** One entry per bot. A single bot is still a list, so adding one is not a format change. */
@@ -324,12 +360,51 @@ export function buildSettingsDocument(settings: SettingsProjection["settings"]):
  * soul.md stays readable Markdown rather than JSON, because a person is meant to open and edit
  * it. The version marker is an HTML comment so it survives a Markdown reader untouched.
  */
+/**
+ * Byte-exact round-trip contract for soul.md.
+ *
+ * For each persona the renderer emits EXACTLY these five slots, newline-joined, and appends the
+ * body verbatim with no trimming:
+ *
+ *     <!-- muster-persona ID -->
+ *     ## ID
+ *     <one blank line>
+ *     <body, byte for byte>
+ *     <one trailing blank line>
+ *
+ * The parser removes exactly what was added - the heading when it is the generated one, the blank
+ * line that follows it, and one trailing blank line - and nothing else. No `trim()`, so leading
+ * indentation, trailing spaces and blank lines inside the body survive unchanged. A body that would
+ * not survive this contract is refused at render time rather than written lossy.
+ *
+ * Refusing marker-shaped lines (see `assertBodyIsRenderable`) is what keeps the contract total: a
+ * literal marker in a body would otherwise read back as a second persona.
+ */
 export function renderSoulMarkdown(document: SoulDocument): string {
-  const lines = [`<!-- muster-visible schemaVersion=${document.schemaVersion} -->`];
+  assertPersonaIdsSane(document.personas);
+  let out = `<!-- muster-visible schemaVersion=${document.schemaVersion} -->\n`;
   for (const persona of document.personas) {
-    lines.push(`<!-- muster-persona ${persona.botId} -->`, `## ${persona.botId}`, "", persona.markdown.trim(), "");
+    assertBodyIsRenderable(persona.botId, persona.markdown);
+    out += `<!-- muster-persona ${persona.botId} -->\n`;
+    out += `## ${persona.botId}\n`;
+    out += "\n";
+    out += persona.markdown;
+    out += "\n\n";
   }
-  return `${lines.join("\n").trimEnd()}\n`;
+  return out;
+}
+
+/** A body containing a persona-marker line could never round-trip, so it is refused, not escaped. */
+function assertBodyIsRenderable(botId: string, markdown: string): void {
+  for (const line of markdown.split("\n")) {
+    if (PERSONA_MARKER.test(line)) {
+      throw new DriveVisibleError(
+        `${botId}'s soul body contains a line that reads as a persona marker ` +
+          `(${line.trim()}); it would be restored as a second bot`,
+        "corrupt",
+      );
+    }
+  }
 }
 
 /**
@@ -338,31 +413,77 @@ export function renderSoulMarkdown(document: SoulDocument): string {
  * decorative `## <botId>` heading this module writes, which is stripped so the round trip is exact.
  * Text before the first marker is ignored rather than guessed at.
  */
-export function splitSoulMarkdown(text: string): SoulDocument["personas"] {
+/**
+ * Splits on persona MARKERS, never on heading shape, and removes exactly the lines the renderer
+ * added so the body is returned byte for byte.
+ *
+ * Heading handling is deliberately narrow: the generated heading is removed ONLY when the first line
+ * is exactly `## <the persona's own id>`. A person who deletes the generated heading keeps their real
+ * first heading (`## Voice`) as content, instead of having it silently deleted.
+ *
+ * `strayContent` is returned so the caller can REJECT a document that has versioned, non-empty
+ * content but no persona markers. That is malformed input, not an empty workspace, and reporting it as
+ * `[]` would let a truncated or hand-mangled file read as "nothing to restore".
+ */
+/** Named so the round-trip contract is a stated type, not an anonymous shape. */
+export interface SoulSplitResult {
+  personas: SoulDocument["personas"];
+  /** True when versioned content appeared outside any persona marker. */
+  strayContent: boolean;
+}
+
+export function splitSoulMarkdownDetailed(text: string): SoulSplitResult {
   const personas: SoulDocument["personas"] = [];
   let currentBotId: string | null = null;
   let body: string[] = [];
+  let strayContent = false;
+  let seenMarker = false;
 
   const flush = (): void => {
     if (currentBotId === null) return;
-    // Drop the decorative heading this module emits, then trim the surrounding blank lines.
-    const withoutHeading = body[0]?.startsWith("## ") ? body.slice(1) : body;
-    personas.push({ botId: currentBotId, markdown: withoutHeading.join("\n").trim() });
+    let rest = body;
+    // Remove the generated heading only on an exact match with this persona's id.
+    if (rest[0] === `## ${currentBotId}`) {
+      rest = rest.slice(1);
+      // The renderer put exactly one blank line after the heading.
+      if (rest[0] === "") rest = rest.slice(1);
+    }
+    // The renderer put exactly one trailing blank line.
+    if (rest.length > 0 && rest[rest.length - 1] === "") rest = rest.slice(0, -1);
+    personas.push({ botId: currentBotId, markdown: rest.join("\n") });
     currentBotId = null;
     body = [];
   };
 
-  for (const line of text.split("\n")) {
+  // The renderer terminates the file with one newline. Removing that terminator FIRST is what
+  // makes "drop exactly one trailing blank line" mean the generated one, rather than accidentally
+  // consuming the terminator and leaving a stray newline attached to the body.
+  const withoutTerminator = text.endsWith("\n") ? text.slice(0, -1) : text;
+
+  for (const line of withoutTerminator.split("\n")) {
     const marker = PERSONA_MARKER.exec(line);
     if (marker?.[1]) {
       flush();
+      seenMarker = true;
       currentBotId = marker[1].trim();
       continue;
     }
-    if (currentBotId !== null) body.push(line);
+    if (currentBotId !== null) {
+      body.push(line);
+      continue;
+    }
+    // Before the first marker: the schema comment and blank lines are expected, anything else is stray.
+    if (line.trim() === "") continue;
+    if (!seenMarker && line.startsWith("<!-- muster-visible schemaVersion=")) continue;
+    strayContent = true;
   }
   flush();
-  return personas;
+  return { personas, strayContent };
+}
+
+/** Convenience wrapper for callers that only want the personas. */
+export function splitSoulMarkdown(text: string): SoulDocument["personas"] {
+  return splitSoulMarkdownDetailed(text).personas;
 }
 
 export function renderDocument(key: VisibleFileKey, document: VisibleDocument): string {
@@ -396,7 +517,23 @@ function parseSoul(raw: string): FileParseResult {
   if (schemaVersion > VISIBLE_SCHEMA_VERSION) {
     return { ok: false, fileName, reason: `schemaVersion ${schemaVersion} is newer than ${VISIBLE_SCHEMA_VERSION}` };
   }
-  const parsed = SoulDocumentSchema.safeParse({ schemaVersion, kind: "soul", personas: splitSoulMarkdown(raw) });
+  const { personas, strayContent } = splitSoulMarkdownDetailed(raw);
+  // Versioned, non-empty content with no persona markers is MALFORMED. An intentionally empty
+  // document is one that carries the version marker and nothing else, which parses to no personas.
+  if (strayContent) {
+    return {
+      ok: false,
+      fileName,
+      reason: "content outside any persona marker; the document is malformed, not empty",
+    };
+  }
+  try {
+    assertPersonaIdsSane(personas);
+  } catch (error) {
+    if (error instanceof DriveVisibleError) return { ok: false, fileName, reason: error.message };
+    throw error;
+  }
+  const parsed = SoulDocumentSchema.safeParse({ schemaVersion, kind: "soul", personas });
   if (!parsed.success) {
     return { ok: false, fileName, reason: parsed.error.issues[0]?.message ?? "schema mismatch" };
   }
@@ -542,6 +679,20 @@ export interface DriveListArgs {
   fields?: string;
 }
 
+/**
+ * GUARANTEE BOUNDARY — read this before trusting a green test run.
+ *
+ * Everything this module guarantees is guaranteed **against the injected client**. Concretely, the
+ * synthetic suite proves: folder selection is parent-scoped and deterministic; duplicate selection is
+ * total; a stale revision is refused; a write with no revision evidence is refused; a file that did
+ * not change is not rewritten; a partial write is reported with its progress.
+ *
+ * What it does NOT prove, because a fake cannot: that Google Drive actually enforces `md5Checksum`
+ * preconditions (Drive v3 has no `If-Match`; it is emulated here), that its 412/404/429/401 statuses
+ * are what the real API returns, that `in parents` and `root` behave as modelled, that a real
+ * concurrent edit is actually caught, or that rate limits and consent revocation behave as modelled.
+ * **None of this is real Drive acceptance, and none of it is real sync or restore.**
+ */
 /** The minimum Drive surface this module needs, so a fake stays trivial. */
 export interface VisibleDriveClient {
   listFiles(args: DriveListArgs): Promise<DriveFileRef[]>;
@@ -624,6 +775,33 @@ export interface WriteOutcome {
 }
 
 /**
+ * Thrown when a multi-file write fails partway. The files already written are NOT rolled back -
+ Drive has no transaction here - so the caller is told exactly how far it got, because a partial
+ * Drive folder that is silently reported as "sync failed" is indistinguishable from one that never
+ * started.
+ */
+export class PartialWriteError extends DriveVisibleError {
+  constructor(
+    message: string,
+    readonly wrote: readonly string[],
+    readonly cause: DriveVisibleError,
+  ) {
+    super(message, cause.code);
+    this.name = "PartialWriteError";
+  }
+}
+
+export interface WriteOptions {
+  /**
+   * Require a revision token (md5 checksum) before overwriting an existing file. Default true,
+   * because Drive's v3 API has no `If-Match` and the ONLY protection against clobbering someone
+   * else's edit is a conditional request. Setting this false opts out of conflict protection and must
+   * be a deliberate choice by the caller.
+   */
+  requireRevisionEvidence?: boolean;
+}
+
+/**
  * Duplicate-folder selection rule, stated because "oldest" is otherwise ambiguous:
  *
  *  1. EARLIEST `createdTime` wins. `modifiedTime` is deliberately NOT used — a folder somebody just
@@ -663,43 +841,68 @@ export async function writeVisibleFiles(
   client: VisibleDriveClient,
   folderId: string,
   files: VisibleFiles,
+  options: WriteOptions = {},
 ): Promise<WriteOutcome> {
   const wrote: string[] = [];
   const unchanged: string[] = [];
+  const requireRevision = options.requireRevisionEvidence !== false;
 
-  for (const [fileName, body] of Object.entries(files)) {
-    if (body === undefined) continue;
-    const key = keyForFileName(fileName);
-    if (key === null) {
-      throw new DriveVisibleError(`${fileName} is not a visible contract file`, "schema_version");
-    }
-    assertRenderedBodyIsUsable(key, body, fileName);
+  try {
+    for (const [fileName, body] of Object.entries(files)) {
+      if (body === undefined) continue;
+      const key = keyForFileName(fileName);
+      if (key === null) {
+        throw new DriveVisibleError(`${fileName} is not a visible contract file`, "schema_version");
+      }
+      assertRenderedBodyIsUsable(key, body, fileName);
 
-    const existing = await listOrThrow(client, {
-      q: `name = '${escapeDriveQuery(fileName)}' and '${escapeDriveQuery(folderId)}' in parents and trashed = false`,
-      fields: "files(id,name,parents,mimeType,md5Checksum)",
-    });
+      const existing = await listOrThrow(client, {
+        q: `name = '${escapeDriveQuery(fileName)}' and '${escapeDriveQuery(folderId)}' in parents and trashed = false`,
+        fields: "files(id,name,parents,mimeType,md5Checksum)",
+      });
 
-    if (existing.length === 0) {
-      await createOrThrow(client, fileName, folderId, body);
+      if (existing.length === 0) {
+        await createOrThrow(client, fileName, folderId, body);
+        wrote.push(fileName);
+        continue;
+      }
+      if (existing.length > 1) {
+        throw new DriveVisibleError(
+          `${fileName} exists ${existing.length} times in Muster/; refusing to guess which to update`,
+          "duplicate_folder",
+        );
+      }
+      const target = existing[0];
+      if (!target) continue;
+      const current = await readCurrent(client, target.id, fileName);
+      if (current && current.body === body) {
+        unchanged.push(fileName);
+        continue;
+      }
+      const revision = current?.md5Checksum ?? target.md5Checksum;
+      if (revision === undefined && requireRevision) {
+        // Writing with no revision token would be an unconditional overwrite. Reporting that as a
+        // successful sync would claim conflict protection this call does not have.
+        throw new DriveVisibleError(
+          `${fileName} has no revision evidence (no md5 checksum), so it cannot be updated safely; ` +
+            `refusing rather than overwriting unconditionally`,
+          "conflict",
+        );
+      }
+      await updateOrThrow(client, target.id, body, revision);
       wrote.push(fileName);
-      continue;
     }
-    if (existing.length > 1) {
-      throw new DriveVisibleError(
-        `${fileName} exists ${existing.length} times in Muster/; refusing to guess which to update`,
-        "duplicate_folder",
+  } catch (error) {
+    if (error instanceof DriveVisibleError) {
+      throw new PartialWriteError(
+        wrote.length === 0
+          ? `visible folder write failed before any file was written: ${error.message}`
+          : `visible folder write failed after ${wrote.length} file(s) (${wrote.join(", ")}); they were NOT rolled back: ${error.message}`,
+        wrote,
+        error,
       );
     }
-    const target = existing[0];
-    if (!target) continue;
-    const current = await getOrNull(client, target.id);
-    if (current && current.body === body) {
-      unchanged.push(fileName);
-      continue;
-    }
-    await updateOrThrow(client, target.id, body, current?.md5Checksum ?? target.md5Checksum);
-    wrote.push(fileName);
+    throw error;
   }
   return { wrote, unchanged };
 }
@@ -717,14 +920,25 @@ function assertRenderedBodyIsUsable(key: VisibleFileKey, body: string, fileName:
 
 // ── Error normalisation ────────────────────────────────────────────────────────
 
-async function getOrNull(
+/**
+ * Reads the current body, distinguishing "gone" from "present". A file that vanished between the
+ * list and the read is NOT the same as one that is unchanged, and must not fall through to be
+ * reported as a conflict or silently recreated over a race.
+ */
+async function readCurrent(
   client: VisibleDriveClient,
   id: string,
+  fileName: string,
 ): Promise<{ body: string; md5Checksum?: string } | null> {
   try {
     return await call(() => client.getFile(id));
   } catch (error) {
-    if (error instanceof DriveVisibleError && error.code === "not_found") return null;
+    if (error instanceof DriveVisibleError && error.code === "not_found") {
+      throw new DriveVisibleError(
+        `${fileName} was listed but has since been deleted; refusing to write over a deletion race`,
+        "not_found",
+      );
+    }
     throw error;
   }
 }

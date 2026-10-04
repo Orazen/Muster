@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CREDENTIAL_KEYS,
+  PartialWriteError,
   DriveVisibleError,
   FOLDER_MIME,
   VISIBLE_BACKUPS_DIR,
@@ -46,6 +47,10 @@ class FakeDrive implements VisibleDriveClient {
   /** Counts writes, so "unchanged" can be proven not to churn revisions. */
   writes = 0;
   private failure: { status: number; message?: string; times: number } | undefined;
+  /** Models Drive not returning a checksum, to test that we refuse rather than overwrite blind. */
+  omitChecksums = false;
+  /** Ids to delete when getFile is called, modelling a deletion between list and update. */
+  raceDeleteOnGet = new Set<string>();
 
   constructor(options: FakeOptions = {}) {
     // `times` must default to 1: an unset value compared with `> 0` is false, the guard
@@ -121,7 +126,11 @@ class FakeDrive implements VisibleDriveClient {
     this.guard();
     const file = this.files.get(id);
     if (!file) throw Object.assign(new Error("not found"), { code: 404 });
-    return { body: file.body, md5Checksum: `md5-${file.body.length}` };
+    if (this.raceDeleteOnGet.delete(id)) {
+      this.files.delete(id);
+      throw Object.assign(new Error("not found"), { code: 404 });
+    }
+    return { body: file.body, md5Checksum: this.omitChecksums ? undefined : `sha-${hashOf(file.body)}` };
   }
 
   async updateFile(id: string, body: string, previousChecksum?: string): Promise<DriveFileRef> {
@@ -129,7 +138,7 @@ class FakeDrive implements VisibleDriveClient {
     const file = this.files.get(id);
     if (!file) throw Object.assign(new Error("not found"), { code: 404 });
     // Drive rejects a stale precondition with 412; the fake does the same.
-    if (previousChecksum && `md5-${file.body.length}` !== previousChecksum) {
+    if (previousChecksum && `sha-${hashOf(file.body)}` !== previousChecksum) {
       throw Object.assign(new Error("conditionNotMet"), { code: 412 });
     }
     file.body = body;
@@ -142,6 +151,13 @@ class FakeDrive implements VisibleDriveClient {
     const file = this.files.get(id);
     if (file) file.body = `${file.body}\n// edited elsewhere`;
   }
+}
+
+/** A content hash, so the fake cannot mistake a same-length edit for an unchanged file. */
+function hashOf(text: string): string {
+  let h = 0;
+  for (let i = 0; i < text.length; i += 1) h = (h * 31 + text.charCodeAt(i)) >>> 0;
+  return `${h.toString(16)}-${text.length}`;
 }
 
 const documents = (): VisibleDocuments => ({
@@ -256,6 +272,157 @@ describe("visible folder contract", () => {
     if (!parsed.ok) return;
     expect(Object.keys(parsed.sessions).sort()).toEqual(["kind", "schemaVersion", "threads"]);
     expect(Object.keys(parsed.sessions.threads[0] ?? {}).sort()).toEqual(["messages", "threadId", "title"]);
+  });
+});
+
+// ── soul.md data preservation (consolidated) ─────────────────────────────────
+
+describe("soul.md preservation", () => {
+  it("round trips bodies byte for byte, including indentation and trailing whitespace", () => {
+    const bodies = [
+      { botId: "bot-1", markdown: "    four space indent\n\n  two spaces  " },
+      { botId: "bot-2", markdown: "" },
+      { botId: "bot-3", markdown: "keeps\n\n\n\nblank runs\n" },
+      { botId: "bot-4", markdown: "```\n## fenced heading\n```\n\ntail" },
+      { botId: "bot-5", markdown: "## Voice\n\nTerse." },
+      { botId: "bot-6", markdown: "## bot-6 looks like a generated heading" },
+    ];
+    const original = buildSoulDocument(bodies);
+    expect(splitSoulMarkdown(renderSoulMarkdown(original))).toEqual(bodies);
+  });
+
+  it("keeps a genuine first heading when the generated one was deleted", () => {
+    // Person deleted the decorative '## bot-1' line; '## Voice' is now first and must survive.
+    const handEdited = "<!-- muster-visible schemaVersion=1 -->\n<!-- muster-persona bot-1 -->\n## Voice\n\nTerse.\n\n";
+    expect(splitSoulMarkdown(handEdited)).toEqual([{ botId: "bot-1", markdown: "## Voice\n\nTerse." }]);
+  });
+
+  it("keeps a body whose first line is its own heading shape", () => {
+    const original = buildSoulDocument([{ botId: "bot-9", markdown: "## Voice\n\nTerse." }]);
+    expect(splitSoulMarkdown(renderSoulMarkdown(original))).toEqual(original.personas);
+  });
+
+  it("refuses to render a body containing a literal persona marker", () => {
+    const trap = buildSoulDocument([
+      { botId: "bot-1", markdown: "before\n<!-- muster-persona sneaky -->\nafter" },
+    ]);
+    expect(() => renderSoulMarkdown(trap)).toThrowError(/reads as a persona marker/);
+  });
+
+  it("rejects an invalid or duplicated persona id on both write and read", () => {
+    expect(() => renderSoulMarkdown(buildSoulDocument([{ botId: "  ", markdown: "x" }]))).toThrowError(
+      /invalid persona id/,
+    );
+    expect(() =>
+      renderSoulMarkdown(
+        buildSoulDocument([
+          { botId: "bot-1", markdown: "a" },
+          { botId: "bot-1", markdown: "b" },
+        ]),
+      ),
+    ).toThrowError(/more than once/);
+
+    const dup = "<!-- muster-visible schemaVersion=1 -->\n<!-- muster-persona bot-1 -->\n## bot-1\n\na\n\n<!-- muster-persona bot-1 -->\n## bot-1\n\nb\n\n";
+    expect(parseVisibleFile("soul", dup)).toMatchObject({ ok: false, reason: expect.stringContaining("more than once") });
+  });
+
+  it("rejects versioned non-empty content with no markers, but accepts an intentionally empty file", () => {
+    expect(parseVisibleFile("soul", "<!-- muster-visible schemaVersion=1 -->\n\n## bot-1\n\nstray\n")).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("malformed, not empty"),
+    });
+    const empty = parseVisibleFile("soul", "<!-- muster-visible schemaVersion=1 -->\n");
+    expect(empty.ok).toBe(true);
+  });
+});
+
+// ── schema and settings boundaries (consolidated) ─────────────────────────────
+
+describe("schema boundaries", () => {
+  it("refuses a file whose kind does not match its name", () => {
+    expect(
+      parseVisibleFile("tasks", JSON.stringify({ schemaVersion: 1, kind: "memory", bots: [] })),
+    ).toMatchObject({ ok: false });
+  });
+
+  it("strips an unknown key rather than letting it survive a round trip", () => {
+    const raw = JSON.stringify({ schemaVersion: 1, kind: "tasks", tasks: [], surprise: "value" });
+    const parsed = parseVisibleFile("tasks", raw);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(JSON.stringify(parsed.document)).not.toContain("surprise");
+  });
+
+  it("refuses settings carrying a credential on READ, not only on write", () => {
+    const raw = JSON.stringify({ schemaVersion: 1, kind: "settings", settings: { theme: "dark", apiKey: "sk-x" } });
+    expect(parseVisibleFile("settings", raw)).toMatchObject({ ok: false });
+  });
+});
+
+// ── write and conflict behaviour (consolidated) ───────────────────────────────
+
+describe("write and conflict behaviour", () => {
+  it("refuses to overwrite when there is no revision evidence at all", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    await drive.createFile(VISIBLE_FILE_NAMES.tasks, folder.id, "stale");
+    drive.omitChecksums = true;
+    await expect(
+      writeVisibleFiles(drive, folder.id, renderVisibleFiles(documents())),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("allows a caller to opt out of revision evidence explicitly", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    await drive.createFile(VISIBLE_FILE_NAMES.tasks, folder.id, "stale");
+    drive.omitChecksums = true;
+    const outcome = await writeVisibleFiles(drive, folder.id, renderVisibleFiles(documents()), {
+      requireRevisionEvidence: false,
+    });
+    expect(outcome.wrote).toContain(VISIBLE_FILE_NAMES.tasks);
+  });
+
+  it("refuses to write a body that would not survive the reader", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    await expect(
+      writeVisibleFiles(drive, folder.id, { [VISIBLE_FILE_NAMES.tasks]: "{\"kind\":\"soul\"}" }),
+    ).rejects.toMatchObject({ code: "corrupt" });
+    expect(drive.writes).toBe(0);
+  });
+
+  it("reports how far a partial write got instead of failing opaquely", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    const good = renderVisibleFiles(documents());
+    const order = [VISIBLE_FILE_NAMES.soul, VISIBLE_FILE_NAMES.tasks];
+    // Fail on the second file only.
+    let seen = 0;
+    const inner = drive.createFile.bind(drive);
+    drive.createFile = async (name, parent, body) => {
+      seen += 1;
+      if (seen === 2) throw Object.assign(new Error("insufficientPermissions"), { code: 401 });
+      return inner(name, parent, body);
+    };
+    const partial = { [order[0]!]: good[order[0]!], [order[1]!]: good[order[1]!] };
+    const error = await writeVisibleFiles(drive, folder.id, partial).then(
+      () => null,
+      (reason: PartialWriteError) => reason,
+    );
+    expect(error).toBeInstanceOf(PartialWriteError);
+    expect(error?.wrote).toEqual([VISIBLE_FILE_NAMES.soul]);
+    expect(error?.code).toBe("consent_revoked");
+  });
+
+  it("reports a deletion race as not_found rather than as success", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    const target = await drive.createFile(VISIBLE_FILE_NAMES.tasks, folder.id, "old");
+    drive.raceDeleteOnGet.add(target.id);
+    await expect(
+      writeVisibleFiles(drive, folder.id, renderVisibleFiles(documents())),
+    ).rejects.toMatchObject({ code: "not_found" });
   });
 });
 
