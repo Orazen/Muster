@@ -23,6 +23,7 @@ import {
   parseVisibleFile,
   parseVisibleFiles,
   projectSettings,
+  renderSoulMarkdown,
   renderVisibleFiles,
   splitSoulMarkdown,
   writeVisibleFiles,
@@ -66,11 +67,18 @@ class FakeDrive implements VisibleDriveClient {
     return ref;
   }
 
-  /** Seeds a duplicate folder, as happens after a manual copy in Drive. */
-  seedFolder(name: string, parent: string, modifiedTime?: string): string {
+  /** Seeds a folder, as happens after a manual copy in Drive. */
+  seedFolder(name: string, parent: string, createdTime?: string, modifiedTime?: string): string {
     const ref = this.add(name, parent, FOLDER_MIME);
-    if (modifiedTime) this.files.set(ref.id, { ...ref, modifiedTime });
+    const existing = this.files.get(ref.id);
+    if (!existing) throw new Error("seed lost");
+    this.files.set(ref.id, { ...existing, createdTime, modifiedTime });
     return ref.id;
+  }
+
+  /** Reverses listing order, to prove selection does not depend on it. */
+  reverseListOrder(): void {
+    this.files = new Map([...this.files.entries()].reverse());
   }
 
   async listFiles({ q }: DriveListArgs): Promise<DriveFileRef[]> {
@@ -86,7 +94,14 @@ class FakeDrive implements VisibleDriveClient {
       .filter((f) => (foldersOnly ? f.mimeType === FOLDER_MIME : true))
       .filter((f) => (wantedName ? f.name === wantedName : true))
       .filter((f) => (wantedParent ? f.parents.includes(wantedParent) : true))
-      .map(({ id, name, parents, mimeType }) => ({ id, name, parents, mimeType }));
+      .map(({ id, name, parents, mimeType, createdTime, modifiedTime }) => ({
+        id,
+        name,
+        parents,
+        mimeType,
+        createdTime,
+        modifiedTime,
+      }));
   }
 
   async createFolder(name: string, parentId: string): Promise<DriveFileRef> {
@@ -186,12 +201,53 @@ describe("visible folder contract", () => {
     expect(() => JSON.parse(body)).toThrow();
   });
 
-  it("splits a hand-edited soul.md back into personas", () => {
-    const edited = "<!-- muster-visible schemaVersion=1 -->\n\n## bot-9\n\nI was edited here.\n";
-    const result = parseVisibleFile("soul", edited);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(splitSoulMarkdown(edited)).toEqual([{ botId: "bot-9", markdown: "I was edited here." }]);
+  it("round trips soul.md EXACTLY with internal headings, several bots and fenced code", () => {
+    const original = buildSoulDocument([
+      {
+        botId: "bot-1",
+        markdown: [
+          "# Soul",
+          "",
+          "I am Scout.",
+          "",
+          "## Voice",
+          "",
+          "Terse.",
+          "",
+          "## Notes",
+          "",
+          "```md",
+          "## this is code, not a persona",
+          "```",
+        ].join("\n"),
+      },
+      { botId: "bot-2", markdown: "Plain body, no headings." },
+      { botId: "bot-3", markdown: "## starts with a heading" },
+    ]);
+    const body = renderSoulMarkdown(original);
+    expect(splitSoulMarkdown(body)).toEqual(original.personas);
+
+    // And through the whole-file path, not just the splitter.
+    const files = renderVisibleFiles({ ...documents(), soul: original });
+    const parsed = parseVisibleFiles(files);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.soul).toEqual(original);
+  });
+
+  it("does NOT turn an internal '## Voice' heading into an extra bot", () => {
+    const one = buildSoulDocument([{ botId: "bot-1", markdown: "I am Scout.\n\n## Voice\n\nTerse." }]);
+    const ids = splitSoulMarkdown(renderSoulMarkdown(one)).map((p) => p.botId);
+    expect(ids).toEqual(["bot-1"]);
+  });
+
+  it("reports a malformed soul.md rather than inventing personas from headings", () => {
+    // No marker at all: headings must NOT be read as personas.
+    expect(splitSoulMarkdown("<!-- muster-visible schemaVersion=1 -->\n\n## bot-9\n\nbody\n")).toEqual([]);
+    // Marker with no body is a real, empty persona rather than a silent drop.
+    expect(splitSoulMarkdown("<!-- muster-visible schemaVersion=1 -->\n<!-- muster-persona bot-9 -->\n## bot-9\n")).toEqual([
+      { botId: "bot-9", markdown: "" },
+    ]);
   });
 
   it("treats sessions.json as conversation history, not authentication state", () => {
@@ -310,13 +366,68 @@ describe("folder discovery", () => {
     expect(second.id).toBe(first.id);
   });
 
-  it("adopts the oldest duplicate and REPORTS the rest rather than hiding them", async () => {
+  it("scopes discovery to the selected parent and ignores a same-named folder elsewhere", async () => {
     const drive = new FakeDrive();
-    drive.seedFolder("Muster", "root", "2026-01-01T00:00:00.000Z");
-    drive.seedFolder("Muster", "root", "2026-09-01T00:00:00.000Z");
+    const nested = drive.seedFolder("Muster", "some-other-parent", "2020-01-01T00:00:00.000Z");
+    const result = await findOrCreateVisibleFolder(drive, "root");
+    // The older folder is under a different parent, so it must NOT be adopted.
+    expect(result.id).not.toBe(nested);
+    expect(result.created).toBe(true);
+    expect(result.duplicates).toEqual([]);
+  });
+
+  it("adopts the OLDEST-CREATED duplicate and REPORTS the rest by exact id", async () => {
+    const drive = new FakeDrive();
+    const older = drive.seedFolder("Muster", "root", "2026-01-01T00:00:00.000Z");
+    const newer = drive.seedFolder("Muster", "root", "2026-09-01T00:00:00.000Z");
     const result = await findOrCreateVisibleFolder(drive);
-    expect(result.duplicates).toHaveLength(1);
     expect(result.created).toBe(false);
+    expect(result.id).toBe(older);
+    expect(result.duplicates).toEqual([newer]);
+  });
+
+  it("selects by createdTime, not modifiedTime", async () => {
+    const drive = new FakeDrive();
+    // Older by creation, but edited most recently: createdTime must win.
+    const olderCreated = drive.seedFolder(
+      "Muster", "root", "2026-01-01T00:00:00.000Z", "2026-12-01T00:00:00.000Z",
+    );
+    drive.seedFolder("Muster", "root", "2026-09-01T00:00:00.000Z", "2026-02-01T00:00:00.000Z");
+    expect((await findOrCreateVisibleFolder(drive)).id).toBe(olderCreated);
+  });
+
+  it("chooses the same folder regardless of listing order", async () => {
+    const forward = new FakeDrive();
+    const a = forward.seedFolder("Muster", "root", "2026-01-01T00:00:00.000Z");
+    const b = forward.seedFolder("Muster", "root", "2026-09-01T00:00:00.000Z");
+    const first = await findOrCreateVisibleFolder(forward);
+
+    const reversed = new FakeDrive();
+    const a2 = reversed.seedFolder("Muster", "root", "2026-01-01T00:00:00.000Z");
+    const b2 = reversed.seedFolder("Muster", "root", "2026-09-01T00:00:00.000Z");
+    reversed.reverseListOrder();
+    const second = await findOrCreateVisibleFolder(reversed);
+
+    expect(first.id).toBe(second.id);
+    expect(first.duplicates).toEqual(second.duplicates);
+    expect([a, b]).toEqual([a2, b2]);
+  });
+
+  it("sorts unknown age LAST and breaks ties by id, so selection is total", async () => {
+    const drive = new FakeDrive();
+    const known = drive.seedFolder("Muster", "root", "2026-05-01T00:00:00.000Z");
+    const unknown = drive.seedFolder("Muster", "root");
+    expect((await findOrCreateVisibleFolder(drive)).id).toBe(known);
+    expect((await findOrCreateVisibleFolder(drive)).duplicates).toEqual([unknown]);
+
+    // Two folders with no createdTime: id ascending decides, not listing order.
+    const tie = new FakeDrive();
+    const first = tie.seedFolder("Muster", "root");
+    const second = tie.seedFolder("Muster", "root");
+    const expected = [first, second].sort();
+    const picked = await findOrCreateVisibleFolder(tie);
+    expect(picked.id).toBe(expected[0]);
+    expect(picked.duplicates).toEqual([expected[1]]);
   });
 
   it("places backups/ under Muster/ and does not recreate it", async () => {

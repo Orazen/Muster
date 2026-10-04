@@ -46,6 +46,18 @@ export const VISIBLE_FILE_NAMES = {
 
 export type VisibleFileKey = keyof typeof VISIBLE_FILE_NAMES;
 
+/**
+ * Persona boundary marker. A persona body is ordinary Markdown and may itself contain `## `
+ * headings, so heading shape cannot delimit personas. Each persona is therefore introduced by this
+ * comment line, which renders invisibly and is not something a hand-written document produces by
+ * accident. Parsing starts a new persona ONLY at a marker, so internal headings stay in the body.
+ *
+ * Known limit, stated rather than hidden: a persona body containing this exact marker at column 0
+ * would still be read as a boundary. Rendered output never produces one, and the round-trip tests
+ * cover realistic bodies; a document hand-crafted to contain the marker is not defended against.
+ */
+const PERSONA_MARKER = /^<!-- muster-persona (.+) -->$/;
+
 /** The five keys, in contract order. Written out so `satisfies` checks it against the
  *  name table rather than an assertion asserting it. Exported so call sites need no assertion. */
 export const VISIBLE_FILE_KEYS = ["soul", "memory", "sessions", "tasks", "settings"] as const satisfies readonly VisibleFileKey[];
@@ -313,25 +325,43 @@ export function buildSettingsDocument(settings: SettingsProjection["settings"]):
  * it. The version marker is an HTML comment so it survives a Markdown reader untouched.
  */
 export function renderSoulMarkdown(document: SoulDocument): string {
-  const lines = [`<!-- muster-visible schemaVersion=${document.schemaVersion} -->`, ""];
+  const lines = [`<!-- muster-visible schemaVersion=${document.schemaVersion} -->`];
   for (const persona of document.personas) {
-    lines.push(`## ${persona.botId}`, "", persona.markdown.trim(), "");
+    lines.push(`<!-- muster-persona ${persona.botId} -->`, `## ${persona.botId}`, "", persona.markdown.trim(), "");
   }
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
+/**
+ * Splits on persona MARKERS, never on heading shape. Everything between two markers is that
+ * persona's body verbatim — internal `## ` headings and fenced code included — except for the
+ * decorative `## <botId>` heading this module writes, which is stripped so the round trip is exact.
+ * Text before the first marker is ignored rather than guessed at.
+ */
 export function splitSoulMarkdown(text: string): SoulDocument["personas"] {
   const personas: SoulDocument["personas"] = [];
-  for (const section of text.split(/^## /m).slice(1)) {
-    const newline = section.indexOf("\n");
-    if (newline === -1) continue;
-    const botId = section.slice(0, newline).trim();
-    const body = section
-      .slice(newline + 1)
-      .replace(/^\s*<!--[^>]*-->\s*/g, "")
-      .trim();
-    if (botId) personas.push({ botId, markdown: body });
+  let currentBotId: string | null = null;
+  let body: string[] = [];
+
+  const flush = (): void => {
+    if (currentBotId === null) return;
+    // Drop the decorative heading this module emits, then trim the surrounding blank lines.
+    const withoutHeading = body[0]?.startsWith("## ") ? body.slice(1) : body;
+    personas.push({ botId: currentBotId, markdown: withoutHeading.join("\n").trim() });
+    currentBotId = null;
+    body = [];
+  };
+
+  for (const line of text.split("\n")) {
+    const marker = PERSONA_MARKER.exec(line);
+    if (marker?.[1]) {
+      flush();
+      currentBotId = marker[1].trim();
+      continue;
+    }
+    if (currentBotId !== null) body.push(line);
   }
+  flush();
   return personas;
 }
 
@@ -502,6 +532,8 @@ export interface DriveFileRef {
   mimeType: string;
   /** md5 checksum as Drive reports it; used to detect a concurrent edit. */
   md5Checksum?: string;
+  /** Drive's creation timestamp. Selection between duplicate folders is based on this. */
+  createdTime?: string;
   modifiedTime?: string;
 }
 
@@ -549,16 +581,21 @@ export async function findOrCreateVisibleFolder(
   client: VisibleDriveClient,
   rootId = "root",
 ): Promise<FolderResolution> {
+  // The parent constraint is essential: without it this adopts a nested "Muster" folder that has
+  // nothing to do with the selected parent, which is how a folder belonging to someone else, or to
+  // a different account tree, gets adopted as the user's own.
   const matches = await listOrThrow(client, {
-    q: `mimeType = '${FOLDER_MIME}' and name = '${escapeDriveQuery(VISIBLE_FOLDER_NAME)}' and trashed = false`,
-    fields: "files(id,name,parents,mimeType,modifiedTime)",
+    q:
+      `mimeType = '${FOLDER_MIME}' and name = '${escapeDriveQuery(VISIBLE_FOLDER_NAME)}'` +
+      ` and '${escapeDriveQuery(rootId)}' in parents and trashed = false`,
+    fields: "files(id,name,parents,mimeType,createdTime,modifiedTime)",
   });
 
   if (matches.length === 0) {
     const created = await createOrThrow(client, VISIBLE_FOLDER_NAME, rootId);
     return { id: created.id, created: true, duplicates: [] };
   }
-  const ordered = [...matches].sort((a, b) => (a.modifiedTime ?? "").localeCompare(b.modifiedTime ?? ""));
+  const ordered = orderForSelection(matches);
   const chosen = ordered[0];
   if (!chosen) return { id: rootId, created: false, duplicates: [] };
   return { id: chosen.id, created: false, duplicates: ordered.slice(1).map((f) => f.id) };
@@ -584,6 +621,32 @@ export async function findOrCreateBackupsFolder(
 export interface WriteOutcome {
   wrote: string[];
   unchanged: string[];
+}
+
+/**
+ * Duplicate-folder selection rule, stated because "oldest" is otherwise ambiguous:
+ *
+ *  1. EARLIEST `createdTime` wins. `modifiedTime` is deliberately NOT used — a folder somebody just
+ *     edited is not thereby the oldest, and ordering by it would pick a different folder depending
+ *     on when the list was fetched.
+ *  2. A folder with NO `createdTime` sorts AFTER every folder that has one. Unknown age is never
+ *     preferred for "oldest".
+ *  3. Remaining ties are broken by `id` ascending, so the result cannot depend on the order Drive
+ *     happened to list the folders in.
+ *
+ * The returned list is in selection order, so `duplicates` is deterministic too.
+ */
+export function orderForSelection(files: readonly DriveFileRef[]): DriveFileRef[] {
+  return [...files].sort((a, b) => {
+    const aCreated = a.createdTime;
+    const bCreated = b.createdTime;
+    if (aCreated !== bCreated) {
+      if (aCreated === undefined) return 1;
+      if (bCreated === undefined) return -1;
+      return aCreated.localeCompare(bCreated);
+    }
+    return a.id.localeCompare(b.id);
+  });
 }
 
 /** Maps a Drive file name back to its contract key, or null when unrecognised. */
