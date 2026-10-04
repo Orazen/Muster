@@ -433,6 +433,22 @@ test("an in-flight OTP send freezes its address and submits only once", async ({
   } finally { release(); }
 });
 
+test("the pairing page sends a visitor to sign-in and keeps the local next target, then shows a real code", async ({ harness, openAuth }) => {
+  // This redirect assertion used to live inside the shared pairCodeFromCloud fixture, which now
+  // takes its session from the sign-in API and so can no longer reach the unauthenticated page.
+  // It is the entry contract, so it is asserted here rather than dropped.
+  const page = await openAuth(harness.cloudUrl);
+  await page.goto(`${harness.cloudUrl}/pair`);
+  await expect(page).toHaveURL(`${harness.cloudUrl}/sign-in?next=%2Fpair`);
+  await signIn(page, harness);
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`);
+  await expect(page.getByText(`Signed in as ${harness.email}.`, { exact: true })).toBeVisible();
+  // The code reached by the direct-password route is a real redeemable code, not a stand-in, so
+  // the fixture's move to the API did not weaken what these specs depend on.
+  await expect(page.getByLabel("Pairing code", { exact: true })).toHaveValue(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/);
+  await expect(page.getByRole("button", { name: "Copy code", exact: true })).toBeEnabled();
+});
+
 test("a real displayed pairing code signs the desktop into the same account at 320px", async ({ harness, openAuth }) => {
   const cloud = await openAuth(harness.cloudUrl, { width: 320 });
   await cloud.goto(`${harness.cloudUrl}/sign-in?next=%2Fpair`);

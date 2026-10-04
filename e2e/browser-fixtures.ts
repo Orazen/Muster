@@ -1,5 +1,9 @@
 /** Shared owned browser fixtures. Each test gets independent servers,
- * accounts and contexts; no real provider authentication is exercised. */
+ * accounts and contexts; no real provider authentication is exercised.
+ *
+ * The pairing fixture takes a real server-issued session from the sign-in API rather than from
+ * the password form, so specs that need an authenticated pairing page do not each depend on
+ * password entry. Password entry itself is covered in e2e/auth-entry.spec.ts. */
 import { expect, test as baseTest, type BrowserContext, type Page } from "@playwright/test";
 import { startPairingHarness, type FixtureEngineMode } from "./pairing-harness.ts";
 
@@ -123,12 +127,35 @@ const test = baseTest.extend<Fixtures>({
     }
   },
   pairCodeFromCloud: async ({ harness, newPage }, use) => {
+    // A REAL cloud session, taken from the sign-in API rather than by driving the password form.
+    //
+    // Twenty-one specs need an authenticated pairing page as a PRECONDITION. Having each of them
+    // reach it through the direct-password UI conflated two unrelated contracts: the pairing
+    // contract those specs actually assert, and password entry, which belongs to the dedicated
+    // auth-entry and direct-sign-in specs. That conflation had a cost beyond tidiness - a failure
+    // anywhere in password entry failed 21 unrelated specs, so a real entry regression was reported
+    // as dozens of unrelated failures.
+    //
+    // Nothing here is faked: the session is issued by the real server and the code read below is a
+    // real, redeemable pairing code. Only the route taken to obtain them changed. The
+    // unauthenticated redirect this fixture used to assert moved to e2e/auth-entry.spec.ts, which
+    // owns the entry contract, so no coverage is lost in the move.
+    const signIn = await fetch(`${harness.cloudUrl}/api/auth/sign-in/email`, {
+      method: "POST", redirect: "error", signal: AbortSignal.timeout(10_000),
+      headers: { "content-type": "application/json", origin: harness.cloudUrl },
+      body: JSON.stringify({ email: harness.email, password: harness.password }),
+    });
+    if (!signIn.ok) throw new Error(`Pairing fixture sign-in failed (${signIn.status})`);
+    await signIn.arrayBuffer();
+    const setCookies = signIn.headers.getSetCookie();
+    if (setCookies.length === 0) throw new Error("Pairing fixture sign-in returned no session cookie");
     const page = await newPage();
+    for (const header of setCookies) {
+      const pair = cookiePair(header.split(";")[0] ?? "");
+      if (!pair) continue;
+      await page.context().addCookies([{ ...pair, url: harness.cloudUrl }]);
+    }
     await page.goto(`${harness.cloudUrl}/pair`);
-    await expect(page).toHaveURL(/\/sign-in\?next=%2Fpair$/);
-    await page.getByLabel("Email address", { exact: true }).fill(harness.email);
-    await page.getByLabel("Password", { exact: true }).fill(harness.password);
-    await page.getByRole("button", { name: "Sign in with email", exact: true }).click();
     await expect(page).toHaveURL(`${harness.cloudUrl}/pair`);
     await expect(page.getByText(`Signed in as ${harness.email}.`, { exact: true })).toBeVisible();
     const codeField = page.getByLabel("Pairing code", { exact: true });
@@ -139,6 +166,13 @@ const test = baseTest.extend<Fixtures>({
   },
 });
 export { test, expect };
+
+/** Splits one cookie header into the name/value pair `addCookies` expects. */
+function cookiePair(header: string): { name: string; value: string } | null {
+  const separator = header.indexOf("=");
+  if (separator <= 0) return null;
+  return { name: header.slice(0, separator), value: header.slice(separator + 1) };
+}
 
 export async function pairDesktop(page: Page, harness: Harness, code: string): Promise<void> {
   await page.goto(`${harness.desktopUrl}/sign-in`);
