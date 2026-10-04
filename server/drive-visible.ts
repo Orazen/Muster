@@ -597,13 +597,57 @@ export function splitSoulMarkdown(text: string): SoulDocument["personas"] {
   return splitSoulMarkdownDetailed(text).personas;
 }
 
+/**
+ * Projects a document down to exactly what may be serialized, at runtime, on EVERY render.
+ *
+ * Reviewer finding: the writer refused credential-shaped fields, but `renderVisibleFiles`
+ * serialized structurally typed non-soul documents directly. A caller could hand it an object with
+ * an extra `apiKey` property and get a rendered string containing that key - the refusal happened
+ * later, at write time, so the secret was already in the bytes. Refusing at the last moment is not
+ * the same as never producing it.
+ *
+ * So the projection runs BEFORE serialization and the SCHEMA's output is what gets serialized, not
+ * the caller's object. Unknown fields cannot reach the string because they are dropped here.
+ * `settings.json` additionally has its allowlist re-applied, so a hand-built document cannot widen
+ * the allowlist by skipping `projectSettings`.
+ *
+ * Raw-input credential rejection is unchanged and still runs on the caller's own object: being
+ * stripped is safe, being silently accepted is not, and the two rules answer different questions.
+ */
+function projectForRender(key: VisibleFileKey, document: VisibleDocument): VisibleDocument {
+  if (key === "soul") return document;
+  // SAFETY: a VisibleDocument is built from JSON-shaped data by the build* helpers, so reading it as
+  // a JsonValue for the key walk restates its construction rather than guessing at it.
+  assertNoCredentialKeysInRaw(document as JsonValue, VISIBLE_FILE_NAMES[key]);
+  if (key === "settings") {
+    // SAFETY: the soul branch returned above, so this is the settings document; the key/value
+    // projection below is the compile-time pairing for it.
+    return buildSettingsDocument(projectSettings((document as SettingsDocument).settings).settings);
+  }
+  const parsed = schemaForKey(key).safeParse(document);
+  if (!parsed.success) {
+    throw new DriveVisibleError(
+      `${VISIBLE_FILE_NAMES[key]} cannot be rendered: ${parsed.error.issues[0]?.message ?? "schema mismatch"}`,
+      "corrupt",
+    );
+  }
+  return parsed.data;
+}
+
+/** The parse schema for a non-soul key. One source of truth for read and render paths. */
+function schemaForKey(key: Exclude<VisibleFileKey, "soul">): z.ZodType<VisibleDocument> {
+  if (key === "memory") return MemoryDocumentSchema;
+  if (key === "sessions") return SessionsDocumentSchema;
+  if (key === "tasks") return TasksDocumentSchema;
+  return SettingsDocumentSchema;
+}
+
 export function renderDocument(key: VisibleFileKey, document: VisibleDocument): string {
-  // SAFETY: callers pair the soul key with a SoulDocument — renderVisibleFiles takes a
-  // per-key record, and buildSoulDocument is the only producer of that key. The assertion
-  // is a compile-time pairing check, not a runtime guess.
-  return key === "soul"
-    ? renderSoulMarkdown(document as SoulDocument)
-    : `${JSON.stringify(document, null, 2)}\n`;
+  if (key !== "soul") return `${JSON.stringify(projectForRender(key, document), null, 2)}\n`;
+  // SAFETY: callers pair the soul key with a SoulDocument. renderVisibleFiles takes a per-key
+  // record and buildSoulDocument is the only producer of that key, so this is a compile-time
+  // pairing check rather than a runtime guess.
+  return renderSoulMarkdown(document as SoulDocument);
 }
 
 /** The five live files, keyed by their Drive file name. */
@@ -916,11 +960,20 @@ export interface WriteOutcome {
  * Drive folder that is silently reported as "sync failed" is indistinguishable from one that never
  * started.
  */
+/**
+ * A thrown value that was not an Error, in the forms an adapter realistically rejects with: a
+ * primitive, or a JSON-shaped payload such as a response body. A value outside this set still
+ * survives on the normalised error's `cause`, so nothing is discarded either way.
+ */
+export type NonErrorRejection = JsonValue;
+
 export class PartialWriteError extends DriveVisibleError {
   constructor(
     message: string,
     readonly wrote: readonly string[],
     readonly cause: Error,
+    /** The original thrown value, kept verbatim when it was not an Error. */
+    readonly thrown?: NonErrorRejection,
   ) {
     super(message, cause instanceof DriveVisibleError ? cause.code : "transport_error");
     this.name = "PartialWriteError";
@@ -1034,14 +1087,27 @@ export async function writeVisibleFiles(
     // list discarded - so a caller that had already replaced three files would be told only that
     // something failed, and could not tell a partial write from one that never started. The
     // original error is kept as `cause` so nothing about the failure is lost in the wrapping.
-    if (!(error instanceof Error)) throw error;
-    throw new PartialWriteError(
-      wrote.length === 0
-        ? `visible folder write failed before any file was written: ${error.message}`
-        : `visible folder write failed after ${wrote.length} file(s) (${wrote.join(", ")}); they were NOT rolled back: ${error.message}`,
-      wrote,
-      error,
-    );
+      let cause: Error;
+      // A thrown value that is not an Error is preserved here when it is a JSON-shaped payload or a
+      // primitive, which is what an adapter rejecting with a response body actually does. Anything
+      // else still travels on the normalised error's own `cause` channel, so nothing is lost.
+      let thrown: NonErrorRejection | undefined;
+      if (error instanceof Error) {
+        cause = error;
+      } else {
+        // SAFETY: this is the branch where the value is NOT an Error, so it is one a JavaScript
+        // client may throw. The cast only widens the declared field; the value is kept verbatim.
+        thrown = error as NonErrorRejection;
+        cause = new Error("the Drive client rejected with a non-Error value", { cause: error });
+      }
+      throw new PartialWriteError(
+        wrote.length === 0
+          ? `visible folder write failed before any file was written: ${cause.message}`
+          : `visible folder write failed after ${wrote.length} file(s) (${wrote.join(", ")}); they were NOT rolled back: ${cause.message}`,
+        wrote,
+        cause,
+        thrown,
+      );
   }
   return { wrote, unchanged };
 }

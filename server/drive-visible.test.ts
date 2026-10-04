@@ -528,6 +528,56 @@ describe("write and conflict behaviour", () => {
     expect(error?.cause).toBe(original);
   });
 
+  it("preserves the written-file list when the client rejects with a plain object", async () => {
+    // Reviewer finding: the catch rethrew anything that was not an Error, so a plain-object rejection
+    // after one successful write discarded the exact wrote list.
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    const good = renderVisibleFiles(documents());
+    const order = [VISIBLE_FILE_NAMES.soul, VISIBLE_FILE_NAMES.tasks];
+    const thrown = { reason: "adapter gave up", status: 599 };
+    let seen = 0;
+    const inner = drive.createFile.bind(drive);
+    drive.createFile = async (name, parent, body) => {
+      seen += 1;
+      if (seen === 2) throw thrown;
+      return inner(name, parent, body);
+    };
+    const partial = { [order[0]!]: good[order[0]!], [order[1]!]: good[order[1]!] };
+    const error = await writeVisibleFiles(drive, folder.id, partial).then(
+      () => null,
+      (reason: PartialWriteError) => reason,
+    );
+    expect(error).toBeInstanceOf(PartialWriteError);
+    expect(error?.wrote).toEqual([VISIBLE_FILE_NAMES.soul]);
+    expect(error?.code).toBe("transport_error");
+    // The original value is kept verbatim, not merely described.
+    expect(error?.thrown).toBe(thrown);
+  });
+
+  it("preserves the written-file list when the client rejects with a bare string", async () => {
+    const drive = new FakeDrive();
+    const folder = await findOrCreateVisibleFolder(drive);
+    const good = renderVisibleFiles(documents());
+    const order = [VISIBLE_FILE_NAMES.soul, VISIBLE_FILE_NAMES.tasks];
+    let seen = 0;
+    const inner = drive.createFile.bind(drive);
+    drive.createFile = async (name, parent, body) => {
+      seen += 1;
+      if (seen === 2) throw "socket hang up";
+      return inner(name, parent, body);
+    };
+    const partial = { [order[0]!]: good[order[0]!], [order[1]!]: good[order[1]!] };
+    const error = await writeVisibleFiles(drive, folder.id, partial).then(
+      () => null,
+      (reason: PartialWriteError) => reason,
+    );
+    expect(error).toBeInstanceOf(PartialWriteError);
+    expect(error?.wrote).toEqual([VISIBLE_FILE_NAMES.soul]);
+    expect(error?.thrown).toBe("socket hang up");
+    expect(error?.cause.message).toMatch(/non-Error value/);
+  });
+
   it("reports a deletion race as not_found rather than as success", async () => {
     const drive = new FakeDrive();
     const folder = await findOrCreateVisibleFolder(drive);
@@ -606,6 +656,30 @@ describe("raw credential rejection", () => {
       if (key === "soul") continue;
       expect(parseVisibleFile(key, JSON.stringify(documents()[key])).ok, `${key} must stay parseable`).toBe(true);
     }
+  });
+
+  it("refuses to RENDER a credential, not merely to write one", () => {
+    // Reviewer finding: the writer refused credential fields, but the renderer serialised the
+    // caller's object directly, so an extra apiKey was already in the produced bytes before any
+    // write check ran. Refusing at the last moment is not the same as never producing it.
+    const smuggled = { ...tasksDoc(), apiKey: "sk-render-1" };
+    expect(() => renderVisibleFiles({ ...documents(), tasks: smuggled })).toThrowError(/credential-shaped keys/);
+
+    // And a non-credential extra is dropped by projection rather than serialised through.
+    const extra = { ...tasksDoc(), surprise: "value" };
+    const rendered = renderVisibleFiles({ ...documents(), tasks: extra })[VISIBLE_FILE_NAMES.tasks] ?? "";
+    expect(rendered).not.toContain("surprise");
+
+    // Nested inside a record, the same way.
+    const nested = { ...tasksDoc(), tasks: [{ ...(tasksDoc().tasks[0] ?? { id: "t", title: "x", status: "open", updatedAt: 1 }), providerKey: "pk-1" }] };
+    expect(() => renderVisibleFiles({ ...documents(), tasks: nested })).toThrowError(/credential-shaped keys/);
+  });
+
+  it("cannot widen the settings allowlist by skipping projectSettings at render time", () => {
+    const widened = { schemaVersion: VISIBLE_SCHEMA_VERSION, kind: "settings", settings: { theme: "dark", somethingElse: 1 } } as const;
+    const rendered = renderVisibleFiles({ ...documents(), settings: widened })[VISIBLE_FILE_NAMES.settings] ?? "";
+    expect(rendered).toContain("theme");
+    expect(rendered).not.toContain("somethingElse");
   });
 
   it("cannot write bytes that retain a field validation discarded", async () => {
