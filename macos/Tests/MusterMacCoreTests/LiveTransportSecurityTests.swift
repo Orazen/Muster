@@ -234,15 +234,21 @@ final class LiveTransportSecurityTests: XCTestCase {
     /// `mime` are optional and `hasImage`/`hasMore` already exist, so the shape was
     /// designed for and never wired on the native side. Bot fields mirror the shape
     /// Fixtures.fleetJSON documents as the live /api/bots?messages=0 wire.
+    ///
+    /// The screen message here must be `kind: "screen"`. `slimMessage()` on the
+    /// server only strips `png`/`mime` and sets `hasImage` when the message is a
+    /// screen, so a `kind: "text"` message paired with `hasImage` is a shape the
+    /// server cannot emit — asserting against it would have passed while leaving
+    /// the real screen path unverified. Text is covered by its own separate message.
     func testSlimTranscriptShapeDecodesWithoutInlineImageBytes() async throws {
         let slim = """
         {"bots":[{"id":"bot-1","threadId":"t-1","name":"Scout","title":"Scout",
           "description":"Research","notifications":true,"unread":false,"color":"blue",
           "modelSelection":{"instanceId":"ghost","model":"sonnet"},
           "createdAt":1723000000000,"busy":false,
-          "messages":[{"id":"m-1","role":"user","kind":"text","at":1724000000000,
-                       "text":"capture please","hasImage":true},
-                      {"id":"m-2","role":"bot","kind":"text","at":1724000005000,
+          "messages":[{"id":"m-1","role":"bot","kind":"screen","at":1724000000000,
+                       "hasImage":true},
+                      {"id":"m-2","role":"user","kind":"text","at":1724000005000,
                        "text":"done"}],
           "hasMore":true}],"groups":[]}
         """.replacingOccurrences(of: "\n", with: "")
@@ -255,11 +261,16 @@ final class LiveTransportSecurityTests: XCTestCase {
         XCTAssertEqual(messages.count, 2)
 
         let flagged = try XCTUnwrap(messages.first { $0.hasImage == true })
+        XCTAssertEqual(flagged.kind, .screen,
+                       "the server only sets hasImage on a screen message; a text message never carries it")
         XCTAssertNil(flagged.png, "the slim shape must not carry inline image bytes")
         XCTAssertNil(flagged.mime, "the slim shape must not carry an inline mime type")
-        XCTAssertEqual(flagged.text, "capture please", "slim messages keep their text")
-        XCTAssertNil(messages.last?.hasImage, "a message with no image carries no flag")
         XCTAssertEqual(bot.hasMore, true, "the slim shape reports further pages")
+
+        let spoken = try XCTUnwrap(messages.first { $0.kind == .text })
+        XCTAssertEqual(spoken.id, "m-2")
+        XCTAssertEqual(spoken.text, "done", "text coverage is carried separately from the screen message")
+        XCTAssertNil(spoken.hasImage, "a text message carries no screen flag")
     }
 
     func testUnprotected307ControlForwardsPasswordAndCookieAcrossOrigins() async throws {
