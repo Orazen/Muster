@@ -168,10 +168,68 @@ describe('release control decision matrix', () => {
       const target = steps.findIndex((entry) => entry.id === 'attest-mac');
       steps.splice(target, 0, steps.splice(from, 1)[0]);
     }],
+    // Notarization coupling. These gates assert a STAPLED ticket, which only
+    // exists if `notarize` actually ran and succeeded. Each of the four
+    // situations below must leave the gate unevaluated, and only genuinely
+    // notarized runs may execute it.
+    ['arm64 DMG gate ignores the notarization outcome', (w) => { stepById(w, 'macos', 'dmg-trust').if = "${{ success() && env.APPLE_CERTIFICATE != '' }}"; }],
+    ['intel DMG gate ignores the notarization outcome', (w) => { stepById(w, 'macos-x64', 'dmg-trust').if = "${{ success() && env.APPLE_CERTIFICATE != '' }}"; }],
+    ['arm64 DMG gate runs on failed notarization', (w) => { const s = stepById(w, 'macos', 'dmg-trust'); s.if = s.if.replace("steps.notarize.outcome == 'success'", "steps.notarize.outcome != 'skipped'"); }],
+    ['intel DMG gate runs on failed notarization', (w) => { const s = stepById(w, 'macos-x64', 'dmg-trust'); s.if = s.if.replace("steps.notarize.outcome == 'success'", "steps.notarize.outcome != 'skipped'"); }],
+    ['DMG gate substitutes a dry-run proxy for real notarization', (w) => { const s = stepById(w, 'macos', 'dmg-trust'); s.if = "${{ success() && needs.prepare.outputs.dry_run == 'false' && env.APPLE_CERTIFICATE != '' }}"; }],
+    ['DMG gate stops requiring the signing certificate', (w) => { const s = stepById(w, 'macos', 'dmg-trust'); s.if = s.if.replace(" && env.APPLE_CERTIFICATE != ''", ''); }],
   ];
   it.each(regressions)('rejects regression: %s', (_name, mutate) => {
     const workflow = copy(); mutate(workflow);
     expect(() => verifyReleaseWorkflow(workflow)).toThrow();
+  });
+
+  it.each(['macos', 'macos-x64'])('runs the %s final-DMG trust gate only on genuinely notarized builds', (platform) => {
+    const job = original.jobs[platform];
+    const notarize = job.steps.find((entry) => /notarytool submit/.test(entry.run ?? ''));
+    const dmgTrust = job.steps.find((entry) => entry.id === 'dmg-trust');
+    // Replay both guards the way the runner does: notarization runs only on a
+    // non-dry run with every ASC credential and team id present, and the DMG
+    // gate may then run only if that notarization succeeded.
+    const attempts = (dryRun, credentials) => {
+      const env = Object.fromEntries(['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT', 'APPLE_TEAM_ID', 'APPLE_CERTIFICATE']
+        .map((key) => [key, credentials ? 'present' : '']));
+      const context = { success: true, env, needs: { prepare: { outputs: { dry_run: dryRun } } } };
+      const outcome = evaluateGuard(notarize.if, context) ? 'success' : 'skipped';
+      return { ran: evaluateGuard(dmgTrust.if, { ...context, steps: { notarize: { outcome } } }), outcome };
+    };
+    // Dry run: notarization never runs, so there is no ticket to validate.
+    expect(attempts('true', true)).toEqual({ ran: false, outcome: 'skipped' });
+    // Missing ASC credentials with a signing certificate present: the exact
+    // case that ran `stapler validate` on an unstapled DMG.
+    expect(attempts('false', false)).toEqual({ ran: false, outcome: 'skipped' });
+    // Real run, full credentials: notarization succeeded, so the gate runs.
+    expect(attempts('false', true)).toEqual({ ran: true, outcome: 'success' });
+    // Failed or skipped notarization, and a failed earlier step, all fail closed.
+    for (const outcome of ['failure', 'skipped', 'cancelled', '']) {
+      expect(evaluateGuard(dmgTrust.if, { success: true, env: { APPLE_CERTIFICATE: 'present' }, steps: { notarize: { outcome } } })).toBe(false);
+    }
+    expect(evaluateGuard(dmgTrust.if, { success: false, env: { APPLE_CERTIFICATE: 'present' }, steps: { notarize: { outcome: 'success' } } })).toBe(false);
+  });
+
+  it('leaves Mac trust unverified and publication fail-closed when notarization is skipped', () => {
+    for (const platform of ['macos', 'macos-x64']) {
+      const attest = original.jobs[platform].steps.find((entry) => entry.id === 'attest-mac');
+      expect(attest.env.NOTARIZATION_OUTCOME).toBe('${{ steps.notarize.outcome }}');
+      // Attestation itself is never conditional, so a skipped notarization is
+      // recorded as evidence rather than silently omitted.
+      expect(attest.if).toBeUndefined();
+      expect(attest['continue-on-error']).toBeUndefined();
+    }
+    // createMacTrustEvidence only reaches status "verified" when every check is
+    // a success, so notarization=skipped keeps the release a draft: artifacts
+    // still upload (allowed non-publication behavior), but publication and the
+    // mirror both require verified trust.
+    expect(original.jobs.publish.outputs.published).toContain("steps.draft.outputs.macos_trust == 'verified'");
+    const draft = original.jobs.publish.steps.find((entry) => entry.id === 'draft');
+    expect(draft.env.ARM64_TRUST_EVIDENCE).toBe('${{ needs.macos.outputs.trust_evidence }}');
+    expect(draft.env.INTEL_TRUST_EVIDENCE).toBe('${{ needs.macos-x64.outputs.trust_evidence }}');
+    expect(original.jobs['deploy-downloads'].needs).toEqual(expect.arrayContaining(['macos', 'macos-x64']));
   });
 });
 

@@ -203,8 +203,16 @@ export function verifyReleaseWorkflow(workflow) {
       'Mac trust evidence must consume actual checks and hash the upload inventory after all edits');
     const requiredArch = architecture === 'arm64' ? 'arm64' : 'x86_64';
     const dmgShell = shell(dmgTrust);
+    // The DMG gate opens the container a user downloads and asserts a stapled
+    // notarization ticket. Stapling only happens inside the `notarize` step, so
+    // this gate must be tied to that step actually SUCCEEDING — not to the mere
+    // presence of a certificate. `notarize` is skipped on dry runs and whenever
+    // any ASC credential or the team id is absent; a certificate-only guard
+    // therefore ran `stapler validate` against unstapled bytes and broke the
+    // documented signed-but-unstapled path before its allowed upload.
+    const dmgTrustIf = "${{ success() && env.APPLE_CERTIFICATE != '' && steps.notarize.outcome == 'success' }}";
     check(dmgTrust['continue-on-error'] === undefined
-      && dmgTrust.if === "${{ " + (platform === 'macos' ? "success() && env.APPLE_CERTIFICATE != ''" : "success() && env.APPLE_CERTIFICATE != ''") + " }}"
+      && dmgTrust.if === dmgTrustIf
       && dmgShell.includes('release/*.dmg')
       && dmgShell.includes('[ "${#DMGS[@]}" -gt 0 ]')
       && dmgShell.includes('codesign --verify --strict "$f"')
@@ -215,6 +223,27 @@ export function verifyReleaseWorkflow(workflow) {
       && steps(job).indexOf(stableCopy) < steps(job).indexOf(dmgTrust)
       && steps(job).indexOf(dmgTrust) < steps(job).indexOf(attest),
       'Every final distributed DMG must be signature, notarization and Gatekeeper checked, and arch-pinned, before it is attested');
+    // Behavioural proof, not just the literal string: replay the guards the way
+    // the runner would. `notarize` is skipped on dry runs and whenever any ASC
+    // credential or the team id is absent, so its outcome is DERIVED from its own
+    // guard and fed into the DMG gate. The gate may run only when notarization
+    // genuinely succeeded with a certificate present; every other case (dry run,
+    // missing ASC credentials, missing certificate, failed or skipped
+    // notarization, failed prior step) must leave it unevaluated.
+    for (const dry of ['false', 'true', '']) for (const credentials of [true, false]) for (const success of [true, false]) {
+      const env = Object.fromEntries(['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT', 'APPLE_TEAM_ID', 'APPLE_CERTIFICATE']
+        .map((key) => [key, credentials ? 'present' : '']));
+      const context = { success, env, needs: { prepare: { outputs: { dry_run: dry } } } };
+      const notarizationRan = evaluateGuard(notarizeStep.if, context);
+      const outcome = notarizationRan ? 'success' : 'skipped';
+      const expected = success && outcome === 'success' && env.APPLE_CERTIFICATE !== '';
+      check(evaluateGuard(dmgTrust.if, { ...context, steps: { notarize: { outcome } } }) === expected,
+        'Final DMG trust must run only after notarization actually succeeded');
+    }
+    for (const outcome of ['success', 'failure', 'skipped', 'cancelled', '']) for (const success of [true, false]) {
+      check(evaluateGuard(dmgTrust.if, { success, env: intelCredentials, steps: { notarize: { outcome } } }) ===
+        (success && outcome === 'success'), 'Final DMG trust must fail closed without successful notarization');
+    }
     if (platform === 'macos-x64') {
       check(job.steps.find((step) => step.id === 'signature').run.includes("flags=0x10000(runtime)"),
         'Intel Developer ID verification requires hardened runtime');

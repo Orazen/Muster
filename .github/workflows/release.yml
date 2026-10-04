@@ -41,7 +41,10 @@
 #     APPLE_CERTIFICATE_PASSWORD   Export password for that .p12
 #
 #   macOS notarization — ANY absent → skip notarize/staple; signed-but-
-#   unstapled (or unsigned) artifacts still upload. Uses the App Store
+#   unstapled (or unsigned) artifacts still upload to the draft. Skipped
+#   notarization also means the Apple trust checks cannot run (they assert a
+#   stapled ticket), so Mac trust stays `unverified` and the release stays a
+#   DRAFT — never published, never mirrored. Uses the App Store
 #   Connect API key, NOT an Apple ID app-specific password: the API key is
 #   the credential this team can actually mint and rotate without a browser,
 #   and notarytool accepts it identically.
@@ -379,7 +382,18 @@ jobs:
 
       - name: "Gate: every final distributed DMG is signed, notarized and arm64"
         id: dmg-trust
-        if: ${{ success() && env.APPLE_CERTIFICATE != '' }}
+        # Tied to notarization that ACTUALLY ran, not merely to the presence of
+        # a certificate. `notarize` is skipped on dry runs and whenever any ASC
+        # credential or team id is absent, and stapling only happens inside that
+        # step — so gating on APPLE_CERTIFICATE alone ran `stapler validate`
+        # against an unstapled DMG and broke the documented
+        # signed-but-unstapled path before its allowed upload.
+        #
+        # When this is skipped, trust is left UNVERIFIED on purpose:
+        # `attest-mac` records notarization=skipped, the evidence status stays
+        # `untrusted`, and publication stays a draft. Artifacts still upload;
+        # they just cannot be published as trusted.
+        if: ${{ success() && env.APPLE_CERTIFICATE != '' && steps.notarize.outcome == 'success' }}
         run: |
           set -euo pipefail
           # The .app gates above prove the inner bundle, not the container a
@@ -612,7 +626,11 @@ jobs:
 
       - name: "Gate: every final distributed DMG is signed, notarized and x86_64"
         id: dmg-trust
-        if: ${{ success() && env.APPLE_CERTIFICATE != '' }}
+        # Same notarization coupling as the arm64 leg: this gate opens the DMG
+        # the user downloads and asserts a stapled ticket, which only exists if
+        # the `notarize` step above actually ran and succeeded. Skipped
+        # notarization leaves trust unverified and publication fail-closed.
+        if: ${{ success() && env.APPLE_CERTIFICATE != '' && steps.notarize.outcome == 'success' }}
         run: |
           set -euo pipefail
           # Same container-level gap the arm64 leg closes: the Intel .app gates
