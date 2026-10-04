@@ -377,6 +377,33 @@ jobs:
           # such pairs). Mac deltas ride the zip channel, where pairing is exact.
           (cd release && shopt -s nullglob && shasum -a 256 *.dmg *.zip *.zip.blockmap > SHA256SUMS-macos-arm64.txt)
 
+      - name: "Gate: every final distributed DMG is signed, notarized and arm64"
+        id: dmg-trust
+        if: ${{ success() && env.APPLE_CERTIFICATE != '' }}
+        run: |
+          set -euo pipefail
+          # The .app gates above prove the inner bundle, not the container a
+          # user actually downloads, and the stable-named DMG is copied *after*
+          # those gates run. So nothing has ever assessed a shipped DMG. Check
+          # every DMG that will be attached to the release, and prove this leg
+          # is genuinely arm64 rather than a mislabelled Intel build.
+          EXE=$(find release/mac-arm64/Muster.app/Contents/MacOS -maxdepth 1 -type f | head -n 1)
+          [ -n "$EXE" ] || { echo "::error::no executable found in arm64 app bundle"; exit 1; }
+          ARCHS=$(lipo -archs "$EXE")
+          case ",$ARCHS," in
+            *,arm64,*) ;;
+            *) echo "::error::arm64 leg produced a non-arm64 binary: $ARCHS"; exit 1 ;;
+          esac
+          shopt -s nullglob
+          DMGS=(release/*.dmg)
+          [ "${#DMGS[@]}" -gt 0 ] || { echo "::error::no DMG to validate"; exit 1; }
+          for f in "${DMGS[@]}"; do
+            codesign --verify --strict "$f"
+            xcrun stapler validate "$f"
+            spctl --assess --type open --context context:primary-signature -vv "$f"
+            echo "validated $f"
+          done
+
       - name: Bind Apple trust checks to exact Mac release bytes
         id: attest-mac
         env:
@@ -582,6 +609,31 @@ jobs:
           cp "release/Muster-${VERSION}-intel.dmg" release/Muster-intel.dmg
           # Same DMG-blockmap exclusion as the arm64 leg (stapler staleness).
           (cd release && shopt -s nullglob && shasum -a 256 *.dmg *.zip *.zip.blockmap > SHA256SUMS-macos-x64.txt)
+
+      - name: "Gate: every final distributed DMG is signed, notarized and x86_64"
+        id: dmg-trust
+        if: ${{ success() && env.APPLE_CERTIFICATE != '' }}
+        run: |
+          set -euo pipefail
+          # Same container-level gap the arm64 leg closes: the Intel .app gates
+          # do not assess the DMG the user downloads, and Muster-intel.dmg is
+          # copied after them. Validate every shipped DMG and pin the arch.
+          EXE=$(find release/mac/Muster.app/Contents/MacOS -maxdepth 1 -type f | head -n 1)
+          [ -n "$EXE" ] || { echo "::error::no executable found in x64 app bundle"; exit 1; }
+          ARCHS=$(lipo -archs "$EXE")
+          case ",$ARCHS," in
+            *,x86_64,*) ;;
+            *) echo "::error::Intel leg produced a non-x86_64 binary: $ARCHS"; exit 1 ;;
+          esac
+          shopt -s nullglob
+          DMGS=(release/*.dmg)
+          [ "${#DMGS[@]}" -gt 0 ] || { echo "::error::no DMG to validate"; exit 1; }
+          for f in "${DMGS[@]}"; do
+            codesign --verify --strict "$f"
+            xcrun stapler validate "$f"
+            spctl --assess --type open --context context:primary-signature -vv "$f"
+            echo "validated $f"
+          done
 
       - name: Bind Apple trust checks to exact Mac release bytes
         id: attest-mac

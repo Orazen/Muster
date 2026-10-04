@@ -5,6 +5,7 @@ const original = readReleaseWorkflow(new URL('../.github/workflows/release.yml',
 const copy = () => structuredClone(original);
 const upload = (workflow, platform) => workflow.jobs[platform].steps.find((step) => /gh release upload/.test(step.run ?? ''));
 const step = (workflow, job, fragment) => workflow.jobs[job].steps.find((entry) => String(entry.run ?? '').includes(fragment));
+const stepById = (workflow, job, id) => workflow.jobs[job].steps.find((entry) => entry.id === id);
 
 describe('release control decision matrix', () => {
   it('permits real complete publication while rejecting dry, draft, prerelease and failed states', () => {
@@ -144,6 +145,29 @@ describe('release control decision matrix', () => {
     ['wrong remote release identity', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run = s.run.replace("--sha '$RELEASE_SHA'", "--sha 'arbitrary'"); }],
     ['unbound transfer manifest', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run = s.run.replace('sha256sum artifacts/mirror-manifest.json', 'echo fixed'); }],
     ['extra remote mirror mutation', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run += '\nssh host overwrite-live'; }],
+    // Final distributed DMG gates: the inner .app checks and the stable-named
+    // copy both sit outside these, so a weakened DMG gate ships unassessed bytes.
+    ['arm64 DMG gate removed', (w) => { w.jobs.macos.steps = w.jobs.macos.steps.filter((entry) => entry.id !== 'dmg-trust'); }],
+    ['intel DMG gate removed', (w) => { w.jobs['macos-x64'].steps = w.jobs['macos-x64'].steps.filter((entry) => entry.id !== 'dmg-trust'); }],
+    ['DMG gate skips Gatekeeper assessment', (w) => { const s = stepById(w, 'macos', 'dmg-trust'); s.run = s.run.replace(/^\s*spctl --assess.*$/m, 'true'); }],
+    ['DMG gate skips signature verification', (w) => { const s = stepById(w, 'macos', 'dmg-trust'); s.run = s.run.replace(/^\s*codesign --verify.*$/m, 'true'); }],
+    ['DMG gate skips the stapled notarization ticket', (w) => { const s = stepById(w, 'macos', 'dmg-trust'); s.run = s.run.replace(/^\s*xcrun stapler validate.*$/m, 'true'); }],
+    ['DMG gate stops enumerating shipped DMGs', (w) => { const s = stepById(w, 'macos', 'dmg-trust'); s.run = s.run.replace('DMGS=(release/*.dmg)', 'DMGS=(release/none.dmg)'); }],
+    ['DMG gate accepts an empty DMG set', (w) => { const s = stepById(w, 'macos', 'dmg-trust'); s.run = s.run.replace('[ "${#DMGS[@]}" -gt 0 ]', '[ "${#DMGS[@]}" -ge 0 ]'); }],
+    ['DMG gate stops pinning the architecture', (w) => { const s = stepById(w, 'macos', 'dmg-trust'); s.run = s.run.replace('*,arm64,*)', '*nothing,*)'); }],
+    ['DMG gate is allowed to fail', (w) => { stepById(w, 'macos', 'dmg-trust')['continue-on-error'] = true; }],
+    ['DMG gate runs before the stable-named copy', (w) => {
+      const steps = w.jobs.macos.steps;
+      const from = steps.findIndex((entry) => entry.id === 'dmg-trust');
+      const target = steps.findIndex((entry) => /Stable-named copy/.test(entry.name ?? ''));
+      steps.splice(target, 0, steps.splice(from, 1)[0]);
+    }],
+    ['DMG gate runs after artifact attestation', (w) => {
+      const steps = w.jobs.macos.steps;
+      const from = steps.findIndex((entry) => entry.id === 'dmg-trust');
+      const target = steps.findIndex((entry) => entry.id === 'attest-mac');
+      steps.splice(target, 0, steps.splice(from, 1)[0]);
+    }],
   ];
   it.each(regressions)('rejects regression: %s', (_name, mutate) => {
     const workflow = copy(); mutate(workflow);

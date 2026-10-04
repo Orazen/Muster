@@ -141,7 +141,7 @@ export function verifyReleaseWorkflow(workflow) {
     'Mac upload must include both exact CLI filenames and dedicated checksums');
   const notarize = one(jobs.macos, (step) => /notarytool submit/.test(shell(step)));
   const intelNotarize = one(jobs['macos-x64'], (step) => /notarytool submit/.test(shell(step)));
-  const gatekeeper = one(jobs.macos, (step) => /spctl --assess/.test(shell(step)));
+  const gatekeeper = one(jobs.macos, (step) => step.id === 'gatekeeper');
   check(notarize.id === 'notarize' && notarize['continue-on-error'] === undefined && gatekeeper['continue-on-error'] === undefined &&
     steps(jobs.macos).indexOf(gatekeeper) > steps(jobs.macos).indexOf(notarize),
     'Gatekeeper assessment must follow notarization');
@@ -180,6 +180,8 @@ export function verifyReleaseWorkflow(workflow) {
     const signature = one(job, (step) => step.id === 'signature');
     const notarizeStep = one(job, (step) => /notarytool submit/.test(shell(step)));
     const gatekeeperStep = one(job, (step) => step.id === 'gatekeeper');
+    const dmgTrust = one(job, (step) => step.id === 'dmg-trust');
+    const stableCopy = one(job, (step) => /Stable-named copy/.test(step.name ?? ''));
     const attest = one(job, (step) => step.id === 'attest-mac');
     const releaseUpload = one(job, (step) => /gh\s+release\s+upload/.test(shell(step)));
     const checksums = one(job, (step) => /shasum -a 256/.test(shell(step)));
@@ -199,6 +201,20 @@ export function verifyReleaseWorkflow(workflow) {
       && steps(job).indexOf(attest) > steps(job).indexOf(checksums)
       && steps(job).indexOf(attest) < steps(job).indexOf(releaseUpload),
       'Mac trust evidence must consume actual checks and hash the upload inventory after all edits');
+    const requiredArch = architecture === 'arm64' ? 'arm64' : 'x86_64';
+    const dmgShell = shell(dmgTrust);
+    check(dmgTrust['continue-on-error'] === undefined
+      && dmgTrust.if === "${{ " + (platform === 'macos' ? "success() && env.APPLE_CERTIFICATE != ''" : "success() && env.APPLE_CERTIFICATE != ''") + " }}"
+      && dmgShell.includes('release/*.dmg')
+      && dmgShell.includes('[ "${#DMGS[@]}" -gt 0 ]')
+      && dmgShell.includes('codesign --verify --strict "$f"')
+      && dmgShell.includes('xcrun stapler validate "$f"')
+      && dmgShell.includes('spctl --assess --type open --context context:primary-signature -vv "$f"')
+      && dmgShell.includes(`*,${requiredArch},*)`)
+      && dmgShell.includes('lipo -archs')
+      && steps(job).indexOf(stableCopy) < steps(job).indexOf(dmgTrust)
+      && steps(job).indexOf(dmgTrust) < steps(job).indexOf(attest),
+      'Every final distributed DMG must be signature, notarization and Gatekeeper checked, and arch-pinned, before it is attested');
     if (platform === 'macos-x64') {
       check(job.steps.find((step) => step.id === 'signature').run.includes("flags=0x10000(runtime)"),
         'Intel Developer ID verification requires hardened runtime');
