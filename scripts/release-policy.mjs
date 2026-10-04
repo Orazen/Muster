@@ -12,6 +12,18 @@ const TrustOutcomes = new Set(['success', 'failure', 'cancelled', 'skipped']);
 const trustKeys = ['architecture', 'checks', 'files', 'runAttempt', 'runId', 'schemaVersion', 'sha', 'status', 'version'];
 const checkKeys = ['gatekeeper', 'notarization', 'signature'];
 
+// Scope of the evidence these names produce, stated precisely because it is
+// easy to overread. The per-architecture `checks` are workflow-step outcomes:
+// they attest that the built app was signature-verified, notarized and
+// Gatekeeper-assessed, and the `dmg-trust` step additionally opens every DMG
+// and runs `codesign --verify --strict`, `xcrun stapler validate` and
+// `spctl --assess` on each one. Every listed file's bytes are digest-bound.
+//
+// That covers the DMG containers. It does NOT extend to the app inside a
+// `.zip`: the workflow never extracts a ZIP and assesses the contained app, so
+// no stapled or Gatekeeper trust is claimed for the ZIP-contained app. Its
+// bytes are pinned only, which is what the updater needs and nothing more.
+// Any future claim beyond that needs the ZIP actually opened and assessed.
 function macArtifactNames(version, architecture) {
   if (!ReleaseVersion.test(String(version))) throw new Error('Invalid Mac trust release version');
   if (architecture === 'arm64') return [
