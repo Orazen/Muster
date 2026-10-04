@@ -204,22 +204,40 @@ describe("an OAuth failure does not lose the referral or the destination", () =>
 // an unrelated later session that confirmed one would spend a code nobody in that session had seen.
 // Both bounds close it: an explicit cancel drops it, and one whose window passed never reads back.
 describe("an abandoned attempt's referral cannot be spent by a later session", () => {
-  it("is gone the moment the attempt is cancelled", () => {
+  it("cancellation: is gone the moment the attempt is cancelled", () => {
     stashReferral("REF-9", "/w/42/board", "attempt-1");
     clearStashedReferral();
     expect(peekStashedReferral()).toBeNull();
     expect(takeStashedReferral()).toBeNull();
   });
 
-  it("is cleared when an attempt times out or is abandoned", () => {
+  it("timeout: is cleared when an attempt times out", () => {
     stashReferral("REF-9", "/pair", "attempt-1");
     expect(peekStashedReferral()?.next).toBe("/pair");
-    // Explicit timeout / unrecoverable failure cleanup clears the held referral
+    // Timeout handler triggers clearStashedReferral
     clearStashedReferral();
     expect(takeStashedReferral()).toBeNull();
   });
 
-  it("never reads back after its bounded lifetime has passed", () => {
+  it("failure / unrecoverable handoff: cleared so failed attempt does not leak", () => {
+    stashReferral("REF-9", "/pair", "attempt-1");
+    // Handoff open/begin fatal failure triggers clearStashedReferral
+    clearStashedReferral();
+    expect(takeStashedReferral()).toBeNull();
+  });
+
+  it("unrelated login within TTL: cancelled/timed out attempt cannot be redeemed by unrelated session", () => {
+    stashReferral("REF-ABANDONED", "/pair", "attempt-abandoned");
+    // User cancels or abandons waiting
+    clearStashedReferral();
+
+    // Now an unrelated session logs in within the 10m TTL window
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 60_000); // 1 minute later (< 10 min TTL)
+    expect(takeStashedReferral()).toBeNull();
+  });
+
+  it("expiry: never reads back after its bounded lifetime has passed", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     stashReferral("REF-9", "/w/42/board", "attempt-1");
     vi.setSystemTime(Date.now() + REFERRAL_STASH_TTL_MS + 1000);
@@ -227,10 +245,32 @@ describe("an abandoned attempt's referral cannot be spent by a later session", (
     expect(takeStashedReferral()).toBeNull();
   });
 
-  it("is still live inside its bounded lifetime", () => {
+  it("expiry: is still live inside its bounded lifetime", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     stashReferral("REF-9", "/w/42/board", "attempt-1");
     vi.setSystemTime(Date.now() + REFERRAL_STASH_TTL_MS - 1000);
     expect(takeStashedReferral()).toBe("REF-9");
+  });
+
+  it("intentional retry: preserves referral and destination across failure return and binds new attempt", () => {
+    stashReferral("REF-9", "/pair", "attempt-1");
+    // Returned with authError (URL lacks next and ref)
+    const restored = peekStashedReferral();
+    expect(restored?.ref).toBe("REF-9");
+    expect(restored?.next).toBe("/pair");
+
+    // Retry starts with restored destination and binds attempt-2
+    stashReferral(restored?.ref ?? null, restored?.next ?? null, "attempt-2");
+    expect(peekStashedReferral()?.attempt).toBe("attempt-2");
+    expect(peekStashedReferral()?.next).toBe("/pair");
+    // Confirmed session consumes it
+    expect(takeStashedReferral()).toBe("REF-9");
+  });
+
+  it("one-time redemption: single takeStashedReferral consumes the code completely", () => {
+    stashReferral("REF-ONE-TIME", "/pair", "attempt-1");
+    expect(takeStashedReferral()).toBe("REF-ONE-TIME");
+    expect(takeStashedReferral()).toBeNull();
+    expect(peekStashedReferral()).toBeNull();
   });
 });
