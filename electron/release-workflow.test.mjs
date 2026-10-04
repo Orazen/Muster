@@ -191,9 +191,10 @@ describe('release control decision matrix', () => {
     // Replay both guards the way the runner does: notarization runs only on a
     // non-dry run with every ASC credential and team id present, and the DMG
     // gate may then run only if that notarization succeeded.
-    const attempts = (dryRun, credentials) => {
-      const env = Object.fromEntries(['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT', 'APPLE_TEAM_ID', 'APPLE_CERTIFICATE']
-        .map((key) => [key, credentials ? 'present' : '']));
+    const attempts = (dryRun, ascCredentials, signingCertificate = ascCredentials) => {
+      const env = Object.fromEntries(['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT', 'APPLE_TEAM_ID']
+        .map((key) => [key, ascCredentials ? 'present' : '']));
+      env.APPLE_CERTIFICATE = signingCertificate ? 'present' : '';
       const context = { success: true, env, needs: { prepare: { outputs: { dry_run: dryRun } } } };
       const outcome = evaluateGuard(notarize.if, context) ? 'success' : 'skipped';
       return { ran: evaluateGuard(dmgTrust.if, { ...context, steps: { notarize: { outcome } } }), outcome };
@@ -202,7 +203,7 @@ describe('release control decision matrix', () => {
     expect(attempts('true', true)).toEqual({ ran: false, outcome: 'skipped' });
     // Missing ASC credentials with a signing certificate present: the exact
     // case that ran `stapler validate` on an unstapled DMG.
-    expect(attempts('false', false)).toEqual({ ran: false, outcome: 'skipped' });
+    expect(attempts('false', false, true)).toEqual({ ran: false, outcome: 'skipped' });
     // Real run, full credentials: notarization succeeded, so the gate runs.
     expect(attempts('false', true)).toEqual({ ran: true, outcome: 'success' });
     // Failed or skipped notarization, and a failed earlier step, all fail closed.

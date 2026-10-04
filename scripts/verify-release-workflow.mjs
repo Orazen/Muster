@@ -230,13 +230,14 @@ export function verifyReleaseWorkflow(workflow) {
     // genuinely succeeded with a certificate present; every other case (dry run,
     // missing ASC credentials, missing certificate, failed or skipped
     // notarization, failed prior step) must leave it unevaluated.
-    for (const dry of ['false', 'true', '']) for (const credentials of [true, false]) for (const success of [true, false]) {
-      const env = Object.fromEntries(['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT', 'APPLE_TEAM_ID', 'APPLE_CERTIFICATE']
-        .map((key) => [key, credentials ? 'present' : '']));
+    for (const dry of ['false', 'true', '']) for (const ascCredentials of [true, false]) for (const signingCertificate of [true, false]) for (const success of [true, false]) {
+      const env = Object.fromEntries(['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT', 'APPLE_TEAM_ID']
+        .map((key) => [key, ascCredentials ? 'present' : '']));
+      env.APPLE_CERTIFICATE = signingCertificate ? 'present' : '';
       const context = { success, env, needs: { prepare: { outputs: { dry_run: dry } } } };
       const notarizationRan = evaluateGuard(notarizeStep.if, context);
       const outcome = notarizationRan ? 'success' : 'skipped';
-      const expected = success && outcome === 'success' && env.APPLE_CERTIFICATE !== '';
+      const expected = success && outcome === 'success' && signingCertificate;
       check(evaluateGuard(dmgTrust.if, { ...context, steps: { notarize: { outcome } } }) === expected,
         'Final DMG trust must run only after notarization actually succeeded');
     }
