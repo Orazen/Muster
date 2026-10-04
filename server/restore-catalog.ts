@@ -48,11 +48,12 @@ import {
   RESTORE_DROPPED_BOT_FIELDS,
   RESTORE_DROPPED_GROUP_FIELDS,
   RESTORE_DROPPED_TASK_FIELDS,
+  RESTORE_EXCLUDED_ROOT_DIRECTORIES,
   RESTORE_EXCLUDED_ROOT_FILES,
 } from "./workspace-bundle-v2.ts";
 
 /** Bumped when the wire shape changes in a way a client must notice. */
-export const RESTORE_CATALOG_VERSION = 1;
+export const RESTORE_CATALOG_VERSION = 2;
 
 /** A Drive row as `listSnapshots` produces it. Structurally typed rather than
  * imported so this module stays pure and this file can be read on its own; the
@@ -112,6 +113,8 @@ export type RestoreDriveState = "connected" | "not-connected" | "capability-unav
 export interface RestoreExclusions {
   /** Data-directory entries that hold credentials or connection grants. */
   files: readonly string[];
+  /** Root directories that may contain installation secrets. */
+  directories: readonly string[];
   /** Bot-record fields dropped rather than restored (grants, owner ids,
    * machine pointers). */
   botFields: readonly string[];
@@ -124,6 +127,7 @@ export interface RestoreExclusions {
 
 export const RESTORE_EXCLUSIONS: RestoreExclusions = Object.freeze({
   files: Object.freeze([...RESTORE_EXCLUDED_ROOT_FILES]),
+  directories: Object.freeze([...RESTORE_EXCLUDED_ROOT_DIRECTORIES]),
   botFields: Object.freeze([...RESTORE_DROPPED_BOT_FIELDS]),
   disabledBotFields: Object.freeze([...RESTORE_DISABLED_BOT_FIELDS]),
   taskFields: Object.freeze([...RESTORE_DROPPED_TASK_FIELDS]),
