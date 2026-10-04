@@ -295,7 +295,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signUp: (name: string, email: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
-  signInWithProvider: (provider: string) => Promise<{ error?: string }>;
+  signInWithProvider: (provider: string, destination?: string | null) => Promise<{ error?: string }>;
   requestPasswordReset: (email: string) => Promise<{ error?: string }>;
   resetPassword: (token: string, newPassword: string) => Promise<{ error?: string }>;
 }
@@ -406,7 +406,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    *  to the original account — the stale session cookie wins over the
    *  account chosen in the OAuth flow. Signing out here makes the choice
    *  real; on the sign-in page that is exactly what the user asked for. */
-  async function signInWithProvider(provider: string): Promise<{ error?: string }> {
+  async function signInWithProvider(provider: string, destination?: string | null): Promise<{ error?: string }> {
     try {
       try {
         const result = await authClient.signOut();
@@ -414,6 +414,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         // best effort — proceed with the OAuth handoff regardless
       }
+      const resolvedDestination =
+        destination ??
+        new URLSearchParams(window.location.search).get("next") ??
+        peekStashedReferral()?.next ??
+        null;
       // SAFETY: provider arrives from the sign-in buttons rendered for the
       // configured socialProviders list ("google" today), which is exactly
       // the provider union better-auth's social() accepts.
@@ -423,7 +428,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // callbackURL regardless of its trustedOrigins list, so this also
         // passes on deployments whose PUBLIC_BASE_URL doesn't match the
         // browser origin (self-hosts that never set OMB_PUBLIC_HOST)
-        callbackURL: authDestination(new URLSearchParams(window.location.search).get("next")),
+        callbackURL: authDestination(resolvedDestination),
       });
       if (res.error) return { error: res.error.message ?? `Could not sign in with ${provider}` };
       return {};

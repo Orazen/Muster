@@ -43,6 +43,7 @@ export function GoogleSignIn({ next, ref, onError }: { next: string; ref?: strin
       controller.abort();
       clearTimeout(timer);
       cancelAttempt();
+      clearStashedReferral();
       setWaiting(false);
       onError("Sign-in took too long. Please try again or use a pairing code.");
     }, 180_000);
@@ -87,7 +88,7 @@ export function GoogleSignIn({ next, ref, onError }: { next: string; ref?: strin
         // session is confirmed. The destination and this attempt's id ride along with it, because
         // the error route strips both from the URL and a retry has to be able to put them back.
         stashReferral(ref ?? null, next, String(currentAttempt));
-        const result = await signInWithProvider("google");
+        const result = await signInWithProvider("google", authDestination(next));
         if (currentAttempt === attempt.current && result.error) onError(result.error);
         return;
       }

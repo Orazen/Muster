@@ -211,6 +211,14 @@ describe("an abandoned attempt's referral cannot be spent by a later session", (
     expect(takeStashedReferral()).toBeNull();
   });
 
+  it("is cleared when an attempt times out or is abandoned", () => {
+    stashReferral("REF-9", "/pair", "attempt-1");
+    expect(peekStashedReferral()?.next).toBe("/pair");
+    // Explicit timeout / unrecoverable failure cleanup clears the held referral
+    clearStashedReferral();
+    expect(takeStashedReferral()).toBeNull();
+  });
+
   it("never reads back after its bounded lifetime has passed", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     stashReferral("REF-9", "/w/42/board", "attempt-1");
