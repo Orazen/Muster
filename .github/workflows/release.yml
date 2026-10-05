@@ -41,7 +41,10 @@
 #     APPLE_CERTIFICATE_PASSWORD   Export password for that .p12
 #
 #   macOS notarization — ANY absent → skip notarize/staple; signed-but-
-#   unstapled (or unsigned) artifacts still upload. Uses the App Store
+#   unstapled (or unsigned) artifacts still upload to the draft. Skipped
+#   notarization also means the Apple trust checks cannot run (they assert a
+#   stapled ticket), so Mac trust stays `unverified` and the release stays a
+#   DRAFT — never published, never mirrored. Uses the App Store
 #   Connect API key, NOT an Apple ID app-specific password: the API key is
 #   the credential this team can actually mint and rotate without a browser,
 #   and notarytool accepts it identically.
@@ -167,6 +170,8 @@ jobs:
     needs: prepare
     runs-on: macos-latest
     timeout-minutes: 60
+    outputs:
+      trust_evidence: ${{ steps.attest-mac.outputs.evidence }}
     # Job-level env, NOT step-level: a step's own `env:` block is out of scope
     # for that step's `if:` expression, so testing secrets there silently
     # skipped signing on every run.
@@ -249,6 +254,7 @@ jobs:
         run: pnpm package:mac:arm64
 
       - name: "Gate: signature must verify BEFORE notarization"
+        id: signature
         if: ${{ env.APPLE_CERTIFICATE != '' }}
         run: |
           set -euo pipefail
@@ -374,6 +380,56 @@ jobs:
           # such pairs). Mac deltas ride the zip channel, where pairing is exact.
           (cd release && shopt -s nullglob && shasum -a 256 *.dmg *.zip *.zip.blockmap > SHA256SUMS-macos-arm64.txt)
 
+      - name: "Gate: every final distributed DMG is signed, notarized and arm64"
+        id: dmg-trust
+        # Tied to notarization that ACTUALLY ran, not merely to the presence of
+        # a certificate. `notarize` is skipped on dry runs and whenever any ASC
+        # credential or team id is absent, and stapling only happens inside that
+        # step — so gating on APPLE_CERTIFICATE alone ran `stapler validate`
+        # against an unstapled DMG and broke the documented
+        # signed-but-unstapled path before its allowed upload.
+        #
+        # When this is skipped, trust is left UNVERIFIED on purpose:
+        # `attest-mac` records notarization=skipped, the evidence status stays
+        # `untrusted`, and publication stays a draft. Artifacts still upload;
+        # they just cannot be published as trusted.
+        if: ${{ success() && env.APPLE_CERTIFICATE != '' && steps.notarize.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          # The .app gates above prove the inner bundle, not the container a
+          # user actually downloads, and the stable-named DMG is copied *after*
+          # those gates run. So nothing has ever assessed a shipped DMG. Check
+          # every DMG that will be attached to the release, and prove this leg
+          # is genuinely arm64 rather than a mislabelled Intel build.
+          EXE=$(find release/mac-arm64/Muster.app/Contents/MacOS -maxdepth 1 -type f | head -n 1)
+          [ -n "$EXE" ] || { echo "::error::no executable found in arm64 app bundle"; exit 1; }
+          ARCHS=$(lipo -archs "$EXE")
+          case ",$ARCHS," in
+            *,arm64,*) ;;
+            *) echo "::error::arm64 leg produced a non-arm64 binary: $ARCHS"; exit 1 ;;
+          esac
+          shopt -s nullglob
+          DMGS=(release/*.dmg)
+          [ "${#DMGS[@]}" -gt 0 ] || { echo "::error::no DMG to validate"; exit 1; }
+          for f in "${DMGS[@]}"; do
+            codesign --verify --strict "$f"
+            xcrun stapler validate "$f"
+            spctl --assess --type open --context context:primary-signature -vv "$f"
+            echo "validated $f"
+          done
+
+      - name: Bind Apple trust checks to exact Mac release bytes
+        id: attest-mac
+        env:
+          ASSETS_DIR: release
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          MAC_ARCH: arm64
+          SIGNATURE_OUTCOME: ${{ steps.signature.outcome }}
+          NOTARIZATION_OUTCOME: ${{ steps.notarize.outcome }}
+          GATEKEEPER_OUTCOME: ${{ steps.gatekeeper.outcome }}
+        run: node scripts/release-policy.mjs attest
+
       - name: Verify artifacts
         run: |
           set -euo pipefail
@@ -416,6 +472,8 @@ jobs:
     needs: prepare
     runs-on: macos-15-intel
     timeout-minutes: 60
+    outputs:
+      trust_evidence: ${{ steps.attest-mac.outputs.evidence }}
     # Same credential set as the arm64 leg: with the Developer ID cert and the
     # ASC key present the Intel dmg/zip ships signed AND notarized, closing the
     # standing gatekeeper gap where every prior Intel artifact was stapled by
@@ -500,16 +558,20 @@ jobs:
       # remains as the fallback when ASC secrets are unset.) The signature
       # gate mirrors the arm64 leg's pre-notarize check.
       - name: "Gate: signature must verify BEFORE notarization"
-        if: ${{ success() && needs.prepare.outputs.dry_run == 'false' && env.APPLE_CERTIFICATE != '' && env.ASC_KEY_ID != '' && env.ASC_ISSUER_ID != '' && env.ASC_KEY_CONTENT != '' }}
+        id: signature
+        if: ${{ success() && env.APPLE_CERTIFICATE != '' }}
         run: |
           set -euo pipefail
           APP=release/mac/Muster.app
           codesign --verify --deep --strict "$APP"
           AUTHORITY=$(codesign -dv --verbose=4 "$APP" 2>&1 | awk -F= '/^Authority=Developer ID Application/ {print $2; exit}')
           [ -n "$AUTHORITY" ] || { echo "::error::no Developer ID Application authority — refusing to notarize"; exit 1; }
+          codesign -dv --verbose=4 "$APP" 2>&1 | grep -q 'flags=0x10000(runtime)' || {
+            echo "::error::$APP was not built with the hardened runtime"; exit 1; }
 
       - name: Notarize and staple (Intel)
-        if: ${{ success() && needs.prepare.outputs.dry_run == 'false' && env.APPLE_CERTIFICATE != '' && env.ASC_KEY_ID != '' && env.ASC_ISSUER_ID != '' && env.ASC_KEY_CONTENT != '' }}
+        id: notarize
+        if: ${{ success() && needs.prepare.outputs.dry_run == 'false' && env.APPLE_CERTIFICATE != '' && env.ASC_KEY_ID != '' && env.ASC_ISSUER_ID != '' && env.ASC_KEY_CONTENT != '' && env.APPLE_TEAM_ID != '' }}
         run: |
           set -euo pipefail
           ASC_KEY_PATH="$RUNNER_TEMP/asc-notary.p8"
@@ -536,6 +598,19 @@ jobs:
             xcrun stapler staple "$f"
             xcrun stapler validate "$f"
           done
+          APP=release/mac/Muster.app
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+
+      - name: "Gate: notarized Intel app passes Gatekeeper"
+        id: gatekeeper
+        if: ${{ success() && steps.notarize.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          APP=release/mac/Muster.app
+          codesign --verify --deep --strict "$APP"
+          xcrun stapler validate "$APP"
+          spctl --assess --type exec -vv "$APP"
 
       # Checksums come LAST: stapling rewrites the dmg/zip bytes (the arm64
       # leg documents the same ordering constraint).
@@ -548,6 +623,47 @@ jobs:
           cp "release/Muster-${VERSION}-intel.dmg" release/Muster-intel.dmg
           # Same DMG-blockmap exclusion as the arm64 leg (stapler staleness).
           (cd release && shopt -s nullglob && shasum -a 256 *.dmg *.zip *.zip.blockmap > SHA256SUMS-macos-x64.txt)
+
+      - name: "Gate: every final distributed DMG is signed, notarized and x86_64"
+        id: dmg-trust
+        # Same notarization coupling as the arm64 leg: this gate opens the DMG
+        # the user downloads and asserts a stapled ticket, which only exists if
+        # the `notarize` step above actually ran and succeeded. Skipped
+        # notarization leaves trust unverified and publication fail-closed.
+        if: ${{ success() && env.APPLE_CERTIFICATE != '' && steps.notarize.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          # Same container-level gap the arm64 leg closes: the Intel .app gates
+          # do not assess the DMG the user downloads, and Muster-intel.dmg is
+          # copied after them. Validate every shipped DMG and pin the arch.
+          EXE=$(find release/mac/Muster.app/Contents/MacOS -maxdepth 1 -type f | head -n 1)
+          [ -n "$EXE" ] || { echo "::error::no executable found in x64 app bundle"; exit 1; }
+          ARCHS=$(lipo -archs "$EXE")
+          case ",$ARCHS," in
+            *,x86_64,*) ;;
+            *) echo "::error::Intel leg produced a non-x86_64 binary: $ARCHS"; exit 1 ;;
+          esac
+          shopt -s nullglob
+          DMGS=(release/*.dmg)
+          [ "${#DMGS[@]}" -gt 0 ] || { echo "::error::no DMG to validate"; exit 1; }
+          for f in "${DMGS[@]}"; do
+            codesign --verify --strict "$f"
+            xcrun stapler validate "$f"
+            spctl --assess --type open --context context:primary-signature -vv "$f"
+            echo "validated $f"
+          done
+
+      - name: Bind Apple trust checks to exact Mac release bytes
+        id: attest-mac
+        env:
+          ASSETS_DIR: release
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          MAC_ARCH: intel
+          SIGNATURE_OUTCOME: ${{ steps.signature.outcome }}
+          NOTARIZATION_OUTCOME: ${{ steps.notarize.outcome }}
+          GATEKEEPER_OUTCOME: ${{ steps.gatekeeper.outcome }}
+        run: node scripts/release-policy.mjs attest
 
       - name: "Attach macOS x64 assets to draft release"
         if: ${{ success() && needs.prepare.outputs.dry_run == 'false' }}
@@ -741,7 +857,7 @@ jobs:
     permissions:
       contents: write
     outputs:
-      published: ${{ steps.release.outcome == 'success' && steps.draft.outputs.value == 'false' && !contains(needs.prepare.outputs.version, '-') }}
+      published: ${{ steps.release.outcome == 'success' && steps.draft.outputs.value == 'false' && steps.draft.outputs.macos_trust == 'verified' && !contains(needs.prepare.outputs.version, '-') }}
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
@@ -775,7 +891,26 @@ jobs:
           WINDOWS_RESULT: ${{ needs.windows.result }}
           LINUX_RESULT: ${{ needs.linux.result }}
           INTEL_RESULT: ${{ needs.macos-x64.result }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          ASSETS_DIR: assets
+          ARM64_TRUST_EVIDENCE: ${{ needs.macos.outputs.trust_evidence }}
+          INTEL_TRUST_EVIDENCE: ${{ needs.macos-x64.outputs.trust_evidence }}
         run: node scripts/release-policy.mjs draft
+
+      - name: Require artifact-bound Mac trust before payload validation
+        id: trust-gate
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          ASSETS_DIR: assets
+          ARM64_TRUST_EVIDENCE: ${{ needs.macos.outputs.trust_evidence }}
+          INTEL_TRUST_EVIDENCE: ${{ needs.macos-x64.outputs.trust_evidence }}
+        run: node scripts/release-policy.mjs require-trust
 
       - name: Verify feed bytes and complete stable downloads
         id: payload
@@ -812,8 +947,8 @@ jobs:
   # mirror is inaccessible to draft, prerelease, failed and dry-run jobs.
   deploy-downloads:
     name: Deploy downloads to VPS
-    needs: [prepare, publish]
-    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.dry_run == 'false' && needs.publish.result == 'success' && needs.publish.outputs.published == 'true' }}
+    needs: [prepare, publish, macos, macos-x64]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.dry_run == 'false' && needs.macos.result == 'success' && needs.macos-x64.result == 'success' && needs.publish.result == 'success' && needs.publish.outputs.published == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -824,6 +959,8 @@ jobs:
       RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
       ASSETS_DIR: artifacts
       REQUIRE_COMPLETE: 'true'
+      ARM64_TRUST_EVIDENCE: ${{ needs.macos.outputs.trust_evidence }}
+      INTEL_TRUST_EVIDENCE: ${{ needs.macos-x64.outputs.trust_evidence }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -868,6 +1005,18 @@ jobs:
             gh api -H "Accept: application/octet-stream" "$asset_url" > "artifacts/$asset_file"
             [[ -s "artifacts/$asset_file" ]] || { echo "::error::release asset '$asset_file' downloaded zero bytes"; rm -f "artifacts/$asset_file"; exit 1; }
           done <<< "$UPLOADED_ASSETS"
+
+      - name: Reverify artifact-bound Mac trust against published bytes
+        id: trust-gate
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          ASSETS_DIR: artifacts
+          ARM64_TRUST_EVIDENCE: ${{ needs.macos.outputs.trust_evidence }}
+          INTEL_TRUST_EVIDENCE: ${{ needs.macos-x64.outputs.trust_evidence }}
+        run: node scripts/release-policy.mjs require-trust
 
       - name: Validate complete mirror payload and write manifests
         id: payload
