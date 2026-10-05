@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 import { renderTerminal } from "./qr.mjs";
 import { loadCliConfig, saveCliConfig, readPairPassword, rejectPasswordArgument, sessionCookie } from "./credentials.mjs";
 import { clearRunRecordAt, inspectRecordedServer, parseSetupInstances, readRunRecordAt, stopRecordedServer } from "./runtime-contracts.mjs";
+import { evaluateDataDirClaim } from "../scripts/data-dir-claim-check.mjs";
 
 // Every on-disk path hangs off MUSTER_DIR (default ~/.muster). The env
 // override keeps multi-instance testing and second installs off a real one.
@@ -516,6 +517,14 @@ async function mintAndPrint(port, { detached }) {
  *  BETTER_AUTH_SECRET (resolveSecret throws): generate once, persist 0600,
  *  reuse forever — sessions must survive restarts. */
 function serverEnv(port, runtime) {
+  // Before the first protected write (and before spawning a server that
+  // would only die later at its own boot guard): a data directory carrying a
+  // restore-exclusivity claim marker must not be touched. Launchers refuse;
+  // they do not recover (see server/data-dir-exclusivity.ts and
+  // docs/plans/restore-reconciliation-runbook.md).
+  const dataDir = arg("--data-dir") ?? process.env.OMB_DATA_DIR ?? join(MUSTER_DIR, "data");
+  const claim = evaluateDataDirClaim(dataDir);
+  if (!claim.clear) throw new Error(claim.message);
   const secretPath = join(MUSTER_DIR, "auth.secret");
   mkdirSync(MUSTER_DIR, { recursive: true });
   if (!existsSync(secretPath)) {
@@ -527,7 +536,7 @@ function serverEnv(port, runtime) {
     OMB_HOST: "0.0.0.0", // all interfaces: loopback claim-create AND the phone's LAN access
     BETTER_AUTH_SECRET: readFileSync(secretPath, "utf8").trim(),
     OMB_STATIC_DIR: runtime.static ?? "",
-    OMB_DATA_DIR: arg("--data-dir") ?? process.env.OMB_DATA_DIR ?? join(MUSTER_DIR, "data"),
+    OMB_DATA_DIR: dataDir,
   };
   if (arg("--public-host")) env.OMB_PUBLIC_HOST = arg("--public-host");
   return env;
