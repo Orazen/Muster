@@ -34,10 +34,22 @@
 // proof was absent but the shape looked right" would turn a spoofable signal
 // into a registered installation. Everything below is bound explicitly so
 // that no single spoofable input is sufficient.
+//
+// W2 additions, still inert. (1) The custody fence is PERSISTED: the fence
+// registry writes through an injectable `FencePersistence` whose file-backed
+// default lives under the data dir, so a fence survives the restart that used
+// to lift it. (2) The binding names canonical identity provenance —
+// {cloudSubject, cloudIssuer, workspaceId, clientKey} — where `cloudIssuer`
+// is a strict HTTPS origin and a mismatched issuer is a refusal, per the
+// recorded decision to treat the verified provider `sub` as identity and make
+// issuer/audience/expiry/nonce validation the ID-token layer's job.
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { z } from "zod";
+
+import { FileFencePersistence, defaultEnrollmentFencePath } from "./installation-fence-persistence.ts";
+import type { FencePersistence } from "./installation-fence-persistence.ts";
 
 /** Enrollment is opt-in. Nothing here is reachable unless a caller flips
  * this on AND supplies a protected-store implementation. There is deliberately
@@ -94,6 +106,11 @@ export type EnrollmentFailure =
   | "local-owner"
   | "local-session"
   | "authority"
+  /** The binding's canonical issuer was malformed, or was canonical but is
+   * not the deployment's trusted one. Distinct from `authority` (the
+   * free-form authorization string) so an operator can tell "the issuer you
+   * named is not ours" from "the authority string did not match". */
+  | "issuer"
   | "device"
   | "client-key"
   | "state"
@@ -182,12 +199,52 @@ export interface ProtectedCredentialStore {
   delete(clientKey: string): Promise<boolean>;
 }
 
+/** What a canonical issuer IS: an exact HTTPS origin string.
+ *
+ * The value must already BE canonical when it arrives — the boundary refuses
+ * non-canonical forms rather than silently normalizing them, because two
+ * spellings of one issuer would be two identities. Concretely the string must
+ * equal its own `URL` origin: https scheme only, no path beyond the empty
+ * one, no query, no fragment, no userinfo, lowercase host (the parser
+ * lowercases hosts, so an uppercase spelling fails the equality), and no
+ * default port spelled out (the parser drops `:443`, so the equality fails
+ * there too). A non-default port is preserved and therefore allowed.
+ *
+ * This is the canonical ISSUER STRING entering the contract only. Validating
+ * a real ID token — its signature, issuer, audience, expiry and the flow
+ * nonce — is the ID-token layer's job (the recorded decision: use the
+ * verified provider `sub` as provider identity, not email); nothing here
+ * parses or accepts tokens. */
+export function isCanonicalIssuer(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  if (url.username !== "" || url.password !== "") return false;
+  if (url.search !== "" || url.hash !== "") return false;
+  return url.pathname === "/" && url.origin === value;
+}
+
+export const canonicalIssuerWire = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine(isCanonicalIssuer, {
+    message:
+      "issuer must be a canonical HTTPS origin: lowercase host, no path, query, fragment, userinfo, or default port",
+  });
+
 /** The versioned sealed envelope. Binding cloud subject AND local owner (not
  * just authority/device identity) is what makes a legacy record —
  * one that predates these bindings — unusable until it is explicitly
  * reattached, rather than quietly accepted on the strength of its device id
- * alone. */
-export const protectedEnvelopeVersion = 2;
+ * alone. Version 3 adds the canonical issuer and workspace binding: a record
+ * whose issuing origin is not re-checkable is not an authorization, and a
+ * record that does not name its workspace is not a workspace capability. */
+export const protectedEnvelopeVersion = 3;
 
 export interface ProtectedEnvelope {
   version: number;
@@ -195,9 +252,19 @@ export interface ProtectedEnvelope {
    * is the ONLY thing that may carry the credential. */
   sealed: string;
   cloudSubject: string;
-  /** The issuer that authorized this enrollment. Persisted because a record
-   * whose authority is not re-checkable is not an authorization. */
+  /** The issuer that authorized this enrollment, in the free-form shape the
+   * binding carried it. Persisted because a record whose authority is not
+   * re-checkable is not an authorization. Superseded in precision by
+   * `cloudIssuer` (below) but retained so a version-2 record's field is
+   * still the same field. */
   cloudAuthority: string;
+  /** The CANONICAL issuer this enrollment may act under: a strict HTTPS
+   * origin, validated at the boundary. Equal to the deployment's trusted
+   * issuer at commit time; persisted so the equality can be re-proven later. */
+  cloudIssuer: string;
+  /** The workspace this enrollment's capability is scoped to. Named at the
+   * boundary; only the workspace scope exists in this build. */
+  workspaceId: string;
   localOwnerId: string;
   localSessionId: string;
   installationId: string;
@@ -223,6 +290,8 @@ export const protectedEnvelopeWire = z.object({
   sealed: z.string().min(1).max(8192),
   cloudSubject: z.string().min(1).max(256),
   cloudAuthority: z.string().min(1).max(256),
+  cloudIssuer: canonicalIssuerWire,
+  workspaceId: z.string().min(1).max(128),
   localOwnerId: z.string().min(1).max(256),
   localSessionId: z.string().min(1).max(256),
   installationId: z.string().min(8).max(128),
@@ -257,16 +326,32 @@ export const enrollmentRequestWire = z.object({
 export type EnrollmentRequest = z.infer<typeof enrollmentRequestWire>;
 
 /** Everything the proof is bound to. The enrollment cannot complete unless
- * the caller's live context matches ALL of these. */
+ * the caller's live context matches ALL of these.
+ *
+ * The binding NAMES the identity quadruple in one place —
+ * {cloudSubject, cloudIssuer, workspaceId, clientKey} — so a custody adapter
+ * (including the native one, when it exists) receives the full provenance of
+ * what it is asked to protect, not a fragment of it. */
 export interface EnrollmentBinding {
   /** Canonical cloud account subject — NOT an email. An email can be
    * reassigned, aliased, or matched locally by anyone who signs up. */
   cloudSubject: string;
-  /** The cloud issuer this enrollment may act under. Validated against a
-   * TRUSTED allowlist supplied by the deployment, never merely "some string" —
-   * an enrollment authorized by an arbitrary caller-supplied origin is not an
-   * authorization at all. */
+  /** The CANONICAL cloud issuer this enrollment may act under: a strict
+   * HTTPS origin (see `canonicalIssuerWire`). Compared against the
+   * deployment's trusted issuer; a mismatch is a refusal, never a silent
+   * mismatch. Validating the ID token itself — issuer, audience, expiry,
+   * flow nonce — belongs to the ID-token layer that produced this string. */
+  cloudIssuer: string;
+  /** The cloud issuer this enrollment may act under, in the free-form shape
+   * carried since version 2 of the envelope. Must ALSO equal the trusted
+   * issuer; `cloudIssuer` is the canonical, schema-validated form. */
   cloudAuthority: string;
+  /** The workspace the enrollment's capability is scoped to. */
+  workspaceId: string;
+  /** The device key this binding is about. Must be the same key the request
+   * carries: a binding that binds one key while the request begins another
+   * is a contradiction, refused rather than resolved by whichever arrived. */
+  clientKey: string;
   /** The local owner session the installation will belong to. */
   localOwnerId: string;
   /** The local session id, so a session change invalidates in-flight work. */
@@ -312,7 +397,15 @@ export const enrollmentBindingWire = z.object({
     .refine((value) => !value.includes("@"), {
       message: "cloudSubject must be a canonical subject id, not an email address",
     }),
+  // Canonical issuer provenance: a strict HTTPS origin, refused — not
+  // normalized — when it arrives in any other spelling. See
+  // `canonicalIssuerWire` for exactly what canonical means here.
+  cloudIssuer: canonicalIssuerWire,
   cloudAuthority: z.string().min(1).max(128),
+  workspaceId: z.string().min(1).max(128),
+  // The same bounds the request's clientKey has, so a binding cannot name a
+  // key the request shape would not have allowed in the first place.
+  clientKey: z.string().min(16).max(256),
   localOwnerId: z.string().min(1).max(256),
   localSessionId: z.string().min(1).max(256),
   cloudSessionValid: z.literal(true),
@@ -538,7 +631,7 @@ export class MemoryProtectedStore implements ProtectedCredentialStore {
     // fake behave like a conforming adapter rather than relying on every caller
     // checking first. The load-bearing enforcement is the synchronous fence read
     // before `deps.exchange`, plus the post-commit guard and cleanup.
-    if (fencedKeys.has(request.clientKey)) return null;
+    if (sharedFenceHandle.isFenced(request.clientKey)) return null;
     if (this.failCommitAt === this.commitCommitOrdinal()) return null;
     // Reject AFTER the write, so a caller that trusts "it threw, nothing
     // landed" is wrong: the record is on disk and must still be cleaned up.
@@ -554,6 +647,8 @@ export class MemoryProtectedStore implements ProtectedCredentialStore {
       sealed: `sealed:${request.binding.cloudSubject}`,
       cloudSubject: request.binding.cloudSubject,
       cloudAuthority: request.binding.cloudAuthority,
+      cloudIssuer: request.binding.cloudIssuer,
+      workspaceId: request.binding.workspaceId,
       localOwnerId: request.binding.localOwnerId,
       localSessionId: request.binding.localSessionId,
       installationId: request.installationId,
@@ -817,6 +912,21 @@ export interface EnrollmentPolicy {
   trusted: TrustedCloudConfig;
 }
 
+/** Per-engine options. Everything here is optional; omitting all of it yields
+ * exactly the pre-W2 engine wired to the process-wide fence registry. */
+export interface EnrollmentEngineOptions {
+  /** The durable fence store THIS engine's fence registry persists to.
+   *
+   * Omitted: the engine shares the process-wide registry, whose default
+   * persistence is the file-backed store under the data dir.
+   *
+   * Supplied: the engine gets its OWN registry — empty memory plus exactly
+   * this store — which is what a fresh process after a restart must look
+   * like: it observes what a prior instance PERSISTED and nothing it merely
+   * held in memory. */
+  fencePersistence?: FencePersistence;
+}
+
 /** Inactivate the record a completion just wrote, and SAY whether it is gone.
  *
  * A returned boolean is not proof of cleanup: the adapter may have refused
@@ -849,6 +959,7 @@ export type CustodyRead =
 async function cleanupCommittedRecord(
   deps: EnrollmentDeps,
   intent: EnrollmentIntent,
+  fence: FenceRegistry,
 ): Promise<CleanupOutcome> {
   const clientKey = intent.request.clientKey;
   try {
@@ -856,7 +967,7 @@ async function cleanupCommittedRecord(
   } catch {
     // The adapter refused or faulted. Nothing is known about what it removed,
     // so nothing may be assumed about what remains.
-    return unresolved(clientKey);
+    return unresolved(fence, clientKey);
   }
   // Read back with an EXPLICIT read result. `get` returning null cannot serve as
   // proof of absence, because a failed read and a genuinely absent row are the
@@ -866,26 +977,26 @@ async function cleanupCommittedRecord(
   try {
     observed = await deps.store.read(clientKey);
   } catch {
-    return unresolved(clientKey);
+    return unresolved(fence, clientKey);
   }
   // Only an EXPLICIT absence is proof. An unknown read is not.
   if (observed.kind === "absent") return "removed";
-  if (observed.kind === "unknown") return unresolved(clientKey);
+  if (observed.kind === "unknown") return unresolved(fence, clientKey);
   // A remaining row is only acceptable when it is demonstrably NOT ours. The
   // discriminator is the RECORD GENERATION the adapter reports, never a
   // timestamp: issuedAt comes from credential issuance while the intent's
   // createdAt comes from begin, so for the SAME generation they normally
   // DIFFER, and two generations can share a timestamp.
   if (observed.record.storedGeneration !== intent.generation) return "superseded-winner-kept";
-  return unresolved(clientKey);
+  return unresolved(fence, clientKey);
 }
 
 /** The ONE place "removal unconfirmed" is established, so the fence is set on
  * every unresolved path and no caller can forget. An earlier version fenced only
  * the same-generation-row path, which meant an indeterminate read or a
  * rejecting adapter reported unresolved custody while the key stayed reusable. */
-function unresolved(clientKey: string): CleanupOutcome {
-  fencedKeys.add(clientKey);
+function unresolved(fence: FenceRegistry, clientKey: string): CleanupOutcome {
+  fence.fence(clientKey, "custody-unresolved");
   return "unresolved";
 }
 
@@ -899,29 +1010,151 @@ function unresolved(clientKey: string): CleanupOutcome {
  * key, so recovery requires an explicit owner action rather than a retry that
  * silently rides on top of the unresolved record.
  *
- * In-memory only, and that limit is deliberate: this is a contract, not a
- * substitute for a real adapter's own fencing.
+ * Persisted since W2, and that persistence is the point: the record the fence
+ * guards against is itself durable across a restart, so an in-memory fence was
+ * lifted by exactly the event it exists to survive. The in-memory Set remains
+ * the FAST PATH; the injected `FencePersistence` (file-backed by default, see
+ * `installation-fence-persistence.ts`) is what is authoritative across
+ * restarts. This is still a contract, not a substitute for a real adapter's
+ * own fencing.
  */
-const fencedKeys = new Set<string>();
-
-/** Test seam: clear the fence registry between cases. */
-export function resetEnrollmentFences(): void {
-  fencedKeys.clear();
+interface FenceRegistry {
+  /** Fence a key. The durable write completes BEFORE this returns. */
+  fence(clientKey: string, reason?: string): void;
+  /** Memory first, then the persisted store. Fail-closed: while the store is
+   * degraded — or a read faults — every key counts as fenced. */
+  isFenced(clientKey: string): boolean;
+  /** The explicit owner action: clears memory AND the persisted store. */
+  reset(): void;
 }
 
-/** Whether a client key is locally fenced after unresolved custody. */
+function createFenceRegistry(persistence: () => FencePersistence | null): FenceRegistry {
+  /** The fast path. Fenced keys are answered from memory without touching
+   * the persisted store; the store is consulted only on a memory miss. */
+  const memory = new Set<string>();
+  return {
+    fence(clientKey, reason) {
+      memory.add(clientKey);
+      const store = persistence();
+      if (!store || store.degraded) {
+        // Degraded means every key already counts as fenced, and the store
+        // accepts no writes over unknown contents; a missing store means the
+        // registry is memory-only. The memory fence stands either way.
+        return;
+      }
+      try {
+        store.add(clientKey, reason === undefined ? undefined : { reason });
+      } catch {
+        // Durability could not be confirmed. The memory fence still stands
+        // for this process; a restart may not see this fence. Contained
+        // rather than thrown: `fence` runs inside cleanup paths whose
+        // promise is a RESULT, never a thrown error, and retrying a wedged
+        // disk from here would hold custody hostage on I/O. Over-fencing
+        // (a stale file that still names the key) is the safe direction.
+      }
+    },
+    isFenced(clientKey) {
+      if (memory.has(clientKey)) return true;
+      const store = persistence();
+      if (!store) return false;
+      // Fail CLOSED. A store whose contents are UNKNOWN fences every key —
+      // including keys never fenced — because "absent" cannot be distinguished
+      // from "fenced" when the file cannot be read. A read that faults is the
+      // same ambiguity. Recovery is the explicit reset, which rewrites a
+      // valid file; until then `begin` refuses new work on every key.
+      if (store.degraded) return true;
+      try {
+        return store.read().includes(clientKey);
+      } catch {
+        return true;
+      }
+    },
+    reset() {
+      memory.clear();
+      try {
+        persistence()?.clear();
+      } catch {
+        // A clear that failed leaves the file stale — which OVER-fences after
+        // a restart. Safe direction; the next reset can try again.
+      }
+    },
+  };
+}
+
+/** What the SHARED registry persists to. `undefined` until overridden: the
+ * file-backed default is resolved lazily on first fence use, so importing
+ * this module resolves no path, reads no file and writes none. An explicit
+ * `null` override disables persistence (the pre-W2 memory-only behavior). */
+let sharedFencePersistenceOverride: FencePersistence | null | undefined;
+let defaultSharedFencePersistence: FileFencePersistence | null = null;
+
+function resolveSharedFencePersistence(): FencePersistence | null {
+  if (sharedFencePersistenceOverride !== undefined) return sharedFencePersistenceOverride;
+  defaultSharedFencePersistence ??= new FileFencePersistence({ path: defaultEnrollmentFencePath() });
+  return defaultSharedFencePersistence;
+}
+
+/** The process-wide fence registry. The fence is deliberately process-wide:
+ * unresolved custody for a key is a fact about the KEY, not about whichever
+ * engine noticed it, so every engine that does not bring its own persistence
+ * shares this one. */
+let sharedFence: FenceRegistry = createFenceRegistry(resolveSharedFencePersistence);
+
+/** Test/integrator seam: point the shared registry at a specific durable
+ * store, or `null` for memory-only. Installing one REPLACES the registry,
+ * memory included — that is the restart seam. A freshly constructed instance
+ * observes exactly what the previous instance PERSISTED, and nothing it
+ * merely held in memory, which is precisely what a new process after a
+ * restart observes. */
+export function setEnrollmentFencePersistence(persistence: FencePersistence | null): void {
+  sharedFencePersistenceOverride = persistence;
+  sharedFence = createFenceRegistry(resolveSharedFencePersistence);
+}
+
+/** The handle engines WITHOUT their own persistence share. It delegates to
+ * the CURRENT shared registry on every call, so a seam install applies even
+ * to engines constructed before it. */
+const sharedFenceHandle: FenceRegistry = {
+  fence: (clientKey, reason) => sharedFence.fence(clientKey, reason),
+  isFenced: (clientKey) => sharedFence.isFenced(clientKey),
+  reset: () => sharedFence.reset(),
+};
+
+/** Test seam: clear the fence registry between cases. Clears the in-memory
+ * fast path AND the persisted store. */
+export function resetEnrollmentFences(): void {
+  sharedFenceHandle.reset();
+}
+
+/** Whether a client key is locally fenced after unresolved custody. Consults
+ * memory AND the persisted store, so a fence written by a prior process — or
+ * a prior registry instance — is still honored. */
 export function isEnrollmentKeyFenced(clientKey: string): boolean {
-  return fencedKeys.has(clientKey);
+  return sharedFenceHandle.isFenced(clientKey);
 }
 
 /** Test seam: establish the fence directly, standing in for a CONCURRENT
  * completion whose own cleanup just failed. Needed to exercise the window
- * between this completion's post-commit guard and its adoption. */
-export function fenceEnrollmentKey(clientKey: string): void {
-  fencedKeys.add(clientKey);
+ * between this completion's post-commit guard and its adoption. Persists
+ * before returning. */
+export function fenceEnrollmentKey(clientKey: string, reason?: string): void {
+  sharedFenceHandle.fence(clientKey, reason);
 }
 
-export function createEnrollmentEngine(policy: EnrollmentPolicy) {
+export function createEnrollmentEngine(policy: EnrollmentPolicy, options?: EnrollmentEngineOptions) {
+  // An ENABLED engine cannot be constructed against a non-canonical issuer:
+  // every downstream comparison treats the trusted issuer as the canonical
+  // form, so a deployment that configures a non-canonical spelling would make
+  // every legitimate binding mismatch. The inert engine (issuer "") is
+  // unaffected — the check fires only when enrollment is enabled, which is an
+  // explicit integrator decision.
+  if (policy.enabled && !isCanonicalIssuer(policy.trusted.issuer)) {
+    throw new Error("enrollment: the trusted issuer must be a canonical HTTPS origin");
+  }
+  const enginePersistence = options?.fencePersistence;
+  const fence: FenceRegistry = enginePersistence
+    ? createFenceRegistry(() => enginePersistence)
+    : sharedFenceHandle;
   return {
     /**
      * Step 1 — begin an enrollment.
@@ -941,8 +1174,21 @@ export function createEnrollmentEngine(policy: EnrollmentPolicy) {
       const parsedRequest = enrollmentRequestWire.safeParse(request);
       if (!parsedRequest.success) return fail("purpose");
       const parsedBinding = enrollmentBindingWire.safeParse(binding);
-      // An email-shaped subject is refused here, at the boundary.
-      if (!parsedBinding.success) return fail("subject");
+      // An email-shaped subject is refused here, at the boundary. So is any
+      // other malformed binding field — but a malformed canonical issuer is
+      // named as the ISSUER problem it is, so the refusal is actionable
+      // rather than mislabelled as a subject failure.
+      if (!parsedBinding.success) {
+        // SAFETY: the wire parse already failed, so the input's runtime shape
+        // is unproven; this probe only READS one field through an optional
+        // chain (never dereferences null) to decide WHICH refusal to report,
+        // and every value it can observe is re-validated by safeParse below.
+        const offeredIssuer = (binding as { cloudIssuer?: unknown } | null)?.cloudIssuer;
+        if (offeredIssuer !== undefined && !canonicalIssuerWire.safeParse(offeredIssuer).success) {
+          return fail("issuer");
+        }
+        return fail("subject");
+      }
 
       const req = parsedRequest.data;
       const bind = parsedBinding.data;
@@ -953,6 +1199,15 @@ export function createEnrollmentEngine(policy: EnrollmentPolicy) {
       // The AUTHORITY must be the deployment's trusted issuer. A binding that
       // names its own origin authorizes nothing.
       if (bind.cloudAuthority !== policy.trusted.issuer) return fail("authority");
+      // The CANONICAL issuer must be the deployment's trusted one too. A
+      // canonical-but-foreign issuer is a refusal, never a silent mismatch:
+      // identity provenance that names a different origin is a different
+      // identity, whatever the authority string says.
+      if (bind.cloudIssuer !== policy.trusted.issuer) return fail("issuer");
+      // The binding must be about the device key the request carries. A
+      // binding that names one key while the request begins another is a
+      // contradiction, refused rather than resolved by whichever arrived.
+      if (bind.clientKey !== req.clientKey) return fail("client-key");
 
       // The binding's owner and session must be the ones the caller is
       // actually authenticated as. Without this, an enrollment can be minted
@@ -970,8 +1225,10 @@ export function createEnrollmentEngine(policy: EnrollmentPolicy) {
       if (req.expiresAt <= now) return fail("expired");
 
       // A key whose custody could not be confirmed is fenced: no new work may
-      // be layered on top of a record nobody can prove was removed.
-      if (fencedKeys.has(req.clientKey)) return fail("custody-unresolved");
+      // be layered on top of a record nobody can prove was removed. The
+      // consult covers memory AND the persisted store, so a fence written by
+      // a prior process stops work in this one.
+      if (fence.isFenced(req.clientKey)) return fail("custody-unresolved");
 
       // A new begin supersedes the previous attempt for the same device, and
       // the store allocates THIS row's generation inside that same indivisible
@@ -1078,7 +1335,7 @@ export function createEnrollmentEngine(policy: EnrollmentPolicy) {
         // A fence established while an awaited exchange was in flight applies to
         // this intent too. The synchronous pre-exchange read cannot observe it,
         // because that fence lands during the exchange itself.
-        if (fencedKeys.has(live.request.clientKey)) return "custody-unresolved";
+        if (fence.isFenced(live.request.clientKey)) return "custody-unresolved";
         // LIVE state, not the caller's snapshot. Comparing the intent against
         // `options.context` re-proves the same values the caller already held
         // and therefore cannot observe a sign-out that happened during an
@@ -1139,7 +1396,7 @@ export function createEnrollmentEngine(policy: EnrollmentPolicy) {
       // arming route is withdrawn as unverified — it was never tested, and the
       // test that appears to cover it (a fence queued from `generationFor`)
       // does not isolate this line.
-      if (fencedKeys.has(current.request.clientKey)) return fail("custody-unresolved");
+      if (fence.isFenced(current.request.clientKey)) return fail("custody-unresolved");
 
       const binding: EnrollmentBinding = { ...current.binding, cloudSessionValid: true };
 
@@ -1198,7 +1455,7 @@ export function createEnrollmentEngine(policy: EnrollmentPolicy) {
       // its own. It is retained as defence in depth; what is proven is that the
       // fence is enforced before a commit somewhere on every path, not that
       // this particular read is the one doing it.
-      if (fencedKeys.has(current.request.clientKey)) return fail("custody-unresolved");
+      if (fence.isFenced(current.request.clientKey)) return fail("custody-unresolved");
 
       try {
         // The credential is handed to the CUSTODY ADAPTER, which seals it. It
@@ -1226,7 +1483,7 @@ export function createEnrollmentEngine(policy: EnrollmentPolicy) {
           // The reason is only reported when cleanup CONFIRMED removal. If it
           // did not, saying "cancelled" would be a lie: the credential is
           // still usable and the caller must be told custody is unresolved.
-          const cleanup = await cleanupCommittedRecord(deps, current);
+          const cleanup = await cleanupCommittedRecord(deps, current, fence);
           return cleanup === "unresolved" ? fail("custody-unresolved") : fail(afterCommit);
         }
       } catch {
@@ -1234,7 +1491,7 @@ export function createEnrollmentEngine(policy: EnrollmentPolicy) {
         // rejected. Either way a record may be on disk, so cleanup is owed and
         // the refusal is unresolved unless the readback proves removal.
         if (!writeAttempted) return fail("credential-persist-failed");
-        const cleanup = await cleanupCommittedRecord(deps, current);
+        const cleanup = await cleanupCommittedRecord(deps, current, fence);
         return cleanup === "unresolved" ? fail("custody-unresolved") : fail("credential-persist-failed");
       }
 
@@ -1248,7 +1505,7 @@ export function createEnrollmentEngine(policy: EnrollmentPolicy) {
         // about custody, and unresolved custody must stay visible. The adapter
         // seam check is a fake's convenience and cannot stand in for engine-side
         // enforcement, so this branch reports the honest reason.
-        if (fencedKeys.has(current.request.clientKey)) return fail("custody-unresolved");
+        if (fence.isFenced(current.request.clientKey)) return fail("custody-unresolved");
         return fail("credential-persist-failed");
       }
 
@@ -1263,9 +1520,9 @@ export function createEnrollmentEngine(policy: EnrollmentPolicy) {
       // is unresolved for this key REGARDLESS of which check happens to fire
       // first, so it is consulted first and again after the expiry cleanup's own
       // await — that await is precisely where a concurrent fence can land.
-      const fenced = () => fencedKeys.has(current.request.clientKey);
+      const fenced = () => fence.isFenced(current.request.clientKey);
       if (fenced()) {
-        await cleanupCommittedRecord(deps, current);
+        await cleanupCommittedRecord(deps, current, fence);
         return fail("custody-unresolved");
       }
       // The expiry branch is the last await before adoption, so the fence is
@@ -1274,7 +1531,7 @@ export function createEnrollmentEngine(policy: EnrollmentPolicy) {
       // needed — an earlier draft had one, and a mutation showed it was
       // unreachable rather than load-bearing.
       if (deps.now() >= committed.credentialExpiresAt) {
-        const cleanup = await cleanupCommittedRecord(deps, current);
+        const cleanup = await cleanupCommittedRecord(deps, current, fence);
         if (cleanup === "unresolved" || fenced()) return fail("custody-unresolved");
         return fail("credential-expired");
       }
