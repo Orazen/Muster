@@ -8,7 +8,8 @@ export const SEED_CARD_PURPOSE = "onboarding-v1";
 export const SEED_CARD_TITLE = "What do you mostly want help with?";
 export const SEED_CARD_SUBTITLE = "Pick whatever's closest; we can always expand from there.";
 export const SEED_CARD_OPTIONS = ["Work & projects", "Writing & research", "Life admin", "A bit of everything"];
-export const seedAnswerTextSchema = z.string().max(4000).refine((answer) => answer.trim().length > 0);
+// The wire contract limits UTF-16 code units; Zod's max counts Unicode code points.
+export const seedAnswerTextSchema = z.string().max(4000).refine((answer) => answer.length <= 4000 && answer.trim().length > 0);
 export const seedAnswerReceiptSchema = z.object({
   messageId: z.string().min(1), attempt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   status: z.enum(["recorded", "starting", "started", "not-started", "uncertain"]), error: z.string().optional(),
