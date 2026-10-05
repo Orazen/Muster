@@ -154,7 +154,7 @@ const driverFixtures: string[] = [];
 afterAll(() => {
   for (const dir of driverFixtures) rmSync(dir, { recursive: true, force: true });
 });
-const fixtureEnv = (override: Record<string, string>): Record<string, string> => ({
+const fixtureEnv = (override: Record<string, string>) => ({
   ...override, PATH: process.env.PATH ?? "",
 });
 const fixtureHome = (label: string): string => {
@@ -193,7 +193,8 @@ driverModes("ACP driver BYOK config files", () => {
     const home = fixtureHome("muster-acp-kimi-");
     ensureKimiInjectAlias(first, fixtureEnv({ KIMI_CODE_HOME: join(home, ".kimi-code") }));
     expect(statSync(join(home, ".kimi-code", "config.toml")).mode & 0o777).toBe(0o600);
-    expect(statSync(home).mode & 0o777 & 0o070).toBe(0);
+    // The data root the DRIVER creates must be private, not the fixture dir.
+    expect(statSync(join(home, ".kimi-code")).mode & 0o777 & 0o070).toBe(0);
   });
 
   it("creates the opencode config.json 0600", () => {
