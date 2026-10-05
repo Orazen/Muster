@@ -62,6 +62,12 @@ function readMarkerBytes(markerPath, stat) {
   }
 }
 
+/** Structural type probes without runtime `typeof` narrowing (repo lint
+ * rule): JSON.parse output only ever yields plain objects, arrays or
+ * primitives, so constructor identity is a complete discriminator here. */
+const isPlainObject = (value) => value !== null && value !== undefined && !Array.isArray(value) && value.constructor === Object;
+const isText = (value) => value !== null && value !== undefined && value.constructor === String;
+
 /** A defensive, message-only reading of the marker bytes. Exit codes never
  * depend on this succeeding: an unparseable marker is still a refusal, it
  * just says so honestly instead of naming an owner it cannot prove. */
@@ -71,21 +77,21 @@ function describeMarker(markerPath, stat) {
   if (bytes.length === 0) return " (empty marker: a claim write torn by a crash; its owner cannot be proven)";
   let record = null;
   try { record = JSON.parse(bytes.toString("utf8")); } catch { record = null; }
-  if (record === null || typeof record !== "object") {
+  if (!isPlainObject(record)) {
     return " (unreadable or corrupt marker bytes; its owner cannot be proven)";
   }
-  const pid = typeof record.pid === "number" && Number.isInteger(record.pid) && record.pid > 0 ? record.pid : null;
+  const pid = Number.isInteger(record.pid) && record.pid > 0 ? record.pid : null;
   let liveness = "";
   if (pid !== null) {
     let alive;
     try { process.kill(pid, 0); alive = true; }
-    catch (error) { alive = !(error !== null && typeof error === "object" && error.code === "ESRCH"); }
+    catch (error) { alive = error?.code !== "ESRCH"; }
     liveness = alive ? ", live" : ", owner process gone";
   }
-  const reason = typeof record.reason === "string" && record.reason.length > 0
+  const reason = isText(record.reason) && record.reason.length > 0
     ? JSON.stringify(record.reason)
     : "reason not stated";
-  const backup = record.backupPath && typeof record.backupPath === "string"
+  const backup = isText(record.backupPath)
     ? `, backup recorded at ${record.backupPath}`
     : "";
   return ` (claim${pid === null ? "" : ` by pid ${pid}${liveness}`}: ${reason}${backup})`;
@@ -95,15 +101,17 @@ function describeMarker(markerPath, stat) {
  * absent; every other outcome carries an exit code and an operator-facing
  * message. This never mutates anything and never follows symlinks. */
 export function evaluateDataDirClaim(dataDir) {
-  const markerPath = exclusiveClaimMarkerPath(dataDir);
-  if (typeof dataDir !== "string" || dataDir.trim() === "") {
-    return { clear: false, exitCode: EXIT_INDETERMINATE, outcome: "indeterminate", markerPath,
+  // Validate the argument before deriving anything from it: an undefined or
+  // non-text data directory is an indeterminate refusal, not a crash.
+  if (!isText(dataDir) || dataDir.trim() === "") {
+    return { clear: false, exitCode: EXIT_INDETERMINATE, outcome: "indeterminate", markerPath: null,
       message: "Restore-exclusivity claim check ran without a data directory; refusing is the only safe action." };
   }
+  const markerPath = exclusiveClaimMarkerPath(dataDir);
   let stat;
   try { stat = lstatSync(markerPath); }
   catch (error) {
-    if (error !== null && typeof error === "object" && error.code === "ENOENT") {
+    if (error?.code === "ENOENT") {
       return { clear: true, exitCode: EXIT_CLEAR, outcome: "clear", markerPath };
     }
     return { clear: false, exitCode: EXIT_INDETERMINATE, outcome: "indeterminate", markerPath,
@@ -130,7 +138,7 @@ function runCli(argv) {
 //   and the entry is muster, never this check — an argv/import.meta.name
 //   comparison would be trivially equal inside a single-file bundle, so the
 //   build marker is what keeps the check inert in the bundled CLI.
-if (typeof import.meta.musterCliBuild === "undefined"
+if (import.meta.musterCliBuild === undefined
   && basename(process.argv[1] ?? "") === basename(fileURLToPath(import.meta.url))) {
   process.exit(runCli(process.argv));
 }

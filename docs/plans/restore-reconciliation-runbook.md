@@ -29,9 +29,11 @@ they disagree with this document, the modules win):
    unrecoverable data loss. The marker is the only record of what a crashed
    restore was doing; it is deleted by the boot guard when deletion is
    provable, and by a human only after the evidence steps below.
-2. **Launchers refuse; they never recover.** `docker-entrypoint.sh`, the CLI
-   and the desktop parent exit (2 or 3) on any marker. Recovery belongs to the
-   server's own boot guard and, beyond it, to a human following this page.
+2. **Launchers refuse; they never recover.** `docker-entrypoint.sh` exits 2
+   and the CLI exits 1 on any marker; the desktop parent refuses via a dialog
+   and quits without a distinguished code. All three decline to start anything
+   that would write protected data. Recovery belongs to the server's own boot
+   guard and, beyond it, to a human following this page.
 3. **Preserve before touching.** Copy the marker bytes, the dev/ino identity
    of every tree, and a recursive `ls -laR` of the data directory and any
    sibling backup/staging trees to a location OUTSIDE the data directory
@@ -67,7 +69,9 @@ DATA=<your OMB_DATA_DIR>
 MARKER="$(dirname "$DATA")/.muster-restore-exclusivity.$(basename "$DATA").json"
 # Evidence bundle — copy OUTSIDE the data directory:
 cp "$MARKER" /tmp/marker-evidence.json 2>/dev/null && cat /tmp/marker-evidence.json
-stat -c 'dev=%d ino=%i mode=%a mtime=%y size=%s' "$DATA" "$MARKER"
+# Portable identity probe (works on GNU coreutils and BSD/macOS stat):
+stat -f 'dev=%d ino=%i mode=%Sp mtime=%Sm size=%z' "$DATA" "$MARKER" 2>/dev/null \
+  || stat -c 'dev=%d ino=%i mode=%a mtime=%y size=%s' "$DATA" "$MARKER"
 ls -la "$(dirname "$DATA")"          # siblings: backups, staging trees
 ls -laR "$DATA" > /tmp/tree-listing.txt 2>&1
 node -e 'const s=require("fs").lstatSync(process.argv[1]);console.log(JSON.stringify({dev:s.dev,ino:s.ino,mode:s.mode&0o777,size:s.size,mtime:s.mtime}))' "$DATA"
