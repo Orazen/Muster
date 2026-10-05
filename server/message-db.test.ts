@@ -508,3 +508,54 @@ describe("durable non-mutating transcript snapshots", () => {
   });
 
 });
+
+describe("fresh offline recovery SQLite boundary",()=>{
+  beforeEach(()=>{closeMessageDb();rmSync(DATA_DIR,{recursive:true,force:true});mkdirSync(DATA_DIR,{recursive:true});});
+  afterEach(closeMessageDb);
+  const threads=()=>[{threadId:"fresh-thread",activeLeafId:"older",messages:[msg("root","Root",{at:1,parentId:null}),msg("older","Selected",{at:2,parentId:"root"}),msg("newer","Unselected",{at:3,parentId:"root"})]}];
+  it("commits true fresh rows, original head and operation marker together without producer events",async()=>{
+    const api=await import("./message-db.ts"),hooks=await import("./sync-hooks.ts");const written=vi.spyOn(hooks,"chatWasWritten");
+    insertMessage("foreign",msg("kept","FOREIGN"));api.insertFreshRecoveryThreads("operation",threads());
+    expect(api.freshRecoveryThreadsMatch("operation",threads())).toBe(true);expect(readThreadSnapshot("fresh-thread")).toMatchObject({activeLeafId:"older",messages:[{id:"root"},{id:"older"},{id:"newer"}]});
+    expect(written).not.toHaveBeenCalled();api.compensateFreshRecoveryThreads("operation",threads());expect(readThreadSnapshot("foreign")).toMatchObject({messages:[{text:"FOREIGN"}]});
+    expect(api.recoveryThreadIds()).toEqual(["foreign"]);written.mockRestore();
+  });
+  it("rejects orphan/intents collisions, cycles and live action metadata instead of replacing rows",async()=>{
+    const api=await import("./message-db.ts");insertMessage("fresh-thread",msg("orphan","Existing orphan"));
+    expect(()=>api.insertFreshRecoveryThreads("operation",threads())).toThrow(/collision/);
+    expect(readThreadSnapshot("fresh-thread")).toMatchObject({messages:[{text:"Existing orphan"}]});
+    const loop=[{threadId:"cycle",activeLeafId:"a",messages:[msg("a","Loop",{parentId:"a"})]}];expect(()=>api.insertFreshRecoveryThreads("cycle-op",loop)).toThrow(/cycle/);
+    const live=threads();live[0].messages[1].card={title:"Authority",subtitle:"Must refuse",options:["Allow"],requestId:"SYNTHETIC-ASK"};
+    expect(()=>api.insertFreshRecoveryThreads("live-op",[{...live[0],threadId:"different"}])).toThrow(/graph/);
+  });
+  it("real SQLite abort trigger cannot leave rows or a success marker",async()=>{
+    const api=await import("./message-db.ts");api.recoveryThreadIds();const database=new DatabaseSync(join(DATA_DIR,"messages.db"));
+    database.exec("CREATE TRIGGER recovery_abort BEFORE INSERT ON messages WHEN NEW.thread_id='fresh-thread' BEGIN SELECT RAISE(ABORT,'owned-trigger'); END");
+    expect(()=>api.insertFreshRecoveryThreads("operation",threads())).toThrow(/owned-trigger/);expect(api.freshRecoveryThreadsMatch("operation",threads())).toBe(false);expect(api.recoveryThreadIds()).toEqual([]);database.close();
+  });
+  it("refuses changed rows and missing markers during compensation without deleting the newer content",async()=>{
+    const api=await import("./message-db.ts");api.insertFreshRecoveryThreads("operation",threads());updateMessage("fresh-thread",msg("older","Newer writer",{at:2,parentId:"root"}));
+    expect(()=>api.compensateFreshRecoveryThreads("operation",threads())).toThrow(/changed/);expect(readThreadSnapshot("fresh-thread")).toMatchObject({messages:[{}, {text:"Newer writer"},{}]});
+    expect(()=>api.compensateFreshRecoveryThreads("missing-operation",threads())).toThrow(/marker missing/);
+  });
+  it.each([{column:"id",value:"changed-id"},{column:"at",value:99},{column:"role",value:"bot"},{column:"kind",value:"activity"},{column:"text",value:"NEWER-COLUMN-WRITER"}])("refuses a changed actual $column column even when payload JSON is unchanged",async ({column,value})=>{
+    const api=await import("./message-db.ts");api.insertFreshRecoveryThreads("operation",threads());
+    const database=new DatabaseSync(join(DATA_DIR,"messages.db"));
+    database.prepare(`UPDATE messages SET ${column}=? WHERE thread_id='fresh-thread' AND id='root'`).run(value);
+    const before=database.prepare("SELECT * FROM messages ORDER BY rowid").all();
+    expect(api.freshRecoveryThreadsMatch("operation",threads())).toBe(false);
+    expect(()=>api.compensateFreshRecoveryThreads("operation",threads())).toThrow(/changed/);
+    expect(database.prepare("SELECT * FROM messages ORDER BY rowid").all()).toEqual(before);database.close();
+  });
+  it("reads the marker inside the compensation write transaction and preserves a replacement",async()=>{
+    const api=await import("./message-db.ts");api.insertFreshRecoveryThreads("operation",threads());
+    const database=new DatabaseSync(join(DATA_DIR,"messages.db")),original=DatabaseSync.prototype.exec;
+    let replaced=false;
+    const execute=vi.spyOn(DatabaseSync.prototype,"exec").mockImplementation(function(this:DatabaseSync,sql:string){
+      if(sql==="BEGIN IMMEDIATE"&&!replaced){replaced=true;database.prepare("UPDATE account_recovery_operations SET fingerprint=? WHERE operation_id='operation'").run("b".repeat(64));}
+      return original.call(this,sql);
+    });
+    try{expect(()=>api.compensateFreshRecoveryThreads("operation",threads())).toThrow(/changed/);expect(replaced).toBe(true);expect(database.prepare("SELECT id FROM messages WHERE thread_id='fresh-thread'").all()).toHaveLength(3);}
+    finally{execute.mockRestore();database.close();}
+  });
+});

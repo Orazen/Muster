@@ -1,6 +1,6 @@
 // Optional account-owned visible copies. Existing appData grants and the
 // hosted whole-installation restore wall remain separate and unchanged.
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { DatabaseSync } from "node:sqlite";
 import { TextDecoder } from "node:util";
@@ -10,9 +10,11 @@ import { z } from "zod";
 import { createGoogleIdTokenVerifier, type GoogleIdTokenVerifier } from "./calendar-oauth.ts";
 import { resolveFollowUpAccount, type FollowUpAccount } from "./follow-up-identity.ts";
 import { acquireVisibleAccess, VisibleAccessError, type VisibleAccessLease } from "./drive-visible-access.ts";
+import { inspectAccountRecoveryArchive } from "./drive-visible-account-archive.ts";
+import type { AccountRecoverySourceInput } from "./drive-visible-account-state.ts";
 import { ACCOUNT_PROJECTION_UNSUPPORTED } from "./drive-visible-account-bundle.ts";
-import { writeAccountVisibleBackup, VisibleBackupError } from "./drive-visible-backups.ts";
-import { readAccountVisibleSource, type AccountVisibleSourceInput } from "./drive-visible-data-source.ts";
+import { writeAccountVisibleBackup, writeAccountRecoveryBackup, VisibleBackupError } from "./drive-visible-backups.ts";
+import { readAccountVisibleSource } from "./drive-visible-data-source.ts";
 import { createGoogleVisibleDriveClient } from "./drive-visible-google-client.ts";
 import { cancelVisibleConsentState, consumeVisibleConsentState, createVisibleConsentState,
   getVisibleGrant, isVisibleGrantCurrent, revokeVisibleGrant, saveVisibleGrant } from "./drive-visible-grants.ts";
@@ -38,7 +40,7 @@ export interface VisibleDriveRouteContext {
   /** Operator-configured PUBLIC_BASE_URL, never request Host/proxy headers. */
   publicBaseUrl: string;
   google: { clientId: string; clientSecret: string } | null;
-  source(): Pick<AccountVisibleSourceInput, "store" | "plans" | "dataDir"> | null;
+  source(): Pick<AccountRecoverySourceInput, "store" | "plans" | "dataDir"> | null;
   appVersion: string;
   now?: () => number;
   /** Isolated test transport/identity ports. Production registration supplies neither. */
@@ -60,8 +62,9 @@ const settingsBody = z.object({ values: z.record(z.string().max(200),
   z.union([z.string().max(4000), z.number().finite(), z.boolean(), z.null()])) }).strict();
 const passphrase = z.string().min(8).max(4096);
 const recoveryCode = z.string().max(128).refine(code => normalizeRecoveryCode(code) !== null);
-const backupBody = z.object({ passphrase, recoveryCodes: z.array(recoveryCode).min(1).max(16).optional() }).strict();
-const restoreBody = z.object({ fileId: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/),
+const archiveFormat = z.enum(["projection-v1", "account-recovery-v1"]);
+const backupBody = z.object({ format: archiveFormat.optional(), passphrase, recoveryCodes: z.array(recoveryCode).min(1).max(16).optional() }).strict();
+const restoreBody = z.object({ format: archiveFormat.optional(), fileId: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/),
   passphrase: passphrase.optional(), recoveryCode: recoveryCode.optional() }).strict()
   .refine(body => (body.passphrase === undefined) !== (body.recoveryCode === undefined));
 
@@ -190,6 +193,39 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
     const account = currentAccount();
     if (!account) refuse(401, "session-unavailable");
     const signature = JSON.stringify(account);
+    let secret: string;
+    let protector;
+    try { secret = ctx.deploymentSecret(); protector = createVisibleRuntimeProtector(secret); }
+    catch { return refuse(503, "key-unavailable"); }
+    // Opaque freshness receipts, never incoming authority. The real signed
+    // session and current membership were checked above. Feed the private
+    // session token directly to the MAC; it never enters JSON or a reply.
+    const viewRevision = createHmac("sha256", secret).update("muster-visible-view-v1\0")
+      .update(signature).update("\0").update(pinned.sessionToken).digest("base64url");
+    const offeredView = req.headers["x-muster-visible-view"];
+    if (offeredView !== undefined) {
+      const freshness = z.string().regex(/^[A-Za-z0-9_-]{43}$/).safeParse(offeredView);
+      if (!freshness.success || freshness.data !== viewRevision) refuse(409, "view-changed");
+    }
+    const receipts = () => {
+      const ready = grantSchemaReady(db);
+      // These are protected ciphertext rows, not decrypted credentials. A
+      // refresh or a new consent changes this receipt independently of the
+      // stable session/workspace view. SELECT never initializes a schema.
+      const epoch = ready ? db.prepare("SELECT generation FROM drive_visible_grant_generations WHERE userId = ?").get(account.userId) : null;
+      const protectedGrant = ready ? db.prepare(`SELECT googleSub,accessToken,refreshToken,expiresAt,scopes,generation
+        FROM drive_visible_grants WHERE userId = ?`).get(account.userId) : null;
+      const grantRevision = createHmac("sha256", secret).update("muster-visible-grant-v1\0")
+        .update(viewRevision).update("\0").update(JSON.stringify({ epoch: epoch ?? null, grant: protectedGrant ?? null })).digest("base64url");
+      return { viewRevision, grantRevision };
+    };
+    const offeredGrant = req.headers["x-muster-visible-grant"];
+    const assertOfferedGrant = () => {
+      if (offeredGrant === undefined) return;
+      const freshness = z.string().regex(/^[A-Za-z0-9_-]{43}$/).safeParse(offeredGrant);
+      if (!freshness.success || freshness.data !== receipts().grantRevision) refuse(409, "grant-changed");
+    };
+    assertOfferedGrant();
     let signedSessionChanged = false;
     const assertCurrent = () => {
       if (req.aborted || res.destroyed) controller.abort();
@@ -208,14 +244,15 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
       }
       assertCurrent();
     };
-    let protector;
-    try { protector = createVisibleRuntimeProtector(ctx.deploymentSecret()); }
-    catch { return refuse(503, "key-unavailable"); }
+    const reply = <T>(value: T) => {
+      assertCurrent();
+      json(res, 200, { ...value, ...receipts() });
+    };
     const providerConfigured = !!ctx.google?.clientId.trim() && !!ctx.google.clientSecret.trim();
     if (action === "status") {
       const grant = grantSchemaReady(db) ? getVisibleGrant(db, account.userId, protector) : null;
       assertCurrent();
-      json(res, 200, { available: providerConfigured, connected: !!grant, scope: "account-owned",
+      reply({ available: providerConfigured, connected: !!grant, scope: "account-owned",
         restoreApply: "unsupported", settingsCaptured: readAccountSettings(db, account) !== null });
       return true;
     }
@@ -223,15 +260,16 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
     // revokes a sign-in/appData grant or deletes an existing backup.
     const offered = method === "POST" ? await body(req, controller.signal) : undefined;
     await recheck();
+    assertOfferedGrant();
     if (action === "cancel") {
       const input = parse(stateBody, offered);
       const cancelled = grantSchemaReady(db) && cancelVisibleConsentState(db, { ...pinned, state: input.state }, now());
-      json(res, 200, { cancelled, priorGrant: "preserved" }); return true;
+      reply({ cancelled, priorGrant: "preserved" }); return true;
     }
     if (action === "disconnect") {
       parse(emptyBody, offered);
       revokeVisibleGrant(db, account.userId);
-      json(res, 200, { disconnected: true, remoteRevocation: "not-requested", backups: "preserved" }); return true;
+      reply({ disconnected: true, remoteRevocation: "not-requested", backups: "preserved" }); return true;
     }
     if (action === "settings") {
       const input = parse(settingsBody, offered);
@@ -239,7 +277,7 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
       try { captured = captureAccountSettings(db, account, input.values, now()); }
       catch { return refuse(400, "invalid-settings"); }
       assertCurrent();
-      json(res, 200, { captured: true, values: captured.snapshot.values, droppedSettings: captured.droppedSettings }); return true;
+      reply({ captured: true, values: captured.snapshot.values, droppedSettings: captured.droppedSettings }); return true;
     }
     const backupInput = action === "backup" ? parse(backupBody, offered) : undefined;
     const restoreInput = action === "restore/inspect" ? parse(restoreBody, offered) : undefined;
@@ -296,7 +334,7 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
       consentState = attempt.state;
       const url = provider.authorizationUrl(attempt);
       assertCurrent();
-      json(res, 200, { authorizationUrl: url, state: attempt.state, expiresAt: attempt.expiresAt });
+      reply({ authorizationUrl: url, state: attempt.state, expiresAt: attempt.expiresAt });
       consentState = undefined; return true;
     }
     if (action === "callback") {
@@ -328,10 +366,11 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
       await recheck(); consentGuard();
       saveVisibleGrant(db, { ...verified, userId: account.userId, expectedGeneration: attempt.generation }, protector, now());
       consentState = undefined;
-      json(res, 200, { connected: true, scope: "account-owned" }); return true;
+      reply({ connected: true, scope: "account-owned" }); return true;
     }
 
     if (!grantSchemaReady(db)) refuse(409, "grant-unavailable");
+    let custodyBound = false;
     const refreshProvider: Pick<VisibleFileOAuthProvider, "refresh"> = { refresh: async offeredGrant => {
       const heldGrant = getVisibleGrant(db, account.userId, protector);
       if (!heldGrant || offeredGrant.googleSub !== heldGrant.googleSub || offeredGrant.accessToken !== heldGrant.accessToken
@@ -342,10 +381,24 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
         if (!isVisibleGrantCurrent(db, heldGrant, protector)) refuse(409, "grant-changed");
       };
       try { consentGuard(); return await provider.refresh(offeredGrant); }
-      finally { consentGuard = undefined; }
+      finally {
+        // The existing access guard verifies its captured row before the
+        // refresh CAS; after that CAS an old client receipt must not reject
+        // this operation's own newly sealed token bytes.
+        custodyBound = true;
+        consentGuard = undefined;
+      }
     } };
-    const held = await interrupted(acquireVisibleAccess({ db, protector, account, readCurrentAccount: currentAccount,
-      provider: refreshProvider, signal: controller.signal, now }), controller.signal);
+    // Bind the client-observed custody immediately before the real access
+    // lease captures its row. From there the existing lease/CAS checks fence
+    // replacement, while its own refresh may legitimately change ciphertext.
+    assertCurrent(); assertOfferedGrant();
+    const held = await interrupted(acquireVisibleAccess({ db, protector, account, readCurrentAccount: () => {
+      assertCurrent();
+      if (!custodyBound) assertOfferedGrant();
+      return currentAccount();
+    }, provider: refreshProvider, signal: controller.signal, now }), controller.signal);
+    custodyBound = true;
     await recheck(); held.assertCurrent();
     const lease: VisibleAccessLease = {
       googleSub: held.googleSub,
@@ -367,28 +420,43 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
       const input = restoreInput ?? refuse(400, "invalid-body");
       const downloaded = await client.getBinaryFile(input.fileId);
       await recheck(); lease.assertCurrent();
+      if (input.format === "account-recovery-v1") {
+        const inspected = inspectAccountRecoveryArchive({ bytes: downloaded.body, key: { custody: "user-held",
+          passphrase: input.passphrase, recoveryCode: input.recoveryCode }, resolveAccount });
+        lease.assertCurrent();
+        if (inspected.status !== "ready") refuse(422, "restore-inspection-unavailable");
+        const state = inspected.state;
+        reply({ status: "ready", format: "account-recovery-v1", scope: "account-owned", apply: "unsupported",
+          sourceDigest: state.sourceDigest, counts: { bots: state.bots.length, groups: state.groups.length,
+            threads: state.threads.length, messages: state.threads.reduce((total, thread) => total + thread.messages.length, 0),
+            plans: state.plans.length, transitions: state.transitions.length }, excludes: inspected.excludes });
+        return true;
+      }
       const inspected = inspectAccountVisibleRestore({ bytes: downloaded.body, key: { custody: "user-held",
         passphrase: input.passphrase, recoveryCode: input.recoveryCode }, resolveAccount });
       lease.assertCurrent();
       if (inspected.status !== "ready") refuse(422, "restore-inspection-unavailable");
-      json(res, 200, { status: "ready", scope: inspected.scope, apply: inspected.apply,
+      reply({ status: "ready", scope: inspected.scope, apply: inspected.apply,
         sourceDigest: inspected.source.sourceDigest, projection: inspected.projection, unsupported: inspected.unsupported }); return true;
     }
     const source = ctx.source();
     if (!source) refuse(503, "source-unavailable");
-    const input: AccountVisibleSourceInput = { ...source, account, settingsSnapshot: readAccountSettings(db, account) };
+    const input: AccountRecoverySourceInput = { ...source, account, settingsSnapshot: readAccountSettings(db, account) };
     if (action === "projection") {
       const projection = readAccountVisibleSource(input);
       lease.assertCurrent();
       if (projection.status !== "ready") refuse(503, projection.reason);
-      json(res, 200, { ...projection, restoreApply: "unsupported", unsupported: ACCOUNT_PROJECTION_UNSUPPORTED }); return true;
+      reply({ ...projection, restoreApply: "unsupported", unsupported: ACCOUNT_PROJECTION_UNSUPPORTED }); return true;
     }
     const inputKey = backupInput ?? refuse(400, "invalid-body");
-    const result = await writeAccountVisibleBackup({ lease, client, bundle: { source: input, resolveAccount,
-      appVersion: ctx.appVersion, key: { custody: "user-held", passphrase: inputKey.passphrase,
-        recovery: inputKey.recoveryCodes ? { codes: inputKey.recoveryCodes } : undefined } } });
+    const archive = { source: input, resolveAccount, appVersion: ctx.appVersion,
+      key: { custody: "user-held" as const, passphrase: inputKey.passphrase,
+        recovery: inputKey.recoveryCodes ? { codes: inputKey.recoveryCodes } : undefined } };
+    const result = inputKey.format === "account-recovery-v1"
+      ? await writeAccountRecoveryBackup({ lease, client, archive })
+      : await writeAccountVisibleBackup({ lease, client, bundle: archive });
     await recheck(); lease.assertCurrent();
-    json(res, 200, result); return true;
+    reply(result); return true;
   } catch (error) {
     if (consentState && pinned) {
       try { cancelVisibleConsentState(ctx.db(), { ...pinned, state: consentState }, now()); }

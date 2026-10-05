@@ -4,6 +4,7 @@
 // one). messages-<threadId>.json holds the folded transcript.
 import { existsSync, readFileSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { normalizeBotCursors, normalizeBotProfile } from "./bot-profile.ts";
@@ -607,6 +608,89 @@ export class Store {
     if (data === this.lastGroupsJson) return;
     writeFileAtomic(GROUPS_FILE, data);
     this.lastGroupsJson = data;
+  }
+
+  /** Offline recovery's fresh-only roster port. The caller owns a journal
+   * across these two files; this emits no events and never chooses an engine. */
+  insertFreshRecoveryRoster(input: { bots: BotRecord[]; groups: GroupRecord[] }, before: { bots: string | null; groups: string | null }): void {
+    const disk = (path: string) => existsSync(path) ? readFileSync(path, "utf8") : null;
+    const previousBots:BotRecord[]=before.bots===null?[]:JSON.parse(before.bots);
+    const previousGroups:GroupRecord[]=before.groups===null?[]:JSON.parse(before.groups);
+    const persistedBot=(bot:BotRecord)=>{const {busy:_busy,activity:_activity,...record}=bot;return record;};
+    const persistedGroup=(group:GroupRecord)=>{const {busyBotId:_busy,...record}=group;return record;};
+    // Saved JSON omits undefined optional properties. Compare the same JSON
+    // projection while retaining the exact serialized before-image check.
+    const savedProjection=(records:unknown[])=>JSON.parse(JSON.stringify(records));
+    if (disk(BOTS_FILE) !== before.bots || disk(GROUPS_FILE) !== before.groups
+      || !isDeepStrictEqual(savedProjection(this.bots.map(persistedBot)),savedProjection(previousBots.map(persistedBot)))
+      || !isDeepStrictEqual(savedProjection(this.groups.map(persistedGroup)),savedProjection(previousGroups.map(persistedGroup)))) {
+      throw new Error("Recovery roster changed");
+    }
+    const ids = new Set([...this.bots.map(bot => bot.id), ...this.groups.map(group => group.id),...this.groups.flatMap(group=>group.memberIds),...mdb.recoveryReservedBotIds()]);
+    const threads = new Set([...this.bots.flatMap(bot => [bot.threadId, ...(bot.tasks ?? []).map(task => task.threadId)]), ...this.groups.map(group => group.threadId)]);
+    for (const record of [...input.bots, ...input.groups]) {
+      if (!/^[\w-]{1,200}$/.test(record.id) || !/^[\w-]{1,200}$/.test(record.threadId) || !record.ownerId
+        || ids.has(record.id) || threads.has(record.threadId)) throw new Error("Recovery roster collision");
+      ids.add(record.id); threads.add(record.threadId);
+    }
+    for (const bot of input.bots) {
+      if (!bot.modelSelection.instanceId || !bot.modelSelection.model || bot.computer !== "off" || bot.browser !== false || bot.composio !== false
+        || bot.autoApprove !== false || bot.alwaysAllow?.length || bot.chiefOfStaff || bot.approvePeerComms || bot.speakReplies
+        || bot.cwd || Object.keys(bot.resumeCursors).length || bot.tasks?.some(task => task.cwd || task.lastInstanceId || Object.keys(task.resumeCursors ?? {}).length)) throw new Error("Recovery bot is not inert");
+      const tasks=bot.tasks??[];
+      if(!tasks.some(task=>task.threadId===bot.threadId) || new Set(tasks.map(task=>task.threadId)).size!==tasks.length)throw new Error("Recovery task binding invalid");
+      for(const task of tasks) {
+        if(!/^[\w-]{1,200}$/.test(task.threadId))throw new Error("Recovery task binding invalid");
+        if(task.threadId===bot.threadId)continue;
+        if(threads.has(task.threadId))throw new Error("Recovery task collision");threads.add(task.threadId);
+      }
+    }
+    const members = new Set(input.bots.map(bot => bot.id));
+    for (const group of input.groups) {
+      if (group.cwd || group.pinnedCwd || group.memberIds.some(id => !members.has(id) || input.bots.find(bot=>bot.id===id)?.ownerId!==group.ownerId)
+        || (group.defaultResponder.kind === "member" && !group.memberIds.includes(group.defaultResponder.botId))) throw new Error("Recovery group member unavailable");
+    }
+    const oldBots = this.bots, oldGroups = this.groups;
+    try {
+      this.bots = [...this.bots, ...structuredClone(input.bots)];
+      this.groups = [...this.groups, ...structuredClone(input.groups)];
+      // Preserve prior saved records verbatim; boot-derived transient cache
+      // properties must not rewrite another account while appending this one.
+      writeFileAtomic(BOTS_FILE,JSON.stringify([...previousBots,...input.bots],null,2));
+      writeFileAtomic(GROUPS_FILE,JSON.stringify([...previousGroups,...input.groups.map(persistedGroup)],null,2));
+      this.lastBotsJson=undefined;this.lastGroupsJson=undefined;
+    } catch (error) {
+      this.bots = oldBots; this.groups = oldGroups;
+      this.lastBotsJson = undefined; this.lastGroupsJson = undefined;
+      throw error;
+    }
+  }
+
+  /** After exact journal compensation, discard only imported caches. This
+   * changes no disk bytes, publishes nothing and runs no boot migrations. */
+  recoveryRosterMatches(before: { bots: BotRecord[]; groups: GroupRecord[] }, after: { bots: BotRecord[]; groups: GroupRecord[] }): boolean {
+    return (isDeepStrictEqual(this.bots,before.bots) || isDeepStrictEqual(this.bots,after.bots))
+      && (isDeepStrictEqual(this.groups,before.groups) || isDeepStrictEqual(this.groups,after.groups));
+  }
+
+  /** Inspect existing caches only: loading a cold thread here could hide a
+   * newer best-effort message or manufacture a postimage from durable SQL. */
+  recoveryThreadCachesMatch(expected: mdb.FreshRecoveryThread[], allowBefore = false): boolean {
+    return expected.every(thread=>{
+      const cached=this.threads.get(thread.threadId);
+      if(!cached)return true;
+      if(cached.pendingInserts.size)return false;
+      if(allowBefore && cached.messages.length===0 && cached.activeLeafId===null)return true;
+      return isDeepStrictEqual(cached.messages,thread.messages)
+        && cached.activeLeafId===(thread.activeLeafId??thread.messages.at(-1)?.id??null);
+    });
+  }
+
+  reloadCompensatedRecoveryRoster(before: { bots: BotRecord[]; groups: GroupRecord[] }, after: { bots: BotRecord[]; groups: GroupRecord[] }, threads: mdb.FreshRecoveryThread[]): void {
+    if(!this.recoveryRosterMatches(before,after) || !this.recoveryThreadCachesMatch(threads,true))throw new Error("Recovery roster or thread cache changed");
+    this.bots = structuredClone(before.bots); this.groups = structuredClone(before.groups);
+    for (const thread of threads) this.threads.delete(thread.threadId);
+    this.lastBotsJson = undefined; this.lastGroupsJson = undefined;
   }
 
   // ── groups ────────────────────────────────────────────────────────────

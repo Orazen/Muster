@@ -892,3 +892,61 @@ describe("Store durable transcript snapshots", () => {
     expect(store.snapshotThread(bot.threadId)).toEqual({ status: "unavailable", reason: "source-unavailable" });
   });
 });
+
+describe("fresh offline recovery roster",()=>{
+  beforeEach(()=>{messageDb.closeMessageDb();rmSync(DATA_DIR,{recursive:true,force:true});});
+  function fixture(){
+    const store=new Store(selection),existing=store.createBot({ownerId:"foreign"},{seedMessages:false});
+    const before={bots:readFileSync(join(DATA_DIR,"bots.json"),"utf8"),groups:null};
+    const bot:BotRecord={...structuredClone(existing),id:"fresh-bot",ownerId:"current",threadId:"fresh-thread",tasks:[{threadId:"fresh-thread",title:"Recovered",createdAt:1,resumeCursors:{}}],
+      modelSelection:{instanceId:"fixtureApi:current",model:"explicit-model"},resumeCursors:{},computer:"off",browser:false,composio:false,autoApprove:false,alwaysAllow:[],chiefOfStaff:false,approvePeerComms:false,speakReplies:false};
+    const group={id:"fresh-group",ownerId:"current",threadId:"fresh-room-thread",name:"Recovered room",memberIds:[bot.id],defaultResponder:{kind:"member" as const,botId:bot.id},bulletin:"Preserved",unread:false,createdAt:1};
+    return {store,existing,before,bot,group};
+  }
+  it("keeps foreign records exactly and inserts fresh IDs without greeting, fallback or event",()=>{
+    const f=fixture(),events=vi.fn();f.store.onChange(events);f.store.insertFreshRecoveryRoster({bots:[f.bot],groups:[f.group]},f.before);
+    expect(f.store.bots[0]).toEqual(f.existing);expect(f.store.bots[1]).toEqual(f.bot);expect(f.store.groups[0]).toEqual(f.group);
+    expect(f.store.messagesFor(f.bot.threadId)).toEqual([]);expect(events).not.toHaveBeenCalled();
+  });
+  it("refuses collision or live grants before touching either roster file",()=>{
+    const f=fixture();expect(()=>f.store.insertFreshRecoveryRoster({bots:[{...f.bot,id:f.existing.id}],groups:[]},f.before)).toThrow(/collision/);
+    expect(()=>f.store.insertFreshRecoveryRoster({bots:[{...f.bot,composio:true}],groups:[]},f.before)).toThrow(/inert/);
+    expect(readFileSync(join(DATA_DIR,"bots.json"),"utf8")).toBe(f.before.bots);
+  });
+  it("requires the exact current file before-images and does not hide another writer",()=>{
+    const f=fixture();const next=f.before.bots+"\n";writeFileSync(join(DATA_DIR,"bots.json"),next);
+    expect(()=>f.store.insertFreshRecoveryRoster({bots:[f.bot],groups:[f.group]},f.before)).toThrow(/changed/);expect(readFileSync(join(DATA_DIR,"bots.json"),"utf8")).toBe(next);
+  });
+  it("allows absent JSON optionals but refuses a substantive unsaved roster change",()=>{
+    const f=fixture(),name=f.existing.name;
+    f.existing.name="Unsaved replacement";
+    expect(()=>f.store.insertFreshRecoveryRoster({bots:[f.bot],groups:[f.group]},f.before)).toThrow(/changed/);
+    expect(readFileSync(join(DATA_DIR,"bots.json"),"utf8")).toBe(f.before.bots);
+    f.existing.name=name;f.existing.busy=false;f.existing.activity="idle";
+    f.store.insertFreshRecoveryRoster({bots:[f.bot],groups:[f.group]},f.before);
+    expect(JSON.parse(readFileSync(join(DATA_DIR,"bots.json"),"utf8"))[0]).toEqual(JSON.parse(f.before.bots)[0]);
+  });
+  it("does not reset a newer cache during compensation",()=>{
+    const f=fixture(),before={bots:structuredClone(f.store.bots),groups:structuredClone(f.store.groups)};
+    f.store.insertFreshRecoveryRoster({bots:[f.bot],groups:[f.group]},f.before);
+    const after={bots:structuredClone(f.store.bots),groups:structuredClone(f.store.groups)};
+    f.store.bot(f.bot.id)!.autoApprove=true;
+    expect(()=>f.store.reloadCompensatedRecoveryRoster(before,after,[{threadId:f.bot.threadId,messages:[],activeLeafId:null}])).toThrow(/cache changed/);
+    expect(f.store.bot(f.bot.id)!.autoApprove).toBe(true);expect(f.store.bots).toHaveLength(2);
+  });
+  it("checks cold and exact imported thread caches without loading SQL or clearing a newer public message",()=>{
+    const f=fixture(),threads=[{threadId:f.bot.threadId,messages:[{id:"restored-message",at:1,role:"user" as const,kind:"text" as const,text:"Recovered",parentId:null}],activeLeafId:"restored-message"}];
+    const read=vi.spyOn(messageDb,"readThread");
+    expect(f.store.recoveryThreadCachesMatch(threads)).toBe(true);expect(read).not.toHaveBeenCalled();
+    messageDb.insertFreshRecoveryThreads("store-cache-fixture",threads);
+    const before={bots:structuredClone(f.store.bots),groups:structuredClone(f.store.groups)};
+    f.store.insertFreshRecoveryRoster({bots:[f.bot],groups:[f.group]},f.before);
+    const after={bots:structuredClone(f.store.bots),groups:structuredClone(f.store.groups)};
+    f.store.messagesFor(f.bot.threadId);expect(f.store.recoveryThreadCachesMatch(threads)).toBe(true);
+    f.store.messagesFor(f.bot.threadId)[0]!.text="Newer mutable public transcript";
+    expect(f.store.recoveryThreadCachesMatch(threads,true)).toBe(false);
+    expect(()=>f.store.reloadCompensatedRecoveryRoster(before,after,threads)).toThrow(/cache changed/);
+    expect(f.store.messagesFor(f.bot.threadId)[0]!.text).toBe("Newer mutable public transcript");
+    expect(f.store.bots).toHaveLength(2);read.mockRestore();
+  });
+});
