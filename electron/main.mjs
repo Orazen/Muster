@@ -233,6 +233,32 @@ async function saveSecureCredentials(credentials) {
   fs.renameSync(temporary, CREDENTIALS_FILE);
 }
 
+// Launcher-side refusal for a data directory carrying a restore-exclusivity
+// claim marker (server/data-dir-exclusivity.ts). This is an inline mirror of
+// scripts/data-dir-claim-check.mjs's rule — the marker path computed exactly
+// as exclusiveClaimPath computes it, ANY presence refused, symlinks never
+// followed, nothing ever recovered — because the packaged app does not ship
+// the scripts/ tree (electron-builder packs only electron/**), so importing
+// the script would work in dev and break every packaged launch. It guards the
+// one parent-side write into the data directory (secureComposioConfig's
+// config.json migration below); the server child's own boot guard remains the
+// recovery owner. See docs/plans/restore-reconciliation-runbook.md.
+function assertNoRestoreExclusivityClaim(dataDir) {
+  const root = path.resolve(dataDir);
+  const marker = path.join(path.dirname(root), `.muster-restore-exclusivity.${path.basename(root)}.json`);
+  let stat;
+  try {
+    stat = fs.lstatSync(marker);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw new Error(`Restore-exclusivity claim check could not inspect ${marker} (${error?.code ?? error}); see docs/plans/restore-reconciliation-runbook.md.`);
+  }
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(`${marker} exists but is ${stat.isSymbolicLink() ? "a symbolic link" : "not a plain file"}; reconcile it manually before starting Muster.`);
+  }
+  throw new Error(`A restore-exclusivity claim exists at ${marker}; Muster must not start until it is reconciled manually (see docs/plans/restore-reconciliation-runbook.md).`);
+}
+
 async function secureComposioConfig() {
   const dataDir = process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".muster");
   const configPath = path.join(dataDir, "config.json");
@@ -1026,6 +1052,16 @@ app.whenReady().then(async () => {
     return;
   }
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
+  // Never write into a tree an exclusive restore owns: the config.json
+  // migration below is the parent's one protected write, so refuse before it.
+  try {
+    assertNoRestoreExclusivityClaim(process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".muster"));
+  } catch (error) {
+    slog(`restore-exclusivity refusal: ${error?.message ?? error}`);
+    dialog.showErrorBox("Restore in progress", `${error?.message ?? error}\n\nMuster will not start.`);
+    app.quit();
+    return;
+  }
   if (app.isPackaged) {
     secureCredentials = await loadSecureCredentials();
     await secureComposioConfig();
