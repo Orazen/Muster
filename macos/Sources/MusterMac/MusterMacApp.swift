@@ -412,6 +412,10 @@ struct LiveConversationView: View {
         live.fleet.bots.first { $0.threadId == live.selectedThreadId }
     }
 
+    private var selectedRoom: Room? {
+        live.fleet.groups.first { $0.threadId == live.selectedThreadId }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -427,6 +431,9 @@ struct LiveConversationView: View {
                         .padding(.bottom, 8)
                 }
                 LiveComposer(bot: bot)
+            } else if let room = selectedRoom {
+                LiveTranscriptView(threadId: room.threadId, isRoom: true)
+                roomComposer
             } else {
                 ContentUnavailableView("No conversation selected", systemImage: "bubble.left.and.text.bubble.right")
             }
@@ -444,6 +451,16 @@ struct LiveConversationView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            } else if let room = selectedRoom {
+                Image(systemName: "person.3")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(room.name).font(.headline)
+                    Text("Room")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
             Text("Muster")
@@ -454,11 +471,45 @@ struct LiveConversationView: View {
         .frame(minHeight: 56)
         .background(MusterAppearance.canvas)
     }
+
+    // The native transport currently sends to bots only. Room selection must
+    // display its own transcript without forwarding a draft to a member bot.
+    private var roomComposer: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            TextField("Room messaging is unavailable on this Mac", text: .constant(""), axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(1...5)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            Button {} label: {
+                Image(systemName: "arrow.up")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(MusterAppearance.accent, in: RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Send room message unavailable")
+        }
+        .disabled(true)
+        .padding(6)
+        .background(MusterAppearance.panel, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(MusterAppearance.border))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(MusterAppearance.canvas)
+    }
 }
 
 struct LiveTranscriptView: View {
     @EnvironmentObject private var live: LiveSessionModel
     let threadId: String
+    let isRoom: Bool
+
+    init(threadId: String, isRoom: Bool = false) {
+        self.threadId = threadId
+        self.isRoom = isRoom
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -469,8 +520,9 @@ struct LiveTranscriptView: View {
                         VStack(spacing: 8) {
                             FlowerView(colorName: nil, busy: false)
                                 .frame(width: 56, height: 56)
-                            Text("Say hello").font(.headline)
-                            Text("This teammate has no conversation yet.").foregroundStyle(.secondary)
+                            Text(isRoom ? "Room conversation" : "Say hello").font(.headline)
+                            Text(isRoom ? "No messages in this room yet." : "This teammate has no conversation yet.")
+                                .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)
