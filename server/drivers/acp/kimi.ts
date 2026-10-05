@@ -6,9 +6,11 @@
 // loadSession:true (session/load resume works), mcpCapabilities http+sse,
 // and a full session/new → session/prompt roundtrip streams
 // agent_thought_chunk + agent_message_chunk and settles with end_turn.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+import { writeCredentialFile } from "./credential-write.ts";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { decodeInjectId, hostApiKey, LOCAL_HOSTS, localHost, mergeLocalInject } from "../local-inject.ts";
@@ -64,7 +66,7 @@ export function ensureKimiInjectAlias(
 
   const alias = `${inject.host}/${inject.model.replace(/\//g, "-")}`;
   const dataRoot = kimiDataRoot(env);
-  mkdirSync(dataRoot, { recursive: true });
+  mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
   const path = join(dataRoot, "config.toml");
   let text = "";
   try {
@@ -94,7 +96,7 @@ export function ensureKimiInjectAlias(
   }
   if (blocks.length) {
     const prefix = text && !text.endsWith("\n") ? `${text}\n\n` : text ? `${text}\n` : "";
-    writeFileSync(path, `${prefix}${blocks.join("\n")}`);
+    writeCredentialFile(path, `${prefix}${blocks.join("\n")}`);
   }
   return alias;
 }

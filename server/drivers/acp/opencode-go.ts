@@ -1,10 +1,11 @@
 // OpenCode Go subscription/API product through the maintained OpenCode CLI's
 // ACP stdio interface. The generic protocol runtime lives in core.ts.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
+import { writeCredentialFile } from "./credential-write.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import { parseJson, type JsonObject, type JsonValue } from "../../schema.ts";
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
@@ -138,7 +139,7 @@ export function ensureOpenCodeInjectModel(
 
   const native = `${inject.host}/${inject.model}`;
   const dir = opencodeConfigDir(env);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const path = join(dir, "opencode.json");
   const storedConfig = existsSync(path)
     ? parseJsonRecord(readFileSync(path, "utf8"))
@@ -167,7 +168,7 @@ export function ensureOpenCodeInjectModel(
     models,
   };
   config.provider = providers;
-  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+  writeCredentialFile(path, `${JSON.stringify(config, null, 2)}\n`);
   return native;
 }
 

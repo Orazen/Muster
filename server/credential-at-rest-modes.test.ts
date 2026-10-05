@@ -25,10 +25,16 @@
 //
 // POSIX modes only: the Windows runs skip, exactly like the Secure-cookie
 // suite does, since the chmod catch in auth.ts already documents that story.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { encodeInjectId } from "./drivers/local-inject.ts";
+import { ensureDroidInjectModel } from "./drivers/acp/droid.ts";
+import { ensureGrokInjectSlug } from "./drivers/acp/grok.ts";
+import { ensureKimiInjectAlias } from "./drivers/acp/kimi.ts";
+import { ensureOpenCodeInjectModel } from "./drivers/acp/opencode-go.ts";
+import { ensureHermesInjectProvider } from "./drivers/acp/hermes.ts";
 
 const T0 = 1_700_000_000_000;
 const posixOnly = describe.skipIf(process.platform === "win32");
@@ -116,5 +122,89 @@ posixOnly("credential files at rest", () => {
       process.env = saved;
       vi.resetModules();
     }
+  });
+
+  it("repairs a legacy auth.secret left broad by an older build", async () => {
+    // The review's P2: the early-return path never chmod'd, so a file an
+    // older build left at 0644 stayed broad forever on upgraded installs.
+    const saved = { ...process.env };
+    try {
+      delete process.env.OMB_HOST;
+      delete process.env.OMB_PUBLIC_HOST;
+      delete process.env.BETTER_AUTH_SECRET;
+      process.env.OMB_DATA_DIR = dataDir;
+      chmodSync(join(dataDir, "auth.secret"), 0o644);
+      vi.resetModules();
+      const auth = await import("./auth.ts");
+      const secret = auth.deploymentSigningSecret();
+      expect(secret).toBe(readFileSync(join(dataDir, "auth.secret"), "utf8").trim());
+      expect(modeOf("auth.secret")).toBe(0o600);
+    } finally {
+      process.env = saved;
+      vi.resetModules();
+    }
+  });
+});
+
+// The five ACP BYOK drivers write real provider API keys into each driver's
+// own config file through the shared discipline in
+// server/drivers/acp/credential-write.ts: first creation lands 0600 and a
+// pre-existing broad file tightens. These drive the real upsert entries.
+const driverFixtures: string[] = [];
+afterAll(() => {
+  for (const dir of driverFixtures) rmSync(dir, { recursive: true, force: true });
+});
+const fixtureEnv = (override: Record<string, string>): Record<string, string> => ({
+  ...override, PATH: process.env.PATH ?? "",
+});
+const fixtureHome = (label: string): string => {
+  const home = mkdtempSync(join(tmpdir(), label));
+  driverFixtures.push(home);
+  return home;
+};
+const driverModes = describe.skipIf(process.platform === "win32");
+
+driverModes("ACP driver BYOK config files", () => {
+  const host = "omlx";
+  const first = encodeInjectId(host, "fixture-model-a");
+  const second = encodeInjectId(host, "fixture-model-b");
+
+  it("creates the droid settings.json 0600 and tightens a broad legacy file", () => {
+    const home = fixtureHome("muster-acp-droid-");
+    ensureDroidInjectModel(first, fixtureEnv({ FACTORY_HOME_OVERRIDE: home }));
+    const file = join(home, ".factory", "settings.json");
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    chmodSync(file, 0o644);
+    expect(ensureDroidInjectModel(second, fixtureEnv({ FACTORY_HOME_OVERRIDE: home }))).not.toBe(first);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(readFileSync(file, "utf8")).toContain("fixture-model-b");
+  });
+
+  it("creates the grok config.toml 0600", () => {
+    const home = fixtureHome("muster-acp-grok-");
+    // The grok driver writes into an existing ~/.grok (its CLI creates it);
+    // mirror that precondition instead of changing driver semantics.
+    mkdirSync(join(home, ".grok"), { recursive: true });
+    ensureGrokInjectSlug(first, fixtureEnv({ GROK_HOME: join(home, ".grok") }));
+    expect(statSync(join(home, ".grok", "config.toml")).mode & 0o777).toBe(0o600);
+  });
+
+  it("creates the kimi config.toml 0600 with a private data root", () => {
+    const home = fixtureHome("muster-acp-kimi-");
+    ensureKimiInjectAlias(first, fixtureEnv({ KIMI_CODE_HOME: join(home, ".kimi-code") }));
+    expect(statSync(join(home, ".kimi-code", "config.toml")).mode & 0o777).toBe(0o600);
+    expect(statSync(home).mode & 0o777 & 0o070).toBe(0);
+  });
+
+  it("creates the opencode config.json 0600", () => {
+    const home = fixtureHome("muster-acp-opencode-");
+    ensureOpenCodeInjectModel(first, fixtureEnv({ XDG_CONFIG_HOME: join(home, ".config"), HOME: home }));
+    expect(statSync(join(home, ".config", "opencode", "opencode.json")).mode & 0o777).toBe(0o600);
+  });
+
+  it("creates the hermes config.yaml 0600", () => {
+    const home = fixtureHome("muster-acp-hermes-");
+    ensureHermesInjectProvider(first, fixtureEnv({ HERMES_HOME: join(home, ".hermes") }));
+    expect(statSync(join(home, ".hermes", "config.yaml")).mode & 0o777).toBe(0o600);
   });
 });
