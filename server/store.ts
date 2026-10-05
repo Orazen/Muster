@@ -739,6 +739,39 @@ export class Store {
     return this.thread(threadId).messages;
   }
 
+  /** Non-mutating, complete durable reader for backup/projection. The live
+   * cache may contain best-effort writes: those are unavailable, not a backup.
+   * Legacy parent normalization is applied to this defensive copy only.
+   */
+  snapshotThread(threadId: string): mdb.ThreadSnapshot {
+    if (this.threads.get(threadId)?.pendingInserts.size) return { status: "unavailable", reason: "pending-writes" };
+    const snapshot = mdb.readThreadSnapshot(threadId);
+    if (snapshot.status !== "ready") return snapshot;
+    const byId = new Map<string, Message>();
+    let previous: string | null = null;
+    for (const message of snapshot.messages) {
+      if (byId.has(message.id)) return { status: "unavailable", reason: "invalid-data" };
+      if (message.parentId === undefined) message.parentId = previous;
+      previous = message.id;
+      byId.set(message.id, message);
+    }
+    const proven = new Set<string>();
+    for (const message of snapshot.messages) {
+      const visiting = new Set<string>();
+      let current: string | null = message.id;
+      while (current !== null && !proven.has(current)) {
+        const node = byId.get(current);
+        if (!node || visiting.has(current)) return { status: "unavailable", reason: "invalid-data" };
+        visiting.add(current);
+        current = node.parentId ?? null;
+      }
+      for (const id of visiting) proven.add(id);
+    }
+    const activeLeafId = snapshot.activeLeafId ?? snapshot.messages.at(-1)?.id ?? null;
+    if (activeLeafId !== null && !byId.has(activeLeafId)) return { status: "unavailable", reason: "invalid-data" };
+    return { ...snapshot, activeLeafId };
+  }
+
   activeLeaf(threadId: string): string | null {
     return this.thread(threadId).activeLeafId;
   }

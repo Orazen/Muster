@@ -129,11 +129,13 @@ export type VisibleErrorCode =
   | "schema_version";
 
 export class DriveVisibleError extends Error {
+  readonly code: VisibleErrorCode;
   constructor(
     message: string,
-    readonly code: VisibleErrorCode,
+    code: VisibleErrorCode,
   ) {
     super(message);
+    this.code = code;
     this.name = "DriveVisibleError";
   }
 }
@@ -147,8 +149,10 @@ export class DriveVisibleError extends Error {
 const PERSONA_ID = /^\S(?:.*\S)?$/;
 
 export class DuplicatePersonaError extends DriveVisibleError {
-  constructor(readonly botId: string) {
+  readonly botId: string;
+  constructor(botId: string) {
     super(`soul.md lists ${botId} more than once; two entries for one bot would silently overwrite each other`, "corrupt");
+    this.botId = botId;
     this.name = "DuplicatePersonaError";
   }
 }
@@ -973,14 +977,20 @@ export interface WriteOutcome {
 export type NonErrorRejection = JsonValue;
 
 export class PartialWriteError extends DriveVisibleError {
+  readonly wrote: readonly string[];
+  readonly cause: Error;
+  readonly thrown?: NonErrorRejection;
   constructor(
     message: string,
-    readonly wrote: readonly string[],
-    readonly cause: Error,
+    wrote: readonly string[],
+    cause: Error,
     /** The original thrown value, kept verbatim when it was not an Error. */
-    readonly thrown?: NonErrorRejection,
+    thrown?: NonErrorRejection,
   ) {
     super(message, cause instanceof DriveVisibleError ? cause.code : "transport_error");
+    this.wrote = wrote;
+    this.cause = cause;
+    this.thrown = thrown;
     this.name = "PartialWriteError";
   }
 }
