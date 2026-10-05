@@ -9581,3 +9581,81 @@ Two self-inflicted errors worth recording, both caught by running rather than re
 2. The next assertion checked for the env var's name inside `bundle-server.mjs`, which went stale the moment the guard moved into `build-identity.mjs`. It now asserts the bundle *calls* the guard, which is the property that matters.
 
 Full-suite note for this entry: in my sandbox the run reported 2 failures, both environmental and neither touching the changed files. `electron/cli-runtime.test.mjs` fails with a `node:net` `setTypeOfService` error and is a PRE-EXISTING flake — reproduced on a completely clean tree, where run 1 failed and run 2 passed. `server/session-persistence-harness.test.ts` fails with `kill EPERM` because the sandbox cannot signal a process it spawned. CI is the arbiter for the tree-wide number, and the commit is not pushed as green on my evidence alone.
+
+
+## Owner-directed consolidation — 2026-10-05: reviewed source integrated; external gates OPEN
+
+#68→#69→#70→#71→#72→#73→#74→#75 merged normally. Source main
+`990c3d02d233070223c91b251e68fdd489daadff` equals final candidate
+`12125b2f615ad28a0f8633e999e022be7873cbc3` at tested tree
+`468295422cc6413208a94d391546aa68597e8f36`. Shared checkout/historical records
+preserved; no force push, admin override, branch deletion or release action.
+
+Latest accepted full `pnpm test`:500 files/8231 passed/8 skipped/0 failed, exit0;
+native13/broker22/updater21/lifecycle14/packaged14 also exit0 (84 auxiliary checks).
+This adds7 files/+167 passing to #74's493/8064 baseline, skips unchanged.
+Typecheck/e2e-typecheck/lint/Vite build exit0; existing Telegram warning remains.
+Manifest SHA2566489560e0b930af430b9db75f0425baf69ebcfcc8bd698a6a276286b62989fd6;
+full gate SHA2563679a97580fc46cf64330026fb3f08b89c4dce23ba82f024cd44c96410e8a754.
+Fresh non-author committed-head ACCEPT receipt
+8a7ad4389901a76e78c5625763b23cdc782777ab38eac27219ed174abf8e1a1d:
+29 owned files/36 dependencies, blocking0/optional0; no unchanged tests repeated.
+
+Drive includes runtime key custody, signed-account readers, real parser round trips,
+separate optional consent, immutable encrypted projection/rich copies, additive
+offline journaled import, early Node startup refusal and optional Backups UI.
+Imported history is inert. Allowlisted archive excludes credentials/grants/attachments/
+arbitrary files and other unclaimed data; no complete user-data restore is claimed.
+Existing appData/sessions/layout preserved. No live HTTP apply or proven host-wide
+exclusion of old runtimes/direct JSON writers; Docker pre-Node/Electron remain
+separate boundaries. JS hooks/cooperative locks are not OS isolation.
+
+Final review reproduced two P2s after component acceptance: same-user session
+replacement stuck consent controls, and compensation erased a newer volatile
+imported-thread message. Original failures retained. Corrective successors passed
+writer223/223 including15 owned SIGKILL/restart cases, startup37 distinct and10/10
+actual Chrome/signed synthetic-backend journeys with mounted AuthProvider replacement;
+no skip/retry/flaky pass. All10 backends/20 ports/browser contexts cleaned. Popup
+cross-origin manual close/expiry fallback remains explicit; no real Google outcome.
+
+Android#71 focused577/577; Expo52/RN0.76.7. Fresh offline debug APK/AAB489 Gradle
+tasks/692 modules; APK7519354f18cc7faadf0eb3baf9fc88641928975f13dfdcae58fc0874089ff993,
+AABd575d27f47f7ccab284e1bbf2b9b82f60bf348fb38c369f1cafac8aea191f3ba,
+Hermes802c98dac8afa072186b5f8300483a38e80a08ac2cc84c547d0c530651246568.
+Owned API34 ARM64 emulator17/17 observed paired messages/approvals/restart/unpair/
+reconnect scenarios; cleanup complete. Debug/Metro availability is not standalone,
+physical, production signing or upgrade acceptance. Alerts73/74 OPEN/vulnerable
+paths remain; local guards are mitigation, not upstream patches. Mac#72 Swift133/133,
+ARM/Intel source compile/owned renders passed; trust/installed/upgrade OPEN.
+Earlier Linux native13/Drive188 applies to earlier repair source, not final GUI/install.
+
+PR75 CI37349858910:12 failed/1 skipped/zero executed steps, billing/spending-limit
+no-start annotations; TestSprite separately No tests detected. Priorff2453 GET-only
+served15 HTTP200/12 referenced matching hashes/sizes/attestationfalse does not prove
+final-source rollout or failed-autodeploy causation. Final-main hosted/GET inspection
+is a separate subsequent receipt; local acceptance is not hosted execution.
+
+Next owners and acceptance:
+
+- Nova/backend and OpenCode: separately claim actual host-exclusive pre-import
+  authority/lifecycle and W2 cloud subject/issuer/callback/current producer with
+  protected generation-conditional native custody/persisted restart fence. Distinct
+  counters/newer-winner cleanup preserved; production enrollment remains off.
+- Authorized Google QA: real consent/re-consent, remote revoke, reconnect and
+  fresh-device restored-content/rollback outcomes on an authorized account/device.
+- Authorized platform QA/release owner: isolated installed/upgrade, physical-device,
+  Windows/Linux GUI and Mac signing/notary/Gatekeeper outcomes; no release implied.
+- Repo billing administrator/Nova: restore Actions eligibility; genuine exact-main
+  CI/authorized autodeploy and served GET; actual TestSprite discovery/target.
+- Freebuff/Android SDK owner: compatible advisory removal/replacement or verified
+  upstream remediation; coherent coordinated SDK acceptance if needed.
+- Tharun/consented QA: five actual testers on three distinct dates (15 tester-days)
+  and provider/model/allowance/reset/global-budget/funding decisions.
+- Astra: register/receipt completion; audit2026-10-06 09:00 Europe/Rome bound to
+  source990c3d02 above and successor deltas/unresolved handoffs once via existing
+  coordinator; no duplicate schedule or unchanged test/artifact reruns.
+
+Canonical https://github.com/Orazen/Muster/pull/38#issuecomment-5969823410.
+Original31 branch audit23 integrated/8 superseded-rejected/0 valid missing patches,
+including squash/content checks. Preserve #57/#58/#66 and old branches. An empty
+PR queue does not establish complete MVP acceptance.

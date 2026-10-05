@@ -1,3 +1,116 @@
+### Status of record — 5 October 2026 (owner-directed consolidation)
+
+This checkpoint supersedes the dated historical statuses below. Source integration,
+local checks, hosted checks, served output, installed apps and physical devices are
+separate evidence. Existing sessions/layout/appData backups remain preserved.
+
+**Integrated source:** #68→#69→#70→#71→#72→#73→#74→#75 merged normally.
+Source main `990c3d02d233070223c91b251e68fdd489daadff` and final candidate
+`12125b2f615ad28a0f8633e999e022be7873cbc3` share tested tree
+`468295422cc6413208a94d391546aa68597e8f36`.
+The latest full local `pnpm test` exited 0: **500 files / 8,231 passed / 8 skipped /
+0 failed**, plus native database13, broker22, updater21, lifecycle14 and packaged
+server14 (84 auxiliary checks). This adds7 files/+167 passing to #74's493/8064
+baseline; skips unchanged. Types, e2e types, lint and Vite build exited0; the untouched
+Telegram optional-chaining warning remains. Non-author consolidated review and
+committed-head rebind accepted29 changed files/36 dependencies, blocking0/optional0.
+Review receipt SHA2568a7ad4389901a76e78c5625763b23cdc782777ab38eac27219ed174abf8e1a1d.
+No hosted pass or scanner completeness claim follows.
+
+Drive now has optional dedicated `drive.file` consent, deployment-key-derived
+credential protection, live signed session/account membership fences, explicit
+settings capture, durable account-scoped readers, bounded fixed-endpoint Google
+transport, immutable encrypted account projection copies and inert restore
+inspection. The optional Backups card supports encrypted account copies and inert
+inspection; the producer/parser round trip requires the real parser. Existing
+Google sign-in/appData and hosted whole-install backup denial remain intact.
+The rich archive covers allowlisted roster/groups/conversations/selected heads/tasks/
+current memory/preferences; credentials, grants, attachments, arbitrary files and
+other unclaimed data remain excluded. No live HTTP apply or existing-installation
+full restore writer is exposed. Actual Google OAuth, remote revocation, reconnect and fresh-device
+restore have not been executed. Explicit `disconnect` is local grant revocation;
+it does not claim remote Google revocation or delete backups.
+
+Android #71 head `9cd5128c7f0ae99feb83e7bd8ad565df8fccc89f` updates Zod/Oxlint
+within the existing Expo52/RN0.76 baseline and preserves UTF-16 answer bounds.
+Focused tests577/577. A fresh owned offline debug APK/AAB build on sourceb82f4cdf
+completed489 Gradle tasks and bundled692 modules, exit0; both artifacts contain
+the exact verified generated Hermes bundle. An isolated API34 ARM64 emulator passed 17/17 observed paired-message, approval,
+durable-restart, navigation, unpair and reconnect scenario assertions against a
+real owned backend with synthetic engine. All owned processes and ports were
+cleaned. Debug certificate/Metro dependencies, physical-device, upgrade and
+standalone acceptance remain distinct. Dependabot
+#73/#74 are **OPEN**, not patched upstream; local guarded consumers are mitigations.
+Do not dismiss a vulnerability simply to empty the queue.
+
+Native Mac #72 head `402d36fa66f84bc3625cadb7d1a9824b00759c41` implements selected
+room transcripts and missing-room/composer handling while preserving bot drafts.
+Swift133/133, ARM/Intel source compilation and owned synthetic before/after renders
+passed. Developer ID signing, notarization, Gatekeeper, installed/upgrade and
+physical-device acceptance have not been established by these results.
+Earlier Linux/x64 container native13/Drive188 checks apply to the earlier repair
+stack, not these newer source modules; Linux GUI/install and Windows runtime
+acceptance remain unverified.
+
+**Hosted checkpoint on PR75 candidate12125b2:** CI37349858910 reported12 failed
+jobs/1 skipped, zero executed steps. Every failed job has an account payment/
+spending-limit no-start annotation. TestSprite separately reports `No tests detected`.
+Effective main rules prohibit deletion/non-fast-forward updates; no mandatory
+status/review rules were returned. Integration used a normal exact-head merge,
+without admin override, force push or check bypass. Repo billing/integration
+administrator owns hosted eligibility and actual TestSprite detection.
+
+**Prior served checkpoint on exactff2453:** GET-only inspection reported matching
+backend/web/public manifest,15 HTTP200 and12/12 actually referenced JS/CSS/preload
+hashes/sizes. Attestation was false. This is earlier served evidence, not proof of
+final-source rollout, every declared file, or failed-autodeploy causation.
+Final-main hosted/served verification remains a separate subsequent receipt.
+
+**Recovery preparation #74:** six new files at exact head
+`852c4afeefde95aed082dd0a7ff9beeb4c2ebd9b` preserve safe rich account state and
+selected heads in a distinct encrypted inventory, with pure additive import
+preflight. Committed bytes independently accepted and full gate passed. This
+does not apply records or grant execution.
+
+**Final assembly #75:** the corrected eleven-path offline writer/journal passed
+223/223 focused checks, including15 actual owned-child crash/restart cases. It
+performs additive inserts and conditional compensation in owned fixtures. Changed
+SQL, roster or volatile message/pending/head caches preserve newer state and leave
+ambiguity open. It is not an HTTP restore or existing-installation writer.
+The six-path first-dependency Node startup refusal passed37 distinct checks before
+auth/store initialization; it does not establish host-wide writer exclusivity.
+Docker pre-Node shell/Electron lifecycle remain separate; JS hooks are not OS-level
+isolation. Rich runtime5/optional UI10/writer11/refusal6 combine into29 unique paths
+because three route/test overlaps have recorded ownership transfer.
+Final independent review reproduced two P2 defects: same-user session replacement
+stranding consent controls, and compensation erasing a newer volatile imported-thread
+message. Corrective successors retain original failures and passed10/10 actual
+Chrome/signed synthetic-backend journeys with mounted AuthProvider replacement,
+no skips/retries/flaky passes, and223 writer checks. All10 backends/20 ports cleaned.
+Final exact-head review and composed full gate accepted the merged source.
+
+Chrome cannot automatically close the cross-origin Google window after its opener
+is severed. The accepted browser criterion preserves that protection, targets the
+exact consent state and clears memory-only secrets, with a truthful manual-close
+notice; retired account/transport can leave server expiry as the fallback. An owned same-origin callback must close automatically. A surviving
+cross-origin window after unmount is an explicit limitation; prior connected state
+or an ordinary status response never establishes consent completion.
+Canonical claims and successor dispositions remain discoverable in
+[PR #38](https://github.com/Orazen/Muster/pull/38#issuecomment-5969823410).
+
+**Remaining gates/owners:** Nova/backend and OpenCode supply separately claimed
+pre-import host exclusivity/current authority and W2 canonical
+authority and protected native custody (production enrollment remains disabled);
+repo administrator restores Actions readiness and reconciles TestSprite; authorized
+account/device operator supplies real Google and installed/device/signing checks;
+Tharun supplies actual15 beta tester-days and included-AI allowance/funding decisions.
+Freebuff/Android SDK owner continues advisory remediation without hiding findings.
+No purchases, release/signing, account creation or real-user-data operation is implied.
+Audit Astra:2026-10-06 09:00 Europe/Rome, source990c3d02 above and successor
+deltas/unresolved handoffs once; no duplicate schedule or unchanged tests.
+
+Historical records follow unchanged.
+
 
 
 ### Status of record — 23 September 2026 (automation resumed; two full releases shipped)
