@@ -7,10 +7,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { createRequire } from "node:module";
+import { assertPrivateNativeDependencies, copyNativeFixtureDependencies, nativeFixtureBinaries, nativeFixtureLayout } from "../scripts/native-fixture-layout.mjs";
 
-const { ensureLoadableNativeModule, loadProbeSource, vendorNativeExternals } = await import("../../scripts/native-vendor.mjs");
+const { ensureLoadableNativeModule, loadProbeSource, vendorNativeExternals } = await import("../scripts/native-vendor.mjs");
 
 const packageName = "better-sqlite3";
 // The fixture prepared by scripts/prepare-native-fixture.mjs — a real
@@ -18,10 +19,6 @@ const packageName = "better-sqlite3";
 // mutate the fixture itself.
 const fixturePackage = join(process.cwd(), ".omb-native-fixture", "better-sqlite3");
 const packageRequire = createRequire(join(fixturePackage, "package.json"));
-const bindingsDir = dirname(packageRequire.resolve("bindings/package.json"));
-const bindingsRequire = createRequire(join(bindingsDir, "package.json"));
-const fileUriDir = dirname(bindingsRequire.resolve("file-uri-to-path/package.json"));
-const binaryRelative = join("build", "Release", "better_sqlite3.node");
 
 const tempRoots: string[] = [];
 function scratch() {
@@ -39,21 +36,22 @@ beforeAll(() => {
       `native fixture missing at ${fixturePackage} — run \`pnpm test:native-load\` (which prepares it); absence is an environment failure, never a skipped test`,
     );
   }
+  nativeFixtureLayout(fixturePackage);
+  assertPrivateNativeDependencies(fixturePackage);
+  expect(nativeFixtureBinaries(fixturePackage).length).toBeGreaterThan(0);
 });
 
 function copyNative(root: string, name = "package") {
   const copy = join(root, name);
   cpSync(fixturePackage, copy, { recursive: true, dereference: true });
-  // Match the bundle's helper layout even with a pnpm/symlinked dependency
-  // store. The probe must not borrow helpers from the checkout above it.
-  mkdirSync(join(copy, "node_modules"), { recursive: true });
-  cpSync(bindingsDir, join(copy, "node_modules", "bindings"), { recursive: true, dereference: true });
-  cpSync(fileUriDir, join(copy, "node_modules", "file-uri-to-path"), { recursive: true, dereference: true });
+  assertPrivateNativeDependencies(copy);
   return copy;
 }
 
 function corrupt(copy: string) {
-  writeFileSync(join(copy, binaryRelative), "NOT A NATIVE BINARY", "utf8");
+  const binaries = nativeFixtureBinaries(copy);
+  expect(binaries.length).toBeGreaterThan(0);
+  for (const binary of binaries) writeFileSync(binary, "NOT A NATIVE BINARY", "utf8");
 }
 
 describe("native runtime verification", () => {
@@ -83,16 +81,36 @@ describe("native runtime verification", () => {
 
   it("rejects a real package with a missing native binary", () => {
     const pkgDir = copyNative(scratch());
-    rmSync(join(pkgDir, binaryRelative));
+    const binaries = nativeFixtureBinaries(pkgDir);
+    expect(binaries.length).toBeGreaterThan(0);
+    for (const binary of binaries) rmSync(binary);
+    expect(nativeFixtureBinaries(pkgDir)).toEqual([]);
     const verdict = ensureLoadableNativeModule(pkgDir, packageName);
     expect(verdict.ok).toBe(false);
-    expect(verdict.error).toMatch(/bindings|locate|not found/i);
+    expect(verdict.error).toMatch(/bindings|locate|not found|Cannot find module/i);
   });
 
   it("rejects unsupported package probes instead of claiming generic native verification", () => {
     const pkgDir = copyNative(scratch());
     expect(ensureLoadableNativeModule(pkgDir, "unknown-native")).toMatchObject({ ok: false });
     expect(() => loadProbeSource("unknown-native")).toThrow(/No native load probe/);
+  });
+
+  it("fails closed when the installed version uses an unsupported fixture layout", () => {
+    const pkgDir = copyNative(scratch());
+    const manifest = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+    writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ ...manifest, version: "99.0.0" }));
+    expect(() => nativeFixtureLayout(pkgDir)).toThrow(/unsupported better-sqlite3 native fixture layout/);
+  });
+
+  it("requires the old bindings helper when the package version declares it", () => {
+    const pkgDir = copyNative(scratch());
+    const manifest = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+    writeFileSync(join(pkgDir, "package.json"), JSON.stringify({
+      ...manifest, version: "12.11.1", dependencies: { bindings: "^1.5.0" },
+    }));
+    expect(() => copyNativeFixtureDependencies(pkgDir, join(scratch(), "target")))
+      .toThrow(/Cannot find module 'bindings/);
   });
 
   it("rejects a manifest that does not identify the requested supported package", () => {
@@ -146,7 +164,7 @@ describe("vendoring acceptance", () => {
     const dest = join(outDir, "_native", "unknown-native");
     mkdirSync(dest, { recursive: true });
     writeFileSync(join(dest, "existing"), "preserved");
-    expect(() => vendorNativeExternals({ packageName: "unknown-native", sourceDir: fixturePackage, outDir, recovery: "none" }))
+    expect(() => vendorNativeExternals({ packageName: "unknown-native", sourceDir: fixturePackage, outDir, recovery: "none", stubDir: "" }))
       .toThrow(/No native load probe/);
     expect(readFileSync(join(dest, "existing"), "utf8")).toBe("preserved");
   });
@@ -158,5 +176,19 @@ describe("probe resolution", () => {
     expect(realpathSync(packageRequire.resolve("./lib/index.js"))).toBe(realpathSync(join(fixturePackage, "lib", "index.js")));
     // The corrupt-copy case above additionally proves the child cannot fall
     // back to a healthy dependency when the requested copy is unloadable.
+  });
+
+  it("refuses to borrow an actual declared dependency from outside the private copy", () => {
+    const root = scratch();
+    const pkgDir = copyNative(root);
+    const manifest = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+    const [dependency] = Object.keys(manifest.dependencies);
+    expect(dependency).toBeDefined();
+    const local = join(pkgDir, "node_modules", dependency);
+    const outside = join(root, "node_modules", dependency);
+    mkdirSync(join(root, "node_modules"), { recursive: true });
+    cpSync(local, outside, { recursive: true, dereference: true });
+    rmSync(local, { recursive: true });
+    expect(() => assertPrivateNativeDependencies(pkgDir)).toThrow(/outside its private package/);
   });
 });
