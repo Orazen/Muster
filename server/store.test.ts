@@ -3,8 +3,9 @@
 // except `busy`, which never does (no turn survives one either).
 import { readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as messageDb from "./message-db.ts";
 import { DATA_DIR } from "./config.ts";
 import { EFFORT_LEVELS, type ModelSelection } from "./contracts.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
@@ -822,5 +823,72 @@ describe("Store save coalescing — identical bytes are not rewritten", () => {
     store.patchGroup(group.id, { name: "Renamed room" });
     expect(ino(groupsPath())).not.toBe(firstIno);
     expect(store.group(group.id)?.name).toBe("Renamed room");
+  });
+});
+
+
+describe("Store durable transcript snapshots", () => {
+  beforeEach(() => { messageDb.closeMessageDb(); rmSync(DATA_DIR, { recursive: true, force: true }); });
+  afterEach(() => { vi.restoreAllMocks(); messageDb.closeMessageDb(); });
+
+  it("keeps all branches and defensive copies without populating a cached thread", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const first = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "first" });
+    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "reply" });
+    const edited = store.branchMessage(bot.threadId, first.id, "edited");
+    const snapshot = store.snapshotThread(bot.threadId);
+    expect(snapshot.status).toBe("ready");
+    if (snapshot.status !== "ready") throw new Error("missing durable fixture");
+    expect(snapshot.messages).toHaveLength(3);
+    expect(snapshot.activeLeafId).toBe(edited?.id);
+    snapshot.messages[0]!.text = "caller mutation";
+    expect(store.messagesFor(bot.threadId)[0]!.text).toBe("first");
+    const threadReader = vi.spyOn(messageDb, "readThread");
+    expect(store.snapshotThread("fresh-thread")).toMatchObject({ status: "ready", messages: [] });
+    expect(threadReader).not.toHaveBeenCalled();
+  });
+
+  it("normalizes legacy links on the copy only and rejects broken graphs", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "warm live handle" });
+    const path = join(DATA_DIR, "messages-legacy-snapshot.json");
+    const raw = JSON.stringify([{ id: "a", at: 1, role: "user", kind: "text", text: "kept" }, { id: "b", at: 2, role: "bot", kind: "text" }]);
+    writeFileSync(path, raw);
+    expect(store.snapshotThread("legacy-snapshot")).toMatchObject({ status: "ready", activeLeafId: "b", messages: [{ parentId: null }, { parentId: "a" }] });
+    expect(readFileSync(path, "utf8")).toBe(raw);
+    for (const messages of [
+      [{ id: "a", at: 1, role: "user", kind: "text", parentId: "missing" }],
+      [{ id: "a", at: 1, role: "user", kind: "text", parentId: "b" }, { id: "b", at: 2, role: "bot", kind: "text", parentId: "a" }],
+      [{ id: "a", at: 1, role: "user", kind: "text" }, { id: "a", at: 2, role: "bot", kind: "text" }],
+    ]) {
+      writeFileSync(path, JSON.stringify(messages));
+      expect(store.snapshotThread("legacy-snapshot")).toEqual({ status: "unavailable", reason: "invalid-data" });
+    }
+    writeFileSync(path, JSON.stringify({ messages: [], activeLeafId: "missing" }));
+    expect(store.snapshotThread("legacy-snapshot")).toMatchObject({ status: "unavailable", reason: "invalid-data" });
+  });
+
+  it("refuses cached memory-only writes until they have actually persisted", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const write = vi.spyOn(messageDb, "appendMessage").mockImplementationOnce(() => { throw new Error("owned disk-full fixture"); });
+    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "volatile" }, { bestEffort: true });
+    expect(errorLog).toHaveBeenCalled();
+    expect(store.snapshotThread(bot.threadId)).toEqual({ status: "unavailable", reason: "pending-writes" });
+    write.mockRestore();
+    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "durable continuation" });
+    expect(store.snapshotThread(bot.threadId)).toMatchObject({ status: "ready", messages: [{ text: "volatile" }, { text: "durable continuation" }] });
+  });
+
+  it("does not export a mutable cache when durable storage becomes unavailable", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "durable" });
+    messageDb.closeMessageDb();
+    expect(store.messagesFor(bot.threadId)).toHaveLength(1);
+    expect(store.snapshotThread(bot.threadId)).toEqual({ status: "unavailable", reason: "source-unavailable" });
   });
 });

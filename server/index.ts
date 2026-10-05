@@ -292,6 +292,7 @@ import {
 import { handleCalendarRoute } from "./calendar-routes.ts";
 import { FOLLOW_UP_ROUTE_PREFIX, handleFollowUpRoute } from "./follow-up-routes.ts";
 import { handleWorkspaceBackupRoute } from "./workspace-backup-routes.ts";
+import { handleVisibleDriveRoute, VISIBLE_DRIVE_ROUTE_PREFIX } from "./drive-visible-routes.ts";
 import { InstallationRegistry, registryPathFor } from "./installation-authority.ts";
 import { handleInstallationRoute } from "./installation-routes.ts";
 import { handleMemoryRoute } from "./memory-routes.ts";
@@ -6158,6 +6159,27 @@ let requestUserEmail = "";
           plan: id => taskPlans?.plan(id) ?? null,
           bot: id => store.bot(id),
           taskByThread: (botId, threadId) => store.taskByThread(botId, threadId) ?? null,
+        },
+      })) return;
+    }
+
+    // Explicit account-owned visible copies precede the whole-installation
+    // backup wall. They require real sessions even on trusted loopback.
+    if (path === VISIBLE_DRIVE_ROUTE_PREFIX || path.startsWith(`${VISIBLE_DRIVE_ROUTE_PREFIX}/`)) {
+      const visibleHeaders = new Headers();
+      for (const [key, value] of Object.entries(req.headers)) {
+        if (value !== undefined) visibleHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
+      }
+      if (await handleVisibleDriveRoute(req, res, req.method ?? "GET", path, {
+        db: getDb, publicBaseUrl: PUBLIC_BASE_URL, deploymentSecret: deploymentSigningSecret,
+        operator: primaryUserId, appVersion: appVersion(),
+        google: { clientId: process.env.GOOGLE_CLIENT_ID?.trim() ?? "", clientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "" },
+        source: () => taskPlans ? { store, plans: taskPlans, dataDir: DATA_DIR } : null,
+        session: async () => {
+          const current = await auth.api.getSession({ headers: visibleHeaders,
+            query: { disableCookieCache: true, disableRefresh: true } }).catch(() => null);
+          return current?.user?.id && current.session?.id && current.session.userId === current.user.id && current.session.token
+            ? { userId: current.user.id, sessionId: current.session.id, sessionToken: current.session.token } : null;
         },
       })) return;
     }

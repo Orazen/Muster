@@ -10,7 +10,8 @@
 // Legacy JSON thread files import lazily: the first read of a thread with
 // no rows pulls the old file in, after which the DB is the source of
 // truth (the JSON file is left behind as a one-time backup).
-import { chmodSync, closeSync, existsSync, openSync, readFileSync, renameSync } from "node:fs";
+import { chmodSync, closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, readSync, renameSync } from "node:fs";
+import { z } from "zod";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
@@ -27,6 +28,7 @@ const DB_FILE = () => join(DATA_DIR, "messages.db");
 
 let handle: DatabaseSync | null = null;
 let handlePath: string | null = null;
+let handleIdentity: { dev: number; ino: number } | null = null;
 
 function open(): DatabaseSync {
   const file = DB_FILE();
@@ -113,6 +115,8 @@ function db(): DatabaseSync {
   } catch {}
   handle = open();
   handlePath = DB_FILE();
+  const identity = lstatSync(handlePath);
+  handleIdentity = { dev: identity.dev, ino: identity.ino };
   return handle;
 }
 
@@ -502,6 +506,95 @@ export function readThreadRows(threadId: string): ThreadRows {
   return { messages: rows.map((row) => rowToMessage(row)), activeLeafId: state?.active_leaf_id ?? null };
 }
 
+/** Complete durable snapshots fail rather than truncate at these read limits. */
+export const THREAD_SNAPSHOT_MAX_BYTES = 64 * 1024 * 1024;
+export const THREAD_SNAPSHOT_MAX_MESSAGES = 100_000;
+export type ThreadSnapshot =
+  | { status: "ready"; source: "sqlite" | "legacy"; messages: Message[]; activeLeafId: string | null }
+  | { status: "unavailable"; reason: "source-unavailable" | "invalid-thread" | "invalid-data" | "read-limit" | "pending-writes" };
+
+const snapshotMessageSchema = z.object({
+  id: z.string().min(1).max(1024), at: z.number().finite(),
+  role: z.enum(["bot", "user"]),
+  kind: z.enum(["text", "options", "activity", "screen", "connector", "compaction", "privacy"]),
+  parentId: z.string().min(1).max(1024).nullable().optional(), text: z.string().optional(),
+}).passthrough();
+const legacySnapshotSchema = z.union([
+  z.array(snapshotMessageSchema),
+  z.object({ messages: z.array(snapshotMessageSchema), activeLeafId: z.string().min(1).max(1024).nullable().optional() }),
+]);
+const unavailable = (reason: Extract<ThreadSnapshot, { status: "unavailable" }>['reason']): ThreadSnapshot => ({ status: "unavailable", reason });
+
+/** SELECT the already-open live database only. Never calls db(), imports legacy
+ * data, creates schema/WAL files, renames files or returns mutable Store rows.
+ * A cold/stale database is explicitly unavailable; normal Store startup warms
+ * it through the existing seed-card pass before runtime projection is offered.
+ */
+export function readThreadSnapshot(threadId: string): ThreadSnapshot {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(threadId)) return unavailable("invalid-thread");
+  try {
+    if (!handle || !handleIdentity || handlePath !== DB_FILE()) return unavailable("source-unavailable");
+    const identity = lstatSync(DB_FILE());
+    if (!identity.isFile() || identity.isSymbolicLink() || identity.nlink !== 1
+      || identity.dev !== handleIdentity.dev || identity.ino !== handleIdentity.ino) return unavailable("source-unavailable");
+    // Pin rows and selected head to one read transaction even when another
+    // process writes this WAL database. Rollback releases only our read lock.
+    const database = handle;
+    database.exec("BEGIN DEFERRED");
+    try {
+    // SAFETY: aggregate query names only numeric count/byte columns. Bound the
+    // result before materializing any attacker-sized JSON cell into JavaScript.
+    const size = database.prepare("SELECT COUNT(*) AS count, COALESCE(SUM(length(CAST(json AS BLOB))), 0) AS bytes FROM messages WHERE thread_id = ?").get(threadId) as { count: number; bytes: number };
+    if (size.count > THREAD_SNAPSHOT_MAX_MESSAGES || size.bytes > THREAD_SNAPSHOT_MAX_BYTES) return unavailable("read-limit");
+    const messages: Message[] = [];
+    let bytes = 0;
+    // SAFETY: SELECT yields exactly the named SQLite columns; JSON is validated
+    // before treating it as a Message, and all optional/future fields survive.
+    const rows = database.prepare("SELECT id, json FROM messages WHERE thread_id = ? ORDER BY rowid").iterate(threadId) as Iterable<{ id: string; json: string }>;
+    for (const row of rows) {
+      bytes += Buffer.byteLength(row.json, "utf8");
+      if (bytes > THREAD_SNAPSHOT_MAX_BYTES || messages.length >= THREAD_SNAPSHOT_MAX_MESSAGES) return unavailable("read-limit");
+      const parsed = snapshotMessageSchema.safeParse(JSON.parse(row.json));
+      if (!parsed.success || parsed.data.id !== row.id) return unavailable("invalid-data");
+      // SAFETY: validated Message identity/graph fields; optional opaque card and
+      // provenance fields are retained, never executed by this reader.
+      messages.push(parsed.data as Message);
+    }
+    // SAFETY: thread_state contains the named nullable TEXT column.
+    const state = database.prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id = ?").get(threadId) as { active_leaf_id: string | null } | undefined;
+    if (messages.length || state) return { status: "ready", source: "sqlite", messages, activeLeafId: state?.active_leaf_id ?? null };
+    const legacyFile = join(DATA_DIR, `messages-${threadId}.json`);
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(legacyFile, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const before = fstatSync(descriptor);
+      if (!before.isFile() || before.nlink !== 1) return unavailable("invalid-data");
+      if (before.size > THREAD_SNAPSHOT_MAX_BYTES) return unavailable("read-limit");
+      const content = Buffer.alloc(before.size + 1);
+      let read = 0;
+      while (read < content.length) {
+        const next = readSync(descriptor, content, read, content.length - read, null);
+        if (!next) break;
+        read += next;
+      }
+      const after = fstatSync(descriptor);
+      if (read !== before.size || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) return unavailable("source-unavailable");
+      const parsed = legacySnapshotSchema.safeParse(JSON.parse(content.subarray(0, read).toString("utf8")));
+      if (!parsed.success) return unavailable("invalid-data");
+      const data = Array.isArray(parsed.data) ? { messages: parsed.data, activeLeafId: null } : parsed.data;
+      if (data.messages.length > THREAD_SNAPSHOT_MAX_MESSAGES) return unavailable("read-limit");
+      // SAFETY: same validated identity/graph fields as the SQLite branch.
+      return { status: "ready", source: "legacy", messages: data.messages as Message[], activeLeafId: data.activeLeafId ?? null };
+    } catch (error) {
+      // A genuinely absent, never-written transcript is empty. Corruption,
+      // permissions and symlink refusal are never disguised as empty success.
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return { status: "ready", source: "sqlite", messages: [], activeLeafId: null };
+      return unavailable("invalid-data");
+    } finally { if (descriptor !== undefined) closeSync(descriptor); }
+    } finally { database.exec("ROLLBACK"); }
+  } catch { return unavailable("source-unavailable"); }
+}
+
 /** Install another install's verified transcript in ONE transaction and
  * with NO producer notification (P4's no-ping-pong rule): rows first,
  * branch head last, so an interrupted install leaves either the old thread
@@ -741,4 +834,5 @@ export function closeMessageDb(): void {
   } catch {}
   handle = null;
   handlePath = null;
+  handleIdentity = null;
 }

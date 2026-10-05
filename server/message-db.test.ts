@@ -1,9 +1,9 @@
 // SQLite message-store contract: per-mutation persistence, one-time legacy
 // import, deletion, and the LIKE search used by /api/search.
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import {
@@ -14,6 +14,8 @@ import {
   insertMessage,
   readMessageIntent,
   readThread,
+  readThreadSnapshot,
+  THREAD_SNAPSHOT_MAX_BYTES,
   persistMessagePath,
   searchMessages,
   setActiveLeaf,
@@ -403,4 +405,106 @@ describe("message intent owner scope (W0)", () => {
     expect(readMessageIntent("intent-owned-0001")?.owner).toBe("acct-alice");
     expect(setMessageIntentOwner("intent-missing-0001", "acct-bob")).toBe(false);
   });
+});
+
+
+describe("durable non-mutating transcript snapshots", () => {
+  beforeEach(() => { closeMessageDb(); rmSync(DATA_DIR, { recursive: true, force: true }); mkdirSync(DATA_DIR, { recursive: true }); });
+  afterEach(() => { vi.restoreAllMocks(); closeMessageDb(); });
+  // Existing SHM read-lock bookkeeping may change during a SELECT. Its inode
+  // stays owned/live; database, WAL and legacy payload bytes must not change.
+  const inventory = () => readdirSync(DATA_DIR).sort().map(name => ({ name, bytes: name.endsWith("-shm") ? undefined : readFileSync(join(DATA_DIR, name)), ino: statSync(join(DATA_DIR, name)).ino }));
+
+  it("refuses a cold database without creating schema or files", () => {
+    expect(readThreadSnapshot("cold")).toEqual({ status: "unavailable", reason: "source-unavailable" });
+    expect(readdirSync(DATA_DIR)).toEqual([]);
+    appendMessage("warm", msg("a", "durable"));
+    closeMessageDb();
+    const before = inventory();
+    expect(readThreadSnapshot("warm")).toMatchObject({ status: "unavailable" });
+    expect(inventory()).toEqual(before);
+  });
+
+  it("reads all durable branches and the selected head without writing files", () => {
+    appendMessage("branches", msg("root", "first", { parentId: null }));
+    appendMessage("branches", msg("left", "left", { parentId: "root" }));
+    appendMessage("branches", msg("right", "right", { parentId: "root" }));
+    setActiveLeaf("branches", "left");
+    const before = inventory();
+    const snapshot = readThreadSnapshot("branches");
+    expect(snapshot).toMatchObject({ status: "ready", source: "sqlite", activeLeafId: "left" });
+    if (snapshot.status !== "ready") throw new Error("missing durable fixture");
+    expect(snapshot.messages.map(m => m.id)).toEqual(["root", "left", "right"]);
+    snapshot.messages[0]!.text = "changed copy";
+    expect(readThreadSnapshot("branches")).toMatchObject({ messages: [{ text: "first" }, {}, {}] });
+    expect(inventory()).toEqual(before);
+  });
+
+  it("reads a bounded legacy file without importing, renaming or changing permissions", () => {
+    appendMessage("warm", msg("warm", "already opened"));
+    writeFileSync(legacy("old"), JSON.stringify([msg("a", "old"), msg("b", "kept")]));
+    const before = inventory();
+    expect(readThreadSnapshot("old")).toMatchObject({ status: "ready", source: "legacy", messages: [{ id: "a" }, { id: "b" }] });
+    expect(inventory()).toEqual(before);
+    expect(existsSync(`${legacy("old")}.imported`)).toBe(false);
+    expect(readThreadSnapshot("never-written")).toEqual({ status: "ready", source: "sqlite", messages: [], activeLeafId: null });
+  });
+
+  it("rejects malformed data and symlinks instead of disguising them as empty", () => {
+    appendMessage("warm", msg("warm", "already opened"));
+    for (const raw of ["{", "{}", JSON.stringify([{ id: "a", role: "user", kind: "text", at: "bad" }])]) {
+      writeFileSync(legacy("bad"), raw);
+      expect(readThreadSnapshot("bad")).toEqual({ status: "unavailable", reason: "invalid-data" });
+    }
+    symlinkSync(legacy("bad"), legacy("linked"));
+    expect(readThreadSnapshot("linked")).toMatchObject({ status: "unavailable" });
+    expect(readThreadSnapshot("../bad")).toEqual({ status: "unavailable", reason: "invalid-thread" });
+  });
+
+  it("rejects oversize legacy files before loading bytes", () => {
+    appendMessage("warm", msg("warm", "already opened"));
+    writeFileSync(legacy("huge"), "");
+    truncateSync(legacy("huge"), THREAD_SNAPSHOT_MAX_BYTES + 1);
+    expect(readThreadSnapshot("huge")).toEqual({ status: "unavailable", reason: "read-limit" });
+  });
+
+  it("rejects removed or replaced backing inodes without reopening the database", () => {
+    appendMessage("warm", msg("warm", "durable"));
+    renameSync(join(DATA_DIR, "messages.db"), join(DATA_DIR, "old.db"));
+    writeFileSync(join(DATA_DIR, "messages.db"), "replacement must not be opened");
+    const before = inventory();
+    expect(readThreadSnapshot("warm")).toEqual({ status: "unavailable", reason: "source-unavailable" });
+    expect(inventory()).toEqual(before);
+    rmSync(join(DATA_DIR, "messages.db"));
+    expect(readThreadSnapshot("warm")).toMatchObject({ status: "unavailable" });
+    expect(existsSync(join(DATA_DIR, "messages.db"))).toBe(false);
+  });
+
+  it("refuses corrupt persisted JSON rather than returning partial rows", () => {
+    appendMessage("corrupt", msg("a", "good"));
+    const writer = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    writer.prepare("UPDATE messages SET json = ? WHERE thread_id = ?").run("{", "corrupt");
+    writer.close();
+    expect(readThreadSnapshot("corrupt")).toMatchObject({ status: "unavailable" });
+  });
+  it("pins rows and active head while a second connection deletes the thread", () => {
+    appendMessage("concurrent", msg("a", "point-in-time", { parentId: null }));
+    const writer = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    const original = DatabaseSync.prototype.prepare;
+    let deleted = false;
+    const prepare = vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function(this: DatabaseSync, sql: string) {
+      if (!deleted && sql.startsWith("SELECT active_leaf_id")) {
+        deleted = true;
+        writer.exec("BEGIN; DELETE FROM messages WHERE thread_id = 'concurrent'; DELETE FROM thread_state WHERE thread_id = 'concurrent'; COMMIT;");
+      }
+      return original.call(this, sql);
+    });
+    try {
+      expect(readThreadSnapshot("concurrent")).toMatchObject({ status: "ready", activeLeafId: "a", messages: [{ id: "a" }] });
+      expect(deleted).toBe(true);
+      prepare.mockRestore();
+      expect(readThreadSnapshot("concurrent")).toMatchObject({ status: "ready", activeLeafId: null, messages: [] });
+    } finally { prepare.mockRestore(); writer.close(); }
+  });
+
 });
