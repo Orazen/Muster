@@ -15,6 +15,7 @@ import { z } from "zod";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
+import { createHash } from "node:crypto";
 
 import { DATA_DIR } from "./config.ts";
 import { SeedAnswerError } from "./seed-card.ts";
@@ -599,6 +600,129 @@ export function readThreadSnapshot(threadId: string): ThreadSnapshot {
  * with NO producer notification (P4's no-ping-pong rule): rows first,
  * branch head last, so an interrupted install leaves either the old thread
  * or the new one — never half of each. */
+export interface FreshRecoveryThread { threadId: string; activeLeafId: string | null; messages: Message[] }
+const recoveryFingerprint = (threads: FreshRecoveryThread[]) => createHash("sha256").update(JSON.stringify(threads)).digest("hex");
+
+/** Includes orphaned rows/heads/intents, not only the visible roster. */
+export function recoveryThreadIds(): string[] {
+  // SAFETY: thread_id is the TEXT identity column in all three owned tables.
+  const result=new Set((db().prepare("SELECT thread_id FROM messages UNION SELECT thread_id FROM thread_state UNION SELECT thread_id FROM message_intents").all() as Array<{ thread_id: string }>).map(row => row.thread_id));
+  // SAFETY: snapshots is the owned receipt TEXT column and is decoded below;
+  // unreadable snapshot structure refuses the whole inventory.
+  const receipts=db().prepare("SELECT snapshots FROM stop_cleanup_receipts").all() as Array<{snapshots:string}>;
+  for(const receipt of receipts) {
+    const snapshots=decodeStopCleanupSnapshots(receipt.snapshots);
+    if(!snapshots)throw new Error("Recovery cleanup inventory unavailable");
+    for(const snapshot of snapshots)result.add(snapshot.threadId);
+  }
+  return [...result].sort();
+}
+
+export function recoveryReservedBotIds(): string[] {
+  // SAFETY: bot_id is the owned stop-cleanup receipt's non-null TEXT identity.
+  return (db().prepare("SELECT bot_id FROM stop_cleanup_receipts").all() as Array<{bot_id:string}>).map(row=>row.bot_id);
+}
+
+/** Plain fresh inserts + operation marker in ONE SQLite commit. No replace,
+ * legacy import, producer hooks, intent/stop-cleanup writes or authority. */
+export function insertFreshRecoveryThreads(operationId: string, threads: FreshRecoveryThread[]): void {
+  const database = db();
+  const used = new Set<string>();
+  for (const thread of threads) {
+    if (!/^[\w-]{1,200}$/.test(thread.threadId) || used.has(thread.threadId)
+      || existsSync(join(DATA_DIR, `messages-${thread.threadId}.json`))) throw new Error("Recovery thread collision");
+    used.add(thread.threadId);
+    const ids = new Set(thread.messages.map(message => message.id));
+    if (ids.size !== thread.messages.length || (thread.activeLeafId !== null && !ids.has(thread.activeLeafId))
+      || thread.messages.some(message => !snapshotMessageSchema.safeParse(message).success || message.card || message.connector || message.queued || message.via || message.tool?.setup
+        || (message.parentId !== null && message.parentId !== undefined && !ids.has(message.parentId)))) throw new Error("Invalid recovery graph");
+    const parents=new Map(thread.messages.map(message=>[message.id,message.parentId??null]));
+    const complete=new Set<string>();
+    for(const message of thread.messages) {
+      const path=new Set<string>();let cursor:string|null=message.id;
+      while(cursor!==null && !complete.has(cursor)) {if(path.has(cursor))throw new Error("Invalid recovery cycle");path.add(cursor);cursor=parents.get(cursor)??null;}
+      for(const id of path)complete.add(id);
+    }
+  }
+  // SAFETY: SQLite's synchronous pragma returns its numeric setting under
+  // the named synchronous column; only that unchanged setting is restored.
+  const previousSynchronous = database.prepare("PRAGMA synchronous").get() as { synchronous: number };
+  database.exec("PRAGMA synchronous = FULL");
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.exec("CREATE TABLE IF NOT EXISTS account_recovery_operations (operation_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, payload TEXT NOT NULL)");
+    if (database.prepare("SELECT 1 FROM account_recovery_operations WHERE operation_id = ?").get(operationId)) throw new Error("Recovery operation already exists");
+    const occupied = new Set(recoveryThreadIds());
+    if (threads.some(thread => occupied.has(thread.threadId))) throw new Error("Recovery thread collision");
+    const insert = database.prepare("INSERT INTO messages(thread_id,id,at,role,kind,text,json) VALUES (?,?,?,?,?,?,?)");
+    const head = database.prepare("INSERT INTO thread_state(thread_id,active_leaf_id) VALUES (?,?)");
+    for (const thread of threads) {
+      for (const message of thread.messages) insert.run(thread.threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
+      head.run(thread.threadId, thread.activeLeafId);
+    }
+    database.prepare("INSERT INTO account_recovery_operations(operation_id,fingerprint,payload) VALUES (?,?,?)")
+      .run(operationId, recoveryFingerprint(threads), JSON.stringify(threads));
+    database.exec("COMMIT");
+  } catch (error) { database.exec("ROLLBACK"); throw error; }
+  finally { database.exec(`PRAGMA synchronous = ${previousSynchronous.synchronous}`); }
+}
+
+function recoveryMarker(operationId: string): { fingerprint: string; payload: string } | null {
+  const database = db();
+  if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='account_recovery_operations'").get()) return null;
+  // SAFETY: this module creates both selected columns as non-null TEXT;
+  // a missing operation row remains undefined and both bytes are matched.
+  return database.prepare("SELECT fingerprint,payload FROM account_recovery_operations WHERE operation_id=?").get(operationId) as { fingerprint: string; payload: string } | undefined ?? null;
+}
+
+export function freshRecoveryThreadsMatch(operationId: string, expected: FreshRecoveryThread[]): boolean {
+  const database=db();database.exec("BEGIN");
+  try {
+    const marker=recoveryMarker(operationId);
+    return !!marker && marker.fingerprint===recoveryFingerprint(expected) && marker.payload===JSON.stringify(expected)
+      && freshRecoveryRowsMatch(database,expected);
+  } finally {database.exec("ROLLBACK");}
+}
+
+function freshRecoveryRowsMatch(database: DatabaseSync, expected: FreshRecoveryThread[]): boolean {
+  return expected.every(thread => {
+    // SAFETY: these are the actual owned messages table's typed columns;
+    // every column, row count and payload byte is compared with its postimage.
+    const rows=database.prepare("SELECT thread_id,id,at,role,kind,text,json FROM messages WHERE thread_id=? ORDER BY rowid").all(thread.threadId) as Array<{thread_id:string;id:string;at:number;role:string;kind:string;text:string|null;json:string}>;
+    // SAFETY: active_leaf_id is the actual nullable TEXT branch-head column;
+    // missing heads or changed values refuse compensation below.
+    const head=database.prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id=?").get(thread.threadId) as {active_leaf_id:string|null}|undefined;
+    return !!head && head.active_leaf_id===thread.activeLeafId && rows.length===thread.messages.length
+      && rows.every((row,index)=>{const message=thread.messages[index]!;return row.thread_id===thread.threadId && row.id===message.id && row.at===message.at
+        && row.role===message.role && row.kind===message.kind && row.text===(message.text??null) && row.json===JSON.stringify(message);})
+      && !database.prepare("SELECT 1 FROM message_intents WHERE thread_id=?").get(thread.threadId);
+  });
+}
+
+/** Compensate only this exact transaction's rows. A missing marker plus
+ * occupied IDs or changed content is ambiguous and MUST remain untouched. */
+export function compensateFreshRecoveryThreads(operationId: string, expected: FreshRecoveryThread[]): void {
+  const database = db();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    // Bind ownership and exact postimages in the SAME write transaction as
+    // deletion; no stale marker read can authorize newer rows for removal.
+    const marker=recoveryMarker(operationId);
+    if(!marker) {
+      const occupied=new Set(recoveryThreadIds());
+      if(expected.some(thread=>occupied.has(thread.threadId)))throw new Error("Recovery marker missing for occupied threads");
+      database.exec("COMMIT");return;
+    }
+    if (marker.fingerprint!==recoveryFingerprint(expected) || marker.payload!==JSON.stringify(expected) || !freshRecoveryRowsMatch(database,expected)) throw new Error("Recovery threads changed");
+    for (const thread of expected) {
+      database.prepare("DELETE FROM messages WHERE thread_id=?").run(thread.threadId);
+      database.prepare("DELETE FROM thread_state WHERE thread_id=?").run(thread.threadId);
+    }
+    database.prepare("DELETE FROM account_recovery_operations WHERE operation_id=?").run(operationId);
+    database.exec("COMMIT");
+  } catch (error) { database.exec("ROLLBACK"); throw error; }
+}
+
 export function replaceThreadFromSync(
   threadId: string,
   messages: ThreadMessageInput[],

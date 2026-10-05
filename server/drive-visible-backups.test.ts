@@ -2,9 +2,15 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { writeAccountVisibleBackup, VisibleBackupError, type VisibleBackupClient } from "./drive-visible-backups.ts";
+import { writeAccountVisibleBackup, writeAccountRecoveryBackup, MAX_VISIBLE_RECOVERY_COPY_BYTES, VisibleBackupError, type VisibleBackupClient } from "./drive-visible-backups.ts";
 import type { AuthenticatedVisibleAccount } from "./drive-visible-account-bundle.ts";
 import type { DriveFileRef } from "./drive-visible.ts";
+import * as archiveCodec from "./drive-visible-account-archive.ts";
+import * as visibleParser from "./drive-visible.ts";
+import { Store } from "./store.ts";
+import { TaskPlanEngine } from "./task-engine.ts";
+import { DATA_DIR } from "./config.ts";
+import { closeMessageDb } from "./message-db.ts";
 import { decryptBundleV2 } from "./workspace-bundle-v2.ts";
 
 const account = { userId: "alice", sessionId: "alice-session", workspaceId: "alice-workspace", isPrimary: false };
@@ -45,7 +51,7 @@ describe("explicit immutable encrypted account copies", () => {
       updateFile: vi.fn(async () => { throw new Error("Forbidden overwrite"); }),
     };
   });
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  afterEach(() => { vi.restoreAllMocks(); closeMessageDb(); rmSync(root, { recursive: true, force: true }); });
   const input = (): Parameters<typeof writeAccountVisibleBackup>[0] => ({
     bundle: { source, resolveAccount: () => current, appVersion: "1.23.3",
       key: { custody: "user-held", passphrase: "synthetic-user-owned-recovery",
@@ -165,4 +171,108 @@ describe("explicit immutable encrypted account copies", () => {
     await expect(writeAccountVisibleBackup(input())).rejects.toMatchObject({ code: "account-unavailable" });
     expect(client.listFiles).not.toHaveBeenCalled();
   });
+
+  const richInput = (): Parameters<typeof writeAccountRecoveryBackup>[0] => {
+    const old = input();
+    return { lease: old.lease, client: old.client, archive: { ...old.bundle,
+      source: { ...old.bundle.source,
+        store: { ...old.bundle.source.store, bots: old.bundle.source.store.bots.map(bot => ({ ...bot,
+          tasks: [{ threadId: bot.threadId, title: "Owned task", createdAt: 1, resumeCursors: {} }] })) }, plans: { listPlans: old.bundle.source.plans.listPlans, transitionsFor: () => [] } } } };
+  };
+  it("backs up real restarted Store branches and actual TaskPlanEngine history with the rich codec", async () => {
+    closeMessageDb(); rmSync(DATA_DIR, { recursive: true, force: true });
+    const initial = new Store(() => ({ instanceId: "offline", model: "test" }));
+    const own = initial.createBot({ ownerId: account.userId, name: "Own actual bot" }, { seedMessages: false });
+    const other = initial.createBot({ ownerId: "bob", name: "Foreign" }, { seedMessages: false });
+    const first = initial.appendMessage(own.threadId, { role: "user", kind: "text", text: "Durable root" });
+    const selected = initial.appendMessage(own.threadId, { role: "bot", kind: "screen", png: "AA==", mime: "image/png", text: "Selected rich history" });
+    const fork = initial.appendMessage(own.threadId, { role: "bot", kind: "activity", parentId: first.id, tool: { name: "Inert historical tool", ok: true } });
+    initial.setActiveLeaf(own.threadId, selected.id);
+    initial.appendMessage(other.threadId, { role: "user", kind: "text", text: "EXCLUDED-FOREIGN-CONTENT" });
+    closeMessageDb();
+    const store = new Store(() => ({ instanceId: "offline", model: "test" }));
+    const plans = new TaskPlanEngine({ file: join(DATA_DIR, "task-plans.json"), now: () => 5 });
+    plans.start();
+    try {
+      const plan = plans.create({ botId: own.id, ownerId: account.userId, threadId: own.threadId, title: "Actual durable plan", steps: [{ title: "Checkpoint", kind: "checkpoint" }] });
+      plans.control(plan.id, { action: "pause" });
+      const offered = richInput();
+      offered.archive.source = { ...offered.archive.source, store, plans, dataDir: DATA_DIR };
+      const receipt = await writeAccountRecoveryBackup(offered);
+      expect(receipt).toMatchObject({ status: "verified", format: "account-recovery-v1", apply: "unsupported", created: true });
+      expect(receipt.name).toMatch(/^muster-account-recovery-v1-[a-f0-9]{64}\.enc$/);
+      const opened = archiveCodec.inspectAccountRecoveryArchive({ bytes: stored,
+        key: { custody: "user-held", passphrase: offered.archive.key.passphrase }, resolveAccount: () => current });
+      if (opened.status !== "ready") throw new Error(JSON.stringify(opened));
+      expect(opened.state.threads).toMatchObject([{ activeLeafId: selected.id, messages: [{ id: first.id }, { id: selected.id, png: "AA==" }, { id: fork.id }] }]);
+      expect(opened.state.plans).toMatchObject([{ id: plan.id, status: "paused" }]);
+      expect(opened.state.transitions.length).toBe(plans.transitionsFor().length);
+      expect(opened.state.transitions.length).toBeGreaterThan(0);
+      expect(JSON.stringify(opened.state)).not.toContain("EXCLUDED-FOREIGN-CONTENT");
+      expect(store.snapshotThread(own.threadId)).toMatchObject({ status: "ready", activeLeafId: selected.id });
+      expect(client.updateFile).not.toHaveBeenCalled();
+    } finally { plans.stop(); closeMessageDb(); }
+  });
+  it("reuses only a real same-source rich copy and keeps the projection namespace separate", async () => {
+    const first = await writeAccountRecoveryBackup(richInput());
+    const bytes = Buffer.from(stored), previous = client.listFiles;
+    client.listFiles = async args => args.q.includes("muster-account-recovery-v1-")
+      ? [{ id: first.fileId, name: first.name, parents: ["backups"], mimeType: "application/octet-stream" }] : previous(args);
+    const next = await writeAccountRecoveryBackup(richInput());
+    expect(next).toEqual({ ...first, created: false }); expect(stored).toEqual(bytes);
+    expect(client.createBinaryFile).toHaveBeenCalledOnce();
+    const legacy = await writeAccountVisibleBackup(input());
+    expect(legacy.name).toMatch(/^muster-account-visible-v1-/);
+    expect(client.createBinaryFile).toHaveBeenCalledTimes(2);
+  });
+  it("cannot adopt different-source bytes under a forged expected rich name", async () => {
+    await writeAccountRecoveryBackup(richInput());
+    const previous = client.listFiles;
+    source.store.bots[0]!.description = "Changed account persona";
+    client.listFiles = async args => args.q.includes("muster-account-recovery-v1-")
+      ? [{ id: "prior", name: /name = '([^']+)'/.exec(args.q)![1]!, parents: ["backups"], mimeType: "application/octet-stream" }] : previous(args);
+    await expect(writeAccountRecoveryBackup(richInput())).rejects.toMatchObject({ code: "verification-failed" });
+    expect(client.createBinaryFile).toHaveBeenCalledOnce(); expect(client.updateFile).not.toHaveBeenCalled();
+  });
+  it.each(["settings", "parser", "transitions", "snapshot"])("missing %s prerequisite refuses rich copies with zero Drive operations", async missing => {
+    const offered = richInput();
+    if (missing === "settings") offered.archive.source = { ...offered.archive.source, settingsSnapshot: null };
+    if (missing === "parser") vi.spyOn(visibleParser, "parseVisibleFiles").mockImplementation(() => { throw new Error("Parser unavailable"); });
+    if (missing === "transitions") offered.archive.source.plans.transitionsFor = () => { throw new Error("No actual transition reader"); };
+    if (missing === "snapshot") offered.archive.source.store.snapshotThread = () => ({ status: "unavailable", reason: "source-unavailable" });
+    await expect(writeAccountRecoveryBackup(offered)).rejects.toMatchObject({ code: "archive-unavailable" });
+    expect(client.resolveRootId).not.toHaveBeenCalled(); expect(client.createFolder).not.toHaveBeenCalled(); expect(client.createBinaryFile).not.toHaveBeenCalled();
+  });
+  it.each([MAX_VISIBLE_RECOVERY_COPY_BYTES, MAX_VISIBLE_RECOVERY_COPY_BYTES + 1])("enforces the runtime media boundary at %i bytes before folder mutation", async length => {
+    const offered = richInput(), actual = archiveCodec.buildAccountRecoveryArchive(offered.archive);
+    if (actual.status !== "ready") throw new Error("Missing real source");
+    // Fault injection at the codec output only exercises the size boundary;
+    // malformed ciphertext at the accepted size still cannot verify.
+    vi.spyOn(archiveCodec, "buildAccountRecoveryArchive").mockReturnValue({ ...actual, bytes: Buffer.alloc(length) });
+    await expect(writeAccountRecoveryBackup(offered)).rejects.toMatchObject({ code: length > MAX_VISIBLE_RECOVERY_COPY_BYTES ? "copy-too-large" : "verification-failed" });
+    if (length > MAX_VISIBLE_RECOVERY_COPY_BYTES) {
+      expect(client.resolveRootId).not.toHaveBeenCalled(); expect(client.listFiles).not.toHaveBeenCalled();
+      expect(client.createFolder).not.toHaveBeenCalled(); expect(client.createBinaryFile).not.toHaveBeenCalled();
+    } else expect(client.createBinaryFile).toHaveBeenCalledOnce();
+  });
+  it.each(["root", "list", "folder", "upload", "readback"])("revocation during rich %s prevents success and subsequent calls", async stage => {
+    if (stage === "root") client.resolveRootId = vi.fn(async () => { validLease = false; return "root-id"; });
+    if (stage === "list") client.listFiles = vi.fn(async () => { validLease = false; return []; });
+    if (stage === "folder") { client.listFiles = vi.fn(async () => []); client.createFolder = vi.fn(async (name, parent) => { validLease = false; return folder("made-folder", name, parent); }); }
+    if (stage === "upload") { const create = client.createBinaryFile; client.createBinaryFile = vi.fn(async (name, parent, bytes) => { const result = await create(name, parent, bytes); validLease = false; return result; }); }
+    if (stage === "readback") client.getBinaryFile = vi.fn(async () => { validLease = false; return { body: Buffer.from(stored) }; });
+    const failure = ["upload", "readback"].includes(stage)
+      ? { code: "operation-failed", createdFileId: "encrypted-copy" } : { code: "operation-failed" };
+    await expect(writeAccountRecoveryBackup(richInput())).rejects.toMatchObject(failure);
+    if (["root", "list", "folder"].includes(stage)) expect(client.createBinaryFile).not.toHaveBeenCalled();
+    if (stage === "upload") expect(client.getBinaryFile).not.toHaveBeenCalled();
+    expect(client.updateFile).not.toHaveBeenCalled();
+  });
+  it("source or account replacement never turns a rich copy into success", async () => {
+    const previous = client.listFiles;
+    client.listFiles = async args => { current = { ...authority, account: { ...account, sessionId: "replacement" } }; return previous(args); };
+    await expect(writeAccountRecoveryBackup(richInput())).rejects.toMatchObject({ code: "account-changed" });
+    expect(client.createBinaryFile).not.toHaveBeenCalled();
+  });
+
 });

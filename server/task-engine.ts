@@ -17,7 +17,7 @@
 //      A failed write rolls memory back to what is actually on disk.
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { z } from "zod";
@@ -404,6 +404,49 @@ export class TaskPlanEngine {
   transitionsFor(planId?: string): TaskTransitionEvent[] {
     const source = planId ? this.transitions.filter((event) => event.planId === planId) : this.transitions;
     return source.map((event) => clone(event));
+  }
+
+  /** Fresh parked records only; no generic persist(), capacity pruning,
+   * dispatch, delivery-intent writes or transition/event publication. */
+  checkFreshRecoveryPlans(plans: TaskPlanRecord[], before: string | null): void {
+    if ((existsSync(this.file) ? readFileSync(this.file, "utf8") : null) !== before) throw new Error("Recovery plans changed");
+    // SAFETY: these saved owned-file arrays are immediately compared with
+    // the actual engine's validated cache before any record is inserted.
+    const previous = before === null ? { version: 1, plans: [], transitions: [] } : JSON.parse(before) as TaskPlanFile;
+    if (JSON.stringify(previous.plans) !== JSON.stringify(this.plans) || JSON.stringify(previous.transitions) !== JSON.stringify(this.transitions)
+      || this.plans.length + plans.length > this.maxPlans) throw new Error("Recovery plans unavailable or capacity exceeded");
+    const ids = new Set(this.recoveryPlanIds());
+    for (const plan of plans) {
+      if (!/^[\w-]{1,200}$/.test(plan.id) || ids.has(plan.id) || !plan.ownerId
+        || !["paused", "succeeded", "failed", "cancelled"].includes(plan.status)
+        || plan.lease || plan.context || plan.delivery || plan.inputRequest || plan.approvalRequest || plan.pausedFrom
+        || plan.steps.some(step => step.status === "active") || plan.currentStep !== null) throw new Error("Recovery plan is not parked");
+      ids.add(plan.id);
+    }
+  }
+
+  insertFreshRecoveryPlans(plans: TaskPlanRecord[], before: string | null): void {
+    this.checkFreshRecoveryPlans(plans, before);
+    const next = [...this.plans, ...structuredClone(plans)];
+    writeFileAtomic(this.file, JSON.stringify({ version: 1, plans: next, transitions: this.transitions }, null, 2));
+    this.plans = next;
+  }
+
+  recoveryFile(): string { return this.file; }
+
+  recoveryPlanIds(): string[] {
+    return [...new Set([...this.plans.map(plan=>plan.id),...Object.values(this.deliveryIntents).flatMap(intent=>[intent.planId,...(intent.usedPlanIds??[])])])];
+  }
+
+  /** Cache reconciliation after the journal restores exact prior bytes. */
+  recoveryPlansMatch(before: { plans: TaskPlanRecord[]; transitions: TaskTransitionEvent[] }, after: { plans: TaskPlanRecord[]; transitions: TaskTransitionEvent[] }): boolean {
+    return (JSON.stringify(this.plans)===JSON.stringify(before.plans) || JSON.stringify(this.plans)===JSON.stringify(after.plans))
+      && (JSON.stringify(this.transitions)===JSON.stringify(before.transitions) || JSON.stringify(this.transitions)===JSON.stringify(after.transitions));
+  }
+
+  reloadCompensatedRecoveryPlans(before: { plans: TaskPlanRecord[]; transitions: TaskTransitionEvent[] }, after: { plans: TaskPlanRecord[]; transitions: TaskTransitionEvent[] }): void {
+    if(!this.recoveryPlansMatch(before,after))throw new Error("Recovery plans cache changed");
+    this.plans = structuredClone(before.plans); this.transitions = structuredClone(before.transitions);
   }
 
   create(input: TaskPlanCreateInput): TaskPlanRecord {

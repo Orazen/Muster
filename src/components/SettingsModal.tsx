@@ -14,6 +14,7 @@ import { ApiKeyRow } from "./ApiKeys";
 import { TelegramChatChannelCard, WorkspaceSyncCard } from "./WorkspaceSyncCard";
 import { LocalFirstSection } from "./LocalFirstSection";
 import { PortableBackupCard } from "./PortableBackupCard";
+import { VisibleDriveCard } from "./VisibleDriveCard";
 import { SnapshotsCard } from "./SnapshotsCard";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
@@ -1464,6 +1465,7 @@ export function SettingsModal() {
             {section === "activity" && <ActivitySection />}
             {section === "backups" && (
               <>
+                <VisibleDriveCard />
                 <WorkspaceSyncCard />
                 <SnapshotsCard />
                 <PortableBackupCard />

@@ -10,10 +10,15 @@ import { exportJWK, generateKeyPair, SignJWT, type JSONWebKeySet } from "jose";
 import { handleVisibleDriveRoute, readLiveVisibleAccount, VISIBLE_DRIVE_ROUTE_PREFIX,
   type VisibleDriveRouteContext, type VisibleRouteSession } from "./drive-visible-routes.ts";
 import { createVisibleRuntimeProtector } from "./drive-visible-runtime-key.ts";
-import { createVisibleConsentState, consumeVisibleConsentState, getVisibleGrant, saveVisibleGrant,
+import { createVisibleConsentState, consumeVisibleConsentState, getVisibleGrant, revokeVisibleGrant, saveVisibleGrant,
   VISIBLE_FILE_SCOPE } from "./drive-visible-grants.ts";
 import { FOLDER_MIME, parseVisibleFiles, type DriveFileRef } from "./drive-visible.ts";
-import type { BotRecord } from "./store.ts";
+import { Store, type BotRecord } from "./store.ts";
+import { TaskPlanEngine } from "./task-engine.ts";
+import { DATA_DIR } from "./config.ts";
+import { closeMessageDb } from "./message-db.ts";
+import { inspectAccountRecoveryArchive } from "./drive-visible-account-archive.ts";
+import * as visibleParser from "./drive-visible.ts";
 
 const NOW = Date.parse("2026-10-05T12:00:00Z");
 const SECRET = "synthetic-visible-routes-deployment-secret";
@@ -21,7 +26,7 @@ const protector = createVisibleRuntimeProtector(SECRET);
 const session = (userId: string): VisibleRouteSession => ({ userId, sessionId: `${userId}-session`, sessionToken: `${userId}-token` });
 const bot = (userId: string): BotRecord => ({ id: `${userId}-bot`, ownerId: userId, threadId: `${userId}-thread`,
   name: userId, title: userId, description: `${userId} persona`, notifications: false, color: "green", unread: false,
-  createdAt: 1, resumeCursors: {}, modelSelection: { instanceId: "offline", model: "test" } });
+  createdAt: 1, tasks: [{ threadId: `${userId}-thread`, title: "Owned task", createdAt: 1, resumeCursors: {} }], resumeCursors: {}, modelSelection: { instanceId: "offline", model: "test" } });
 const md5 = (bytes: Buffer) => createHash("md5").update(bytes).digest("hex");
 const checkedJson = z.record(z.string(), z.unknown());
 const wireFile = z.object({ name: z.string(), mimeType: z.string(), parents: z.array(z.string()) });
@@ -49,10 +54,10 @@ describe("optional visible Drive routes over owned real HTTP", () => {
     { ...init, headers: { "x-owned-account": user, ...Object.fromEntries(new Headers(init.headers)) }, signal: init.signal ?? AbortSignal.timeout(10_000) });
   const post = <T>(action: string, value: T, user = "alice", extra: Record<string, string> = {}) => get(action, user,
     { method: "POST", headers: { origin: ctx.publicBaseUrl, "content-type": "application/json", ...extra }, body: JSON.stringify(value) });
-  const connect = (user = "alice", remainingMs = 3_600_000) => {
+  const connect = (user = "alice", remainingMs = 3_600_000, googleSub = `google-${user}`) => {
     const attempt = createVisibleConsentState(db, session(user), protector, clock);
     expect(consumeVisibleConsentState(db, { ...session(user), state: attempt.state }, protector, clock)).not.toBeNull();
-    return saveVisibleGrant(db, { userId: user, googleSub: `google-${user}`, accessToken: `access-${user}`,
+    return saveVisibleGrant(db, { userId: user, googleSub, accessToken: `access-${user}`,
       refreshToken: `refresh-${user}`, expiresAt: clock + remainingMs, scopes: ["openid", VISIBLE_FILE_SCOPE],
       expectedGeneration: attempt.generation }, protector, clock);
   };
@@ -116,9 +121,9 @@ describe("optional visible Drive routes over owned real HTTP", () => {
       google: { clientId: "synthetic-client", clientSecret: "synthetic-client-secret" }, now: () => clock,
       appVersion: "test", fetch: outbound, verifyIdToken: () => verifyHook ? verifyHook() : Promise.resolve("google-alice"),
       source: () => ({ dataDir: directory, store: { bots: [bot("alice"), bot("bob")], groups: [],
-        snapshotThread: thread => ({ status: "ready", source: "sqlite", activeLeafId: null,
+        snapshotThread: thread => ({ status: "ready", source: "sqlite", activeLeafId: `${thread}-message`,
           messages: [{ id: `${thread}-message`, parentId: null, text: `${thread} durable body`, role: "user", kind: "text", at: 1 }] }) },
-        plans: { listPlans: () => [] } }) };
+        plans: { listPlans: () => [], transitionsFor: () => [] } }) };
     server = createServer((req, res) => {
       const user = z.string().catch("").parse(req.headers["x-owned-account"]);
       void handleVisibleDriveRoute(req, res, req.method ?? "GET", new URL(req.url!, "http://127.0.0.1").pathname,
@@ -136,9 +141,92 @@ describe("optional visible Drive routes over owned real HTTP", () => {
 
   it("requires actual sessions on loopback and advertises without creating grant/settings tables", async () => {
     expect((await get("status", "missing")).status).toBe(401);
-    expect(await (await get("status")).json()).toEqual({ available: true, connected: false, scope: "account-owned", restoreApply: "unsupported", settingsCaptured: false });
+    const status = checkedJson.parse(await (await get("status")).json());
+    expect(status).toEqual({ available: true, connected: false, scope: "account-owned", restoreApply: "unsupported", settingsCaptured: false,
+      viewRevision: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), grantRevision: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
+    expect(JSON.stringify(status)).not.toMatch(/alice|token|session|google|secret/i);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'drive_visible_%'").all()).toEqual([]);
     expect(calls).toEqual([]);
+  });
+  it("opaque view receipts distinguish account, resolved fallback and primary role without private data", async () => {
+    const read = async (user = "alice") => checkedJson.parse(await (await get("status", user)).json());
+    const initial = await read();
+    expect(await read()).toEqual(initial);
+    expect((await read("bob")).viewRevision).not.toBe(initial.viewRevision);
+    db.exec("UPDATE session SET activeOrganizationId=NULL WHERE userId='alice'");
+    // The actual resolver's personal-workspace fallback is the SAME view.
+    expect((await read()).viewRevision).toBe(initial.viewRevision);
+    ctx.operator = () => "bob";
+    expect((await read()).viewRevision).not.toBe(initial.viewRevision);
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'drive_visible_%'").all()).toEqual([]);
+  });
+  it("a stale view is a precondition after signed authorization and before body or writes", async () => {
+    const initial = checkedJson.parse(await (await get("status")).json());
+    const header = { "x-muster-visible-view": z.string().parse(initial.viewRevision) };
+    expect((await post("settings", { values: { theme: "dark" } }, "missing", header)).status).toBe(401);
+    expect((await post("settings", { values: { theme: "dark" } }, "bob", header)).status).toBe(409);
+    db.exec("INSERT INTO organization VALUES('next-org'); INSERT INTO member VALUES('m3','alice','next-org','2026-02-01'); UPDATE session SET activeOrganizationId='next-org' WHERE userId='alice'");
+    // The malformed body would be 400 if it were read before the stale view.
+    const refused = await post("settings", { invalid: true }, "alice", header);
+    expect(refused.status).toBe(409); expect(await refused.json()).toEqual({ error: "view-changed" });
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'drive_visible_%'").all()).toEqual([]);
+    expect(calls).toEqual([]);
+    expect((await post("settings", { values: { theme: "dark" } })).status).toBe(200);
+    expect(db.prepare("SELECT workspaceId FROM drive_visible_settings").get()?.workspaceId).toBe("next-org");
+  });
+  it("a workspace change during the genuine signed recheck refuses an initially matching write", async () => {
+    const initial = checkedJson.parse(await (await get("status")).json());
+    db.exec("INSERT INTO organization VALUES('next-org'); INSERT INTO member VALUES('m3','alice','next-org','2026-02-01')");
+    let reads = 0;
+    sessionHook = async user => {
+      if (++reads === 2) db.exec("UPDATE session SET activeOrganizationId='next-org' WHERE userId='alice'");
+      return session(user);
+    };
+    expect((await post("settings", { values: { theme: "dark" } }, "alice", { "x-muster-visible-view": z.string().parse(initial.viewRevision) })).status).toBe(409);
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'drive_visible_%'").all()).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+  it("a preserved prior grant is not a new callback receipt, and newer consent retires success", async () => {
+    connect();
+    const prior = checkedJson.parse(await (await get("status")).json());
+    const attempt = await start();
+    const pending = checkedJson.parse(await (await get("status")).json());
+    expect(pending.connected).toBe(true); expect(pending.viewRevision).toBe(prior.viewRevision);
+    expect(pending.grantRevision).not.toBe(prior.grantRevision);
+    const callback = checkedJson.parse(await (await get(`callback?state=${attempt.state}&code=owned-code`)).json());
+    const completed = checkedJson.parse(await (await get("status")).json());
+    expect(callback.viewRevision).toBe(prior.viewRevision);
+    expect(callback.grantRevision).toBe(completed.grantRevision);
+    expect(callback.grantRevision).not.toBe(pending.grantRevision);
+    await start();
+    expect((checkedJson.parse(await (await get("status")).json())).grantRevision).not.toBe(callback.grantRevision);
+  });
+  it.each(["arrival", "body recheck"])("refuses a new Google winner between pre-status and %s before settings writes", async interval => {
+    connect();
+    const initial = checkedJson.parse(await (await get("status")).json());
+    const header = { "x-muster-visible-view": z.string().parse(initial.viewRevision), "x-muster-visible-grant": z.string().parse(initial.grantRevision) };
+    const newerWinner = () => { revokeVisibleGrant(db, "alice"); connect("alice", 3_600_000, "google-newer-winner"); };
+    if (interval === "arrival") newerWinner();
+    else {
+      let reads = 0;
+      sessionHook = async user => { if (++reads === 2) newerWinner(); return session(user); };
+    }
+    const response = await post("settings", { values: { theme: "dark" } }, "alice", header);
+    expect(response.status).toBe(409); expect(await response.json()).toEqual({ error: "grant-changed" });
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name='drive_visible_settings'").all()).toEqual([]);
+    expect(getVisibleGrant(db, "alice", protector)?.googleSub).toBe("google-newer-winner");
+    expect(calls).toEqual([]);
+  });
+  it("an owned token refresh changes only custody and binds the actual backup receipt to current status", async () => {
+    connect("alice", 1000); await post("settings", { values: { theme: "dark" } });
+    const initial = checkedJson.parse(await (await get("status")).json());
+    const response = await post("backup", { format: "account-recovery-v1", passphrase: "owned-passphrase" }, "alice", { "x-muster-visible-view": z.string().parse(initial.viewRevision), "x-muster-visible-grant": z.string().parse(initial.grantRevision) });
+    expect(response.status).toBe(200);
+    const result = checkedJson.parse(await response.json());
+    const current = checkedJson.parse(await (await get("status")).json());
+    expect(result.viewRevision).toBe(initial.viewRevision); expect(current.viewRevision).toBe(initial.viewRevision);
+    expect(result.grantRevision).not.toBe(initial.grantRevision); expect(result.grantRevision).toBe(current.grantRevision);
+    expect(result.status).toBe("verified"); expect(files.size).toBeGreaterThan(0);
   });
   it("legacy or partially initialized grant schemas remain untouched by status and projection reads", async () => {
     connect();
@@ -359,6 +447,164 @@ describe("optional visible Drive routes over owned real HTTP", () => {
     expect(calls.some(call => ["PATCH", "DELETE"].includes(call.method))).toBe(false);
     connect("bob");
     expect((await post("restore/inspect", { fileId: answer.fileId, passphrase: "owned-account-passphrase" }, "bob")).status).toBe(422);
+  });
+
+  it("rich copies capture actual Store heads/task transitions and inspection reveals only bounded counts", async () => {
+    closeMessageDb(); rmSync(DATA_DIR, { recursive: true, force: true });
+    const original = new Store(() => ({ instanceId: "offline", model: "test" }));
+    const own = original.createBot({ ownerId: "alice", name: "Actual own bot" }, { seedMessages: false });
+    const foreign = original.createBot({ ownerId: "bob", name: "Actual foreign bot" }, { seedMessages: false });
+    const root = original.appendMessage(own.threadId, { role: "user", kind: "text", text: "PRIVATE-RICH-ROOT" });
+    const selected = original.appendMessage(own.threadId, { role: "bot", kind: "options",
+      card: { title: "PRIVATE-HISTORIC-ASK", subtitle: "Historical display", options: ["Yes", "No"], answered: "Yes" } });
+    original.appendMessage(own.threadId, { role: "bot", kind: "text", parentId: root.id, text: "PRIVATE-ALTERNATE-BRANCH" });
+    original.setActiveLeaf(own.threadId, selected.id);
+    original.appendMessage(foreign.threadId, { role: "user", kind: "text", text: "PRIVATE-FOREIGN-ROW" });
+    closeMessageDb();
+    const store = new Store(() => ({ instanceId: "offline", model: "test" }));
+    const plans = new TaskPlanEngine({ file: join(DATA_DIR, "task-plans.json"), now: () => 5 });
+    plans.start();
+    ctx.source = () => ({ dataDir: DATA_DIR, store, plans });
+    try {
+      const plan = plans.create({ botId: own.id, ownerId: "alice", threadId: own.threadId, title: "Private actual plan", steps: [{ title: "Checkpoint", kind: "checkpoint" }] });
+      plans.control(plan.id, { action: "pause" });
+      connect(); await post("settings", { values: { theme: "dark" } });
+      const response = await post("backup", { format: "account-recovery-v1", passphrase: "actual-account-passphrase" });
+      const receipt = checkedJson.parse(await response.json());
+      expect(response.status, JSON.stringify({ receipt, calls })).toBe(200);
+      expect(receipt).toMatchObject({ status: "verified", format: "account-recovery-v1", apply: "unsupported", created: true });
+      const bytes = files.get(z.string().parse(receipt.fileId))!.bytes;
+      const result = inspectAccountRecoveryArchive({ bytes, key: { custody: "user-held", passphrase: "actual-account-passphrase" },
+        resolveAccount: () => ({ account: { userId: "alice", workspaceId: "alice-org", sessionId: "alice-session", isPrimary: true }, googleSub: "google-alice" }) });
+      if (result.status !== "ready") throw new Error(JSON.stringify(result));
+      expect(result.state.threads).toMatchObject([{ activeLeafId: selected.id, messages: [{ id: root.id }, { id: selected.id }, {}] }]);
+      expect(result.state.plans).toMatchObject([{ id: plan.id, status: "paused" }]);
+      expect(result.state.transitions.length).toBe(plans.transitionsFor().length);
+      expect(JSON.stringify(result.state)).not.toContain("PRIVATE-FOREIGN-ROW");
+      const before = db.prepare("SELECT * FROM drive_visible_grants").all();
+      const inspect = await post("restore/inspect", { format: "account-recovery-v1", fileId: receipt.fileId, passphrase: "actual-account-passphrase" });
+      const body = checkedJson.parse(await inspect.json());
+      expect(inspect.status).toBe(200);
+      expect(body).toMatchObject({ status: "ready", format: "account-recovery-v1", apply: "unsupported",
+        counts: { bots: 1, groups: 0, threads: 1, messages: 3, plans: 1, transitions: plans.transitionsFor().length } });
+      expect(JSON.stringify(body)).not.toContain("PRIVATE-"); expect(body).not.toHaveProperty("state");
+      expect(body).not.toHaveProperty("projection"); expect(body).not.toHaveProperty("googleSub");
+      expect(db.prepare("SELECT * FROM drive_visible_grants").all()).toEqual(before);
+      expect((await post("restore/apply", { format: "account-recovery-v1" })).status).toBe(404);
+      expect(checkedJson.parse(await (await post("backup", { format: "account-recovery-v1", passphrase: "actual-account-passphrase" })).json()).created).toBe(false);
+      // The selector never turns the old projection inspector into the new one.
+      expect((await post("restore/inspect", { fileId: receipt.fileId, passphrase: "actual-account-passphrase" })).status).toBe(422);
+      expect(calls.some(call => ["PATCH", "DELETE"].includes(call.method))).toBe(false);
+    } finally { plans.stop(); closeMessageDb(); }
+  });
+  it("requires the actual parser/settings capture before exposing a new encrypted copy", async () => {
+    connect();
+    const missing = await post("backup", { format: "account-recovery-v1", passphrase: "owned-account-passphrase" });
+    expect(missing.status).toBe(409); expect(calls).toEqual([]);
+    await post("settings", { values: { theme: "dark" } });
+    const broken = vi.spyOn(visibleParser, "parseVisibleFiles").mockImplementation(() => { throw new Error("Actual parser unavailable"); });
+    try {
+      expect((await post("backup", { format: "account-recovery-v1", passphrase: "owned-account-passphrase" })).status).toBe(409);
+      expect(calls).toEqual([]); expect(files.size).toBe(0);
+    } finally { broken.mockRestore(); }
+  });
+  it("legacy explicit format remains a projection and format confusion cannot inspect it as a rich archive", async () => {
+    connect(); await post("settings", { values: { theme: "dark" } });
+    const receipt = checkedJson.parse(await (await post("backup", { format: "projection-v1", passphrase: "owned-account-passphrase" })).json());
+    expect(receipt.name).toMatch(/^muster-account-visible-v1-/); expect(receipt).not.toHaveProperty("format");
+    expect((await post("restore/inspect", { format: "projection-v1", fileId: receipt.fileId, passphrase: "owned-account-passphrase" })).status).toBe(200);
+    expect((await post("restore/inspect", { format: "account-recovery-v1", fileId: receipt.fileId, passphrase: "owned-account-passphrase" })).status).toBe(422);
+  });
+  it("fresh local IDs may inspect rich archives only under the same verified Google subject", async () => {
+    connect(); await post("settings", { values: { theme: "dark" } });
+    const receipt = checkedJson.parse(await (await post("backup", { format: "account-recovery-v1", passphrase: "owned-account-passphrase" })).json());
+    connect("bob");
+    const body = { format: "account-recovery-v1", fileId: receipt.fileId, passphrase: "owned-account-passphrase" };
+    expect((await post("restore/inspect", body, "bob")).status).toBe(422);
+    db.exec(`INSERT INTO user VALUES('fresh'); INSERT INTO organization VALUES('fresh-org');
+      INSERT INTO session VALUES('fresh-session','fresh','fresh-token','2026-10-06T12:00:00.000Z','fresh-org');
+      INSERT INTO member VALUES('fresh-member','fresh','fresh-org','2026-01-01');`);
+    sessionHook = user => Promise.resolve(["alice", "bob", "fresh"].includes(user) ? session(user) : null);
+    connect("fresh", 3_600_000, "google-alice");
+    const inspected = await post("restore/inspect", body, "fresh");
+    expect(inspected.status).toBe(200);
+    const summary = checkedJson.parse(await inspected.json());
+    expect(summary).toMatchObject({ format: "account-recovery-v1", apply: "unsupported", counts: { bots: 1 } });
+    expect(summary).not.toHaveProperty("source");
+    expect(db.prepare("SELECT userId,workspaceId FROM drive_visible_settings WHERE userId='fresh'").all()).toEqual([]);
+  });
+  it.each(["unsupported", "", 1, null])("rejects invalid archive format %s before refresh or transport", async format => {
+    connect("alice", 1000);
+    expect((await post("backup", { format, passphrase: "owned-account-passphrase" })).status).toBe(400);
+    expect((await post("restore/inspect", { format, fileId: "copy", passphrase: "owned-account-passphrase" })).status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+  it("new archive key/body constraints do not refresh tokens on rejected input", async () => {
+    connect("alice", 1000);
+    expect((await post("backup", { format: "account-recovery-v1", passphrase: "owned-account-passphrase", workspaceId: "bob-org" })).status).toBe(400);
+    expect((await post("restore/inspect", { format: "account-recovery-v1", fileId: "copy" })).status).toBe(400);
+    expect((await post("restore/inspect", { format: "account-recovery-v1", fileId: "copy", passphrase: "owned-account-passphrase", recoveryCode: "invalid" })).status).toBe(400);
+    expect((await post("backup", { format: "account-recovery-v1", passphrase: "x".repeat(32_769) })).status).toBe(413);
+    expect(calls).toEqual([]);
+  });
+  it.each(["session", "member", "grant"])("rich inspection fences %s revocation between metadata and media", async boundary => {
+    connect(); await post("settings", { values: { theme: "dark" } });
+    const receipt = checkedJson.parse(await (await post("backup", { format: "account-recovery-v1", passphrase: "owned-account-passphrase" })).json());
+    calls = [];
+    readHook = url => {
+      if (!url.includes(`/files/${String(receipt.fileId)}`)) return;
+      db.exec(boundary === "session" ? "DELETE FROM session WHERE userId='alice'"
+        : boundary === "member" ? "DELETE FROM member WHERE userId='alice'" : "DELETE FROM drive_visible_grants WHERE userId='alice'");
+    };
+    expect((await post("restore/inspect", { format: "account-recovery-v1", fileId: receipt.fileId, passphrase: "owned-account-passphrase" })).status).toBe(409);
+    expect(calls).toHaveLength(1); expect(calls[0]!.url).not.toContain("alt=media");
+  });
+  it("rich media body consumption rechecks live session rows and cancels the owned stream", async () => {
+    connect(); await post("settings", { values: { theme: "dark" } });
+    const receipt = checkedJson.parse(await (await post("backup", { format: "account-recovery-v1", passphrase: "owned-account-passphrase" })).json());
+    const saved = files.get(z.string().parse(receipt.fileId))!;
+    let reads = 0, cancelled = false;
+    ctx.fetch = async (url, init) => {
+      if (String(url).includes(`/files/${String(receipt.fileId)}?alt=media`)) {
+        calls.push({ url: String(url), method: init?.method ?? "GET", authorization: new Headers(init?.headers).get("authorization") });
+        return new Response(new ReadableStream<Uint8Array>({
+          pull(controller) {
+            reads++;
+            controller.enqueue(new Uint8Array(saved.bytes.subarray(0, 16)));
+            db.exec("UPDATE session SET token='rotated-during-body' WHERE userId='alice'");
+          }, cancel() { cancelled = true; },
+        }, { highWaterMark: 0 }));
+      }
+      return outbound(url, init);
+    };
+    expect((await post("restore/inspect", { format: "account-recovery-v1", fileId: receipt.fileId, passphrase: "owned-account-passphrase" })).status).toBe(409);
+    expect(reads).toBe(1); expect(cancelled).toBe(true);
+  });
+  it("request abort during rich upload cannot continue to readback or report verification", async () => {
+    connect(); await post("settings", { values: { theme: "dark" } });
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    let release!: (response: Response) => void;
+    let cancelled = false;
+    ctx.fetch = (url, init) => {
+      if (String(url).includes("/upload/drive/v3/files")) {
+        calls.push({ url: String(url), method: init?.method ?? "GET", authorization: new Headers(init?.headers).get("authorization") });
+        entered(); return new Promise(resolve => { release = resolve; });
+      }
+      return outbound(url, init);
+    };
+    const stop = new AbortController();
+    const pending = get("backup", "alice", { method: "POST", headers: { origin, "content-type": "application/json" },
+      body: JSON.stringify({ format: "account-recovery-v1", passphrase: "owned-account-passphrase" }), signal: stop.signal }).catch(() => null);
+    await started; stop.abort(); await pending;
+    release(new Response(new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } }), { status: 200 }));
+    // Wait for the late owned response to be discarded, not a time-based
+    // assumption that the handler or its client stopped.
+    for (let i = 0; i < 100 && !cancelled; i++) await new Promise<void>(resolve => setImmediate(resolve));
+    expect(cancelled).toBe(true);
+    expect(calls.filter(call => call.url.includes("/upload/drive/v3/files"))).toHaveLength(1);
+    expect(calls.some(call => call.url.includes("alt=media"))).toBe(false);
+    expect(calls.some(call => ["PATCH", "DELETE"].includes(call.method))).toBe(false);
   });
   it("revocation between metadata and media prevents further outbound requests", async () => {
     connect();

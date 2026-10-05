@@ -1,8 +1,9 @@
-// Explicit immutable account-projection copies only. No route activation,
+// Explicit immutable account-projection or rich account-recovery copies. No route activation,
 // destructive migration, appData access, overwrite, or installation restore.
 import type { VisibleAccessLease } from "./drive-visible-access.ts";
 import { accountBundleHash, buildAccountVisibleBundle, resolveAuthenticatedVisibleAccount,
-  sameVisibleAuthority, type AccountBundleResult } from "./drive-visible-account-bundle.ts";
+  sameVisibleAuthority, type AccountBundleResult, type ResolveVisibleAccount } from "./drive-visible-account-bundle.ts";
+import { buildAccountRecoveryArchive, inspectAccountRecoveryArchive } from "./drive-visible-account-archive.ts";
 import { inspectAccountVisibleRestore } from "./drive-visible-restore.ts";
 import { findOrCreateBackupsFolder, findOrCreateVisibleFolder, type DriveFileRef,
   type VisibleDriveClient } from "./drive-visible.ts";
@@ -14,7 +15,7 @@ export interface VisibleBackupClient extends VisibleDriveClient {
   getBinaryFile(id: string): Promise<{ body: Buffer; md5Checksum?: string }>;
 }
 export type VisibleBackupFailure = "account-unavailable" | "account-changed" | "bundle-unavailable"
-  | "ambiguous-folder" | "ambiguous-copy" | "invalid-copy" | "verification-failed" | "operation-failed";
+  | "archive-unavailable" | "copy-too-large" | "ambiguous-folder" | "ambiguous-copy" | "invalid-copy" | "verification-failed" | "operation-failed";
 export class VisibleBackupError extends Error {
   readonly code: VisibleBackupFailure;
   readonly createdFileId?: string;
@@ -39,6 +40,18 @@ export interface VerifiedVisibleBackup {
   unsupported: Extract<AccountBundleResult, { status: "ready" }>["unsupported"];
 }
 
+export interface VerifiedAccountRecoveryBackup extends Omit<VerifiedVisibleBackup, "unsupported"> {
+  format: "account-recovery-v1";
+  excludes: Extract<ReturnType<typeof buildAccountRecoveryArchive>, { status: "ready" }>['excludes'];
+}
+// The actual Google media client accepts at most 24 MiB, even though the
+// offline archive codec supports 48 MiB. Check before any folder operation.
+export const MAX_VISIBLE_RECOVERY_COPY_BYTES = 24 * 1024 * 1024;
+type CopyReceipt = Omit<VerifiedVisibleBackup, "unsupported">;
+interface PreparedCopy<Details extends object> {
+  bytes: Buffer; name: string; details: Details;
+  verify(bytes: Buffer): boolean;
+}
 const binaryMime = "application/octet-stream";
 const safeId = (value: string) => /^[A-Za-z0-9_-]{1,200}$/.test(value);
 const escapeQuery = (value: string) => value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
@@ -54,13 +67,53 @@ export async function writeAccountVisibleBackup(input: {
   lease: VisibleAccessLease;
   client: VisibleBackupClient;
 }): Promise<VerifiedVisibleBackup> {
+  return writeImmutableAccountCopy({ ...input, resolveAccount: input.bundle.resolveAccount, prepare: () => {
+    const ready = buildAccountVisibleBundle(input.bundle);
+    if (ready.status !== "ready") throw new VisibleBackupError("bundle-unavailable");
+    return { bytes: ready.bytes, name: `muster-account-visible-v1-${ready.binding.sourceDigest}.enc`,
+      details: { unsupported: ready.unsupported }, verify: bytes => {
+        const restored = inspectAccountVisibleRestore({ bytes,
+          key: { custody: "user-held", passphrase: input.bundle.key.passphrase }, resolveAccount: input.bundle.resolveAccount });
+        return restored.status === "ready" && restored.source.sourceDigest === ready.binding.sourceDigest
+          && restored.source.authorityDigest === ready.binding.authorityDigest;
+      } };
+  } });
+}
+
+/** Rich archives use their distinct actual codec and digest. They never borrow
+ * installation export or apply authority, and retain the same lease fences. */
+export async function writeAccountRecoveryBackup(input: {
+  archive: Parameters<typeof buildAccountRecoveryArchive>[0];
+  lease: VisibleAccessLease;
+  client: VisibleBackupClient;
+}): Promise<VerifiedAccountRecoveryBackup> {
+  return writeImmutableAccountCopy({ ...input, resolveAccount: input.archive.resolveAccount, prepare: () => {
+    const ready = buildAccountRecoveryArchive(input.archive);
+    if (ready.status !== "ready") throw new VisibleBackupError("archive-unavailable");
+    if (!Buffer.isBuffer(ready.bytes) || ready.bytes.length > MAX_VISIBLE_RECOVERY_COPY_BYTES) throw new VisibleBackupError("copy-too-large");
+    return { bytes: ready.bytes, name: `muster-account-recovery-v1-${ready.sourceDigest}.enc`,
+      details: { format: "account-recovery-v1" as const, excludes: ready.excludes }, verify: bytes => {
+        if (bytes.length > MAX_VISIBLE_RECOVERY_COPY_BYTES) return false;
+        const restored = inspectAccountRecoveryArchive({ bytes,
+          key: { custody: "user-held", passphrase: input.archive.key.passphrase }, resolveAccount: input.archive.resolveAccount });
+        return restored.status === "ready" && restored.state.sourceDigest === ready.sourceDigest;
+      } };
+  } });
+}
+
+async function writeImmutableAccountCopy<Details extends object>(input: {
+  resolveAccount: ResolveVisibleAccount;
+  prepare(): PreparedCopy<Details>;
+  lease: VisibleAccessLease;
+  client: VisibleBackupClient;
+}): Promise<CopyReceipt & Details> {
   let createdFileId: string | undefined;
   const fail = (code: VisibleBackupFailure): never => { throw new VisibleBackupError(code, createdFileId); };
-  const authority = resolveAuthenticatedVisibleAccount(input.bundle.resolveAccount);
+  const authority = resolveAuthenticatedVisibleAccount(input.resolveAccount);
   if (!authority) throw new VisibleBackupError("account-unavailable");
   const current = () => {
     input.lease.assertCurrent();
-    if (!sameVisibleAuthority(authority, resolveAuthenticatedVisibleAccount(input.bundle.resolveAccount))
+    if (!sameVisibleAuthority(authority, resolveAuthenticatedVisibleAccount(input.resolveAccount))
       || authority.googleSub !== input.lease.googleSub) fail("account-changed");
   };
   const call = async <T>(operation: () => Promise<T>): Promise<T> => {
@@ -71,11 +124,9 @@ export async function writeAccountVisibleBackup(input: {
   };
   try {
     current();
-    const bundle = buildAccountVisibleBundle(input.bundle);
-    if (bundle.status !== "ready") throw new VisibleBackupError("bundle-unavailable");
+    const ready = input.prepare();
     current();
-    const ready = bundle;
-    const name = `muster-account-visible-v1-${ready.binding.sourceDigest}.enc`;
+    const name = ready.name;
     const rootId = await call(() => input.client.resolveRootId());
     if (!safeId(rootId)) fail("invalid-copy");
     // Guard the individual list/create calls inside folder helpers as well as
@@ -125,15 +176,12 @@ export async function writeAccountVisibleBackup(input: {
     const downloaded = await call(() => input.client.getBinaryFile(file.id));
     if (!Buffer.isBuffer(downloaded.body)) fail("verification-failed");
     if (!existing && !downloaded.body.equals(ready.bytes)) fail("verification-failed");
-    const restored = inspectAccountVisibleRestore({ bytes: downloaded.body,
-      key: { custody: "user-held", passphrase: input.bundle.key.passphrase }, resolveAccount: input.bundle.resolveAccount });
-    if (restored.status !== "ready" || restored.source.sourceDigest !== ready.binding.sourceDigest
-      || restored.source.authorityDigest !== ready.binding.authorityDigest) fail("verification-failed");
+    if (!ready.verify(downloaded.body)) fail("verification-failed");
     const sha256 = accountBundleHash(downloaded.body);
     current();
     return { status: "verified", scope: "account-owned", apply: "unsupported",
       visibleFolderId: visible.id, backupFolderId: destination.id, fileId: file.id,
-      name, sha256, bytes: downloaded.body.byteLength, created: !existing, unsupported: ready.unsupported };
+      name, sha256, bytes: downloaded.body.byteLength, created: !existing, ...ready.details };
   } catch (error) {
     if (error instanceof VisibleBackupError) throw error;
     return fail("operation-failed");

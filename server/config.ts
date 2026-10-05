@@ -5,6 +5,8 @@ import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { DATA_DIR, configuredDataDir } from "./data-root-path.ts";
+export { DATA_DIR } from "./data-root-path.ts";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { customMcpServerSchema, type CustomMcpServer } from "./custom-mcp.ts";
@@ -281,11 +283,6 @@ export function parseConfigPatch(value: JsonValue): ConfigPatch {
 }
 
 // OMB_DATA_DIR isolates test/soak rigs from the user's real fleet.
-const configuredDataDir = process.env.OMB_DATA_DIR;
-if (configuredDataDir !== undefined && configuredDataDir.trim() === "") {
-  throw new Error("OMB_DATA_DIR must be a nonempty directory path when set");
-}
-export const DATA_DIR = configuredDataDir ?? join(homedir(), ".muster");
 const LEGACY_DATA_DIR = join(homedir(), ".opengrokbot");
 export const EVENTS_DIR = join(DATA_DIR, "events");
 export const NATIVE_DIR = join(DATA_DIR, "native");

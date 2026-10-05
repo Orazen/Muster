@@ -30,9 +30,9 @@ describe.skipIf(process.platform === "win32")("visible Drive registration in the
     const signed = encodeURIComponent(`${token}.${createHmac("sha256", secret).update(token).digest("base64")}`);
     return `better-auth.session_token=${signed}`;
   };
-  const request = <T>(path: string, user = "alice", value?: T, suppliedCookie = cookie(user)) => fetch(`${origin}${path}`, {
+  const request = <T>(path: string, user = "alice", value?: T, suppliedCookie = cookie(user), extraHeaders: Record<string, string> = {}) => fetch(`${origin}${path}`, {
     method: value === undefined ? "GET" : "POST", redirect: "error", signal: AbortSignal.timeout(10_000),
-    headers: { origin, cookie: suppliedCookie, "content-type": "application/json" },
+    headers: { origin, cookie: suppliedCookie, "content-type": "application/json", ...extraHeaders },
     body: value === undefined ? undefined : JSON.stringify(value),
   });
   const own = <T>(action: string, user = "alice", value?: T) => request(`${VISIBLE_DRIVE_ROUTE_PREFIX}/${action}`, user, value);
@@ -104,6 +104,23 @@ syncBuiltinESMExports();
     expect(resultSchema.parse(await response.json()).connected).toBe(false);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'drive_visible_%'").all()).toEqual([]);
   });
+  it("signed current-context receipts fence foreign and retired workspace writes before mutation", async () => {
+    const initial = resultSchema.parse(await (await own("status")).json());
+    const header = { "x-muster-visible-view": z.string().regex(/^[A-Za-z0-9_-]{43}$/).parse(initial.viewRevision) };
+    expect(JSON.stringify(initial)).not.toMatch(/owned-session-token|alice-session|alice-org|secret|accessToken/);
+    expect((await request(`${VISIBLE_DRIVE_ROUTE_PREFIX}/settings`, "bob", { values: { theme: "dark" } }, cookie("bob"), header)).status).toBe(409);
+    const created = new Date().toISOString();
+    db.prepare('INSERT INTO organization(id,name,slug,createdAt) VALUES(?,?,?,?)').run("alice-next", "Next", "alice-next", created);
+    db.prepare('INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,?,?,?)').run("alice-next-member", "alice-next", "alice", "owner", created);
+    db.exec("UPDATE session SET activeOrganizationId='alice-next' WHERE userId='alice'");
+    try {
+      const stale = await request(`${VISIBLE_DRIVE_ROUTE_PREFIX}/settings`, "alice", { invalid: true }, cookie("alice"), header);
+      expect(stale.status).toBe(409); expect(await stale.json()).toEqual({ error: "view-changed" });
+      expect(db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'drive_visible_%'").all()).toEqual([]);
+      const next = resultSchema.parse(await (await own("status")).json());
+      expect(next.viewRevision).not.toBe(initial.viewRevision);
+    } finally { db.exec("UPDATE session SET activeOrganizationId='alice-org' WHERE userId='alice'"); }
+  });
   it("captures explicit actual account preferences independently without opening whole-install backup routes", async () => {
     expect((await own("settings", "alice", { values: { theme: "dark" } })).status).toBe(200);
     expect(resultSchema.parse(await (await own("status")).json()).settingsCaptured).toBe(true);
@@ -126,6 +143,18 @@ syncBuiltinESMExports();
     expect(authorization.searchParams.get("scope")).toBe("openid https://www.googleapis.com/auth/drive.file");
     expect((await own("cancel", "alice", { state: body.state })).status).toBe(200);
     expect(db.prepare("SELECT * FROM drive_visible_oauth_states").all()).toEqual([]);
+  });
+  it("the actual index accepts bounded format selectors without weakening sessions, body limits or the old hosted wall", async () => {
+    for (const format of ["projection-v1", "account-recovery-v1"]) {
+      expect((await own("backup", "alice", { format, passphrase: "owned-user-held-passphrase" })).status).toBe(409);
+      expect((await own("restore/inspect", "alice", { format, fileId: "owned-copy", passphrase: "owned-user-held-passphrase" })).status).toBe(409);
+    }
+    expect((await own("backup", "alice", { format: "unknown", passphrase: "owned-user-held-passphrase" })).status).toBe(400);
+    expect((await own("restore/inspect", "alice", { format: "account-recovery-v1", fileId: "owned-copy" })).status).toBe(400);
+    expect((await request(`${VISIBLE_DRIVE_ROUTE_PREFIX}/backup`, "alice", { format: "account-recovery-v1", passphrase: "owned-user-held-passphrase" }, "")).status).toBe(401);
+    expect((await own("restore/apply", "alice", { format: "account-recovery-v1" })).status).toBe(404);
+    expect((await request("/api/workspace/export/v2")).status).toBe(403);
+    expect(existsSync(networkLog) ? readFileSync(networkLog, "utf8") : "").toBe("");
   });
   it("real ISO expiry, membership removal and deletion override previous signed cookies", async () => {
     db.prepare("UPDATE session SET expiresAt=? WHERE userId='bob'").run("2020-01-01T00:00:00.000Z");

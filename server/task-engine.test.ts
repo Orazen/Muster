@@ -671,3 +671,31 @@ describe("TaskPlanEngine — persistence", () => {
     expect(oversized.context?.workspace).toHaveLength(200);
   });
 });
+
+describe("fresh offline recovery parked plans",()=>{
+  function fixture(maxPlans=200){const h=harness({maxPlans});const prior=h.engine.create({botId:"foreign-bot",ownerId:"foreign",steps:["Keep"],start:false});
+    const before=readFileSync(h.file,"utf8");h.emitted.length=0;
+    const plan:TaskPlanRecord={...structuredClone(prior),id:"fresh-plan",ownerId:"current",botId:"fresh-bot",status:"paused",currentStep:null,lease:undefined,context:undefined,delivery:undefined};
+    return {h,prior,before,plan};}
+  it("preserves old record bytes/history and inserts only parked records without intents or events",()=>{
+    const f=fixture();f.h.engine.insertFreshRecoveryPlans([f.plan],f.before);
+    expect(f.h.engine.listPlans()).toEqual([f.prior,f.plan]);expect(f.h.emitted).toEqual([]);
+    expect(f.h.disk().plans[0]).toEqual(f.prior);expect(f.h.engine.plan(f.plan.id)).toMatchObject({status:"paused",currentStep:null});
+  });
+  it("refuses capacity before pruning foreign records and refuses active leases",()=>{
+    const f=fixture(1);expect(()=>f.h.engine.checkFreshRecoveryPlans([f.plan],f.before)).toThrow(/capacity/);expect(readFileSync(f.h.file,"utf8")).toBe(f.before);
+    const live=fixture();expect(()=>live.h.engine.insertFreshRecoveryPlans([{...live.plan,lease:{holder:"worker",expiresAt:999}}],live.before)).toThrow(/parked/);expect(readFileSync(live.h.file,"utf8")).toBe(live.before);
+  });
+  it("refuses reused identities instead of resetting task history",()=>{
+    const f=fixture();expect(()=>f.h.engine.insertFreshRecoveryPlans([{...f.plan,id:f.prior.id}],f.before)).toThrow(/parked/);expect(readFileSync(f.h.file,"utf8")).toBe(f.before);
+  });
+  it("preserves a newer plan and transition instead of blindly resetting caches",()=>{
+    const f=fixture(),before={plans:f.h.engine.listPlans(),transitions:f.h.engine.transitionsFor()};
+    f.h.engine.insertFreshRecoveryPlans([f.plan],f.before);
+    const after={plans:f.h.engine.listPlans(),transitions:f.h.engine.transitionsFor()};
+    f.h.engine.control(f.plan.id,{action:"cancel"});
+    const newer={plans:f.h.engine.listPlans(),transitions:f.h.engine.transitionsFor()};
+    expect(()=>f.h.engine.reloadCompensatedRecoveryPlans(before,after)).toThrow(/cache changed/);
+    expect({plans:f.h.engine.listPlans(),transitions:f.h.engine.transitionsFor()}).toEqual(newer);
+  });
+});
