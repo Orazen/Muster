@@ -7,22 +7,34 @@ import { AuthShell, authCardBox, authInputCls, authButtonCls } from "@/component
 import { AuthPasswordField } from "@/components/AuthPasswordField";
 import { GoogleSignIn } from "@/components/GoogleSignIn";
 import { EmailOtpSignIn } from "@/components/EmailOtpSignIn";
+import { peekStashedReferral, redeemReferral } from "@/lib/auth";
+import { withReferral } from "./SignupPage";
 import { authDestination } from "@/lib/auth-navigation";
 
 /** Account sign-in and device connection share a page, but remain separate actions. */
 export function LoginPage() {
-  const { capabilities, signIn, user, loading: authLoading, signOut, sessionError, retrySession } = useAuth();
+  const { capabilities, signIn, user, loading: authLoading, signOut, sessionError, retrySession, capabilitiesError, retryCapabilities } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const next = authDestination(params.get("next"));
-  const [error, setError] = useState("");
-  const submitting = useRef(false);
-
   // OAuth failures bounce back here as /sign-in?authError=<code> (the server
   // rewrites better-auth's /api/auth/error). state_mismatch is by far the
   // common one: the state cookie lives 5 minutes, so a Google chooser left
   // open past that expires the attempt — the fix is simply trying again.
+  //
+  // That rewrite is the reason the referral has to come back from the stash: the
+  // error URL carries only the code, so reading `ref`/`next` from it alone left
+  // the retry with no code to re-stash and no destination but the default. The
+  // attempt that redirected stashed both before it went, so restore them here —
+  // only on an error return, never on an ordinary arrival.
   const authError = params.get("authError");
+  const restored = authError ? peekStashedReferral() : null;
+  const next = authDestination(params.get("next") ?? restored?.next ?? null);
+  // A referral that arrived on the sign-up link and followed the visitor here. Redeemed only after
+  // a session exists, and never in a way that can block sign-in.
+  const ref = params.get("ref") ?? restored?.ref ?? null;
+  const [error, setError] = useState("");
+  const [recheckingCaps, setRecheckingCaps] = useState(false);
+  const submitting = useRef(false);
   const authErrorHint =
     authError === "state_mismatch"
       ? "That sign-in expired. Please try again."
@@ -55,6 +67,7 @@ export function LoginPage() {
         setError(result.error);
         return;
       }
+      await redeemReferral(ref);
       navigate(next);
     } catch {
       setError("Could not reach the server. Please try again.");
@@ -98,7 +111,7 @@ export function LoginPage() {
 
   return (
     <AuthShell title="Your day, with Muster." subtitle="Sign in to your workspace. Your next good idea starts here."
-      footer={<>New to Muster? <Link to={`/sign-up?next=${encodeURIComponent(next)}`} className="auth-link">Create an account</Link></>}>
+      footer={<>New to Muster? <Link to={withReferral("/sign-up", next, ref)} className="auth-link">Create an account</Link></>}>
       <div className="auth-stack">
         {sessionError && <div className="auth-notice auth-error" role="alert">
           <p>{sessionError}</p>
@@ -142,10 +155,18 @@ export function LoginPage() {
           </div>
         )}
 
-        <GoogleSignIn next={next} onError={setError} />
+        {capabilitiesError && <div className="auth-notice auth-error" role="alert">
+          <p>Could not load which sign-in methods this server offers. Google sign-in and one-time-code sign-in are hidden until it answers.</p>
+          <button type="button" className="auth-link" disabled={recheckingCaps} onClick={() => {
+            setRecheckingCaps(true);
+            void retryCapabilities().finally(() => setRecheckingCaps(false));
+          }}>{recheckingCaps ? "Checking…" : "Check again"}</button>
+        </div>}
+
+        <GoogleSignIn next={next} ref={ref} onError={setError} />
 
         {(googleConfigured || desktopOAuthHandoff) && <div className="auth-divider">or use your email</div>}
-        {capabilities.emailOtp && <EmailOtpSignIn next={next} />}
+        {capabilities.emailOtp && <EmailOtpSignIn next={next} onVerified={async () => { await redeemReferral(ref); }} />}
         <details className={`auth-password-option${capabilities.emailOtp ? "" : " auth-password-default"}`} open={capabilities.emailOtp ? undefined : true}>
           <summary hidden={!capabilities.emailOtp}>Use a password instead</summary>
         <form onSubmit={(e) => void handleEmailSignIn(e)} className="auth-form">

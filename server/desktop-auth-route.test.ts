@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { isDriveScope } from "./google-auth.ts";
@@ -269,6 +271,64 @@ posixOnly("desktop OAuth start route", () => {
     const { state, cookie } = authorization(await desktopStart(fixture), fixture);
     const location = await providerCancellation(fixture, state, cookie);
     expect(location.searchParams.get("error")).toBe("access_denied");
+  });
+
+  it("carries an encoded local callback route through the grant into the finish fragment", async () => {
+    // The handoff's whole job is to hand back a nested local route — a sign-in
+    // path carrying a referral query — as ONE opaque value. A dropped `&` or a
+    // stripped `?ref=` here loses the referral on the desktop return, and no UI
+    // test can see that: the browser never renders this URL.
+    const route = "/sign-in?ref=DESKTOP-CARRY-REF&next=/app";
+
+    // Synthetic cloud session for this fixture only — no real identity. The
+    // finish route refuses to mint a handoff without one.
+    const signup = await fetch(`${fixture.base}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: fixture.base },
+      body: JSON.stringify({
+        email: `desktop-carry-${randomBytes(6).toString("hex")}@example.test`,
+        password: randomBytes(24).toString("hex"),
+        name: "Fixture",
+      }),
+    });
+    expect(signup.status).toBe(200);
+    const session = signup.headers
+      .getSetCookie()
+      .map((cookieHeader) => cookieHeader.split(";")[0]!)
+      .join("; ");
+
+    // Start with the nested route as `next`; the grant has to remember it.
+    const query = new URLSearchParams({ redirect: "http://127.0.0.1:5199", next: route });
+    const started = await fetch(`${fixture.base}/desktop-auth/start?${query}`, { redirect: "manual" });
+    expect(started.status).toBe(302);
+
+    // Pin the Google bounce (state/cookie/scopes). The grant is NOT in this
+    // redirect — Better Auth holds the callbackURL that carries it in its own
+    // store, and the provider-error path drops it, so read it before cancelling.
+    authorization(started, fixture);
+    const db = new DatabaseSync(join(fixture.directory, "data", "auth.db"));
+    const rows = z.array(z.object({ value: z.string() })).parse(db.prepare("SELECT value FROM verification").all());
+    db.close();
+    const recorded = rows
+      .map((row) => z.object({ callbackURL: z.string() }).parse(JSON.parse(row.value)))
+      .find((entry) => entry.callbackURL.startsWith("/desktop-auth/done"));
+    if (!recorded) throw new Error("this desktop start recorded no callback carrying a grant");
+    const grant = new URL(recorded.callbackURL, "https://muster.invalid").searchParams.get("grant");
+    if (!grant) throw new Error("the recorded desktop callback carried no grant id");
+
+    // Trade the grant: the route lands in the FRAGMENT, never the query, so it
+    // cannot reach access logs or Referrer headers.
+    const finished = await fetch(`${fixture.base}/desktop-auth/done?grant=${encodeURIComponent(grant)}`, {
+      redirect: "manual",
+      headers: { cookie: session },
+    });
+    expect(finished.status).toBe(302);
+    const location = new URL(finished.headers.get("location") ?? "", fixture.base);
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    expect(fragment.get("code")).toBeTruthy();
+    // Exact round trip: the decoded value is byte-for-byte the route we sent.
+    expect(fragment.get("next")).toBe(route);
+    expect(location.search).toBe("");
   });
 
   it("rejects a callback with the state query but no browser state cookie", async () => {

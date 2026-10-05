@@ -1,11 +1,18 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { useAuth } from "@/lib/auth";
+import { redeemReferral, useAuth } from "@/lib/auth";
 import { AuthShell, authInputCls, authButtonCls } from "@/components/AuthShell";
 
 import { GoogleSignIn } from "@/components/GoogleSignIn";
 import { AuthPasswordField } from "@/components/AuthPasswordField";
 import { authDestination, AUTH_PASSWORD_MIN_LENGTH } from "@/lib/auth-navigation";
+
+/** Builds a query string that keeps `ref` alongside `next`, so a referral survives navigation. */
+export function withReferral(path: string, next: string, ref: string | null): string {
+  const query = new URLSearchParams({ next });
+  if (ref) query.set("ref", ref);
+  return `${path}?${query.toString()}`;
+}
 
 /** Two ways to create an account, neither hidden behind the other:
  *   1. Continue with Google — one tap where OAuth creds are configured.
@@ -14,7 +21,7 @@ import { authDestination, AUTH_PASSWORD_MIN_LENGTH } from "@/lib/auth-navigation
  * The old version was Google-only: deployments without OAuth creds showed
  * an operator-facing env-var note and no way to create an account at all. */
 export function SignupPage() {
-  const { capabilities, signUp, sessionError, retrySession } = useAuth();
+  const { capabilities, signUp, sessionError, retrySession, capabilitiesError, retryCapabilities } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = authDestination(params.get("next"));
@@ -24,18 +31,14 @@ export function SignupPage() {
   const [password, setPassword] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
   const [rechecking, setRechecking] = useState(false);
+  const [recheckingCaps, setRecheckingCaps] = useState(false);
   const googleConfigured = capabilities.socialProviders.includes("google");
 
   async function continueToWorkspace() {
     // Only redeem after a confirmed session, including recovery from a
     // successful account creation whose session check was unavailable.
-    const ref = params.get("ref");
-    if (ref) {
-      await fetch("/api/referral/redeem", {
-        method: "POST", headers: { "content-type": "application/json" },
-        credentials: "include", body: JSON.stringify({ code: ref }),
-      }).catch(() => {});
-    }
+    // A rejected referral must not stop someone reaching the workspace they just created.
+    await redeemReferral(params.get("ref"));
     navigate(next);
   }
 
@@ -64,7 +67,7 @@ export function SignupPage() {
 
   return (
     <AuthShell title="Create your account" subtitle="One workspace for your agents and their work."
-      footer={<>Already have an account? <Link to={`/sign-in?next=${encodeURIComponent(next)}`} className="auth-link">Sign in</Link></>}>
+      footer={<>Already have an account? <Link to={withReferral("/sign-in", next, params.get("ref"))} className="auth-link">Sign in</Link></>}>
       <div className="auth-stack">
         {sessionError && <div className="auth-notice auth-error" role="alert">
           <p>{sessionError}</p>
@@ -83,7 +86,15 @@ export function SignupPage() {
           </div>
         )}
 
-        <GoogleSignIn next={next} onError={setError} />
+        {capabilitiesError && <div className="auth-notice auth-error" role="alert">
+          <p>Could not load which sign-in methods this server offers. Google sign-in and one-time-code sign-in are hidden until it answers.</p>
+          <button type="button" className="auth-link" disabled={recheckingCaps} onClick={() => {
+            setRecheckingCaps(true);
+            void retryCapabilities().finally(() => setRecheckingCaps(false));
+          }}>{recheckingCaps ? "Checking…" : "Check again"}</button>
+        </div>}
+
+        <GoogleSignIn next={next} ref={params.get("ref")} onError={setError} />
 
         {(googleConfigured || capabilities.desktopOAuth) && <div className="auth-divider">or use your email</div>}
         <form onSubmit={(e) => void handleEmailSignUp(e)} className="auth-form">

@@ -433,6 +433,262 @@ test("an in-flight OTP send freezes its address and submits only once", async ({
   } finally { release(); }
 });
 
+test("the pairing page sends a visitor to sign-in and keeps the local next target, then shows a real code", async ({ harness, openAuth }) => {
+  // This redirect assertion used to live inside the shared pairCodeFromCloud fixture, which now
+  // takes its session from the sign-in API and so can no longer reach the unauthenticated page.
+  // It is the entry contract, so it is asserted here rather than dropped.
+  const page = await openAuth(harness.cloudUrl);
+  await page.goto(`${harness.cloudUrl}/pair`);
+  await expect(page).toHaveURL(`${harness.cloudUrl}/sign-in?next=%2Fpair`);
+  await signIn(page, harness);
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`);
+  await expect(page.getByText(`Signed in as ${harness.email}.`, { exact: true })).toBeVisible();
+  // The code reached by the direct-password route is a real redeemable code, not a stand-in, so
+  // the fixture's move to the API did not weaken what these specs depend on.
+  await expect(page.getByLabel("Pairing code", { exact: true })).toHaveValue(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/);
+  await expect(page.getByRole("button", { name: "Copy code", exact: true })).toBeEnabled();
+});
+
+// ── Referral ref: preserved across navigation, redeemed only after a session ───
+
+test("a referral survives the hand-off from sign-up to sign-in and is redeemed only after sign-in", async ({ harness, openAuth }) => {
+  const page = await openAuth(harness.cloudUrl);
+  const codes: string[] = [];
+  await page.route(`${harness.cloudUrl}/api/referral/redeem`, async (route) => {
+    codes.push(route.request().postDataJSON().code);
+    await route.fulfill({ status: 200, json: { ok: true } });
+  });
+
+  await page.goto(`${harness.cloudUrl}/sign-up?ref=REF-42&next=${encodeURIComponent("/pair")}`);
+  // Nothing may be redeemed before there is a session: the server answers 401 and the code is lost.
+  expect(codes).toEqual([]);
+
+  // The visitor already has an account, so the referral must follow them to sign-in rather than
+  // being dropped at the boundary.
+  await page.getByRole("link", { name: "Sign in", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`ref=REF-42`));
+  expect(codes).toEqual([]);
+
+  await signIn(page, harness);
+  await expect.poll(() => codes).toEqual(["REF-42"]);
+  // A safe next is still honoured: the referral must not swallow the destination.
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`);
+});
+
+// Retitled with the feature: the previous name claimed the rejection is *reported*, which nothing
+// does — the outcome is returned to the caller and no UI surfaces it. What is actually guaranteed
+// (and what this asserts) is that a rejected code costs nobody their sign-in.
+test("a rejected referral does not strand the sign-in it followed", async ({ harness, openAuth }) => {
+  const page = await openAuth(harness.cloudUrl, { expectedHttpErrors: [{ path: "/api/referral/redeem", status: 400, count: 1 }] });
+  await page.route(`${harness.cloudUrl}/api/referral/redeem`, (route) =>
+    route.fulfill({ status: 400, json: { error: "that referral code isn't valid" } }),
+  );
+  await page.goto(`${harness.cloudUrl}/sign-in?ref=BAD-1&next=${encodeURIComponent("/pair")}`);
+  await signIn(page, harness);
+  // The whole point: a referral is a bonus, not an entitlement. A rejected code must not strand
+  // someone who has just signed in.
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`);
+  await expect(page.getByRole("button", { name: "Copy code", exact: true })).toBeEnabled();
+});
+
+// ── A stalled referral can never cost an authenticated user their navigation ───
+
+const STALL_BUDGET_MS = 8000;
+
+test("a referral endpoint that never answers cannot block password sign-in", async ({ harness, openAuth }) => {
+  const page = await openAuth(harness.cloudUrl);
+  await page.route(`${harness.cloudUrl}/api/referral/redeem`, () => { /* held open on purpose */ });
+
+  await page.goto(`${harness.cloudUrl}/sign-in?ref=SLOW-1&next=${encodeURIComponent("/pair")}`);
+  const started = Date.now();
+  await signIn(page, harness);
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`, { timeout: STALL_BUDGET_MS });
+  expect(Date.now() - started).toBeLessThan(STALL_BUDGET_MS);
+});
+
+test("a referral endpoint that never answers cannot block one-time-code sign-in", async ({ harness, openAuth }) => {
+  const sendPath = "/api/auth/email-otp/send-verification-otp";
+  const verifyPath = "/api/auth/sign-in/email-otp";
+  const page = await openAuth(harness.cloudUrl);
+  await overrideCapabilities(page, harness.cloudUrl, { emailOtp: true });
+  await page.route(`${harness.cloudUrl}/api/referral/redeem`, () => { /* held open on purpose */ });
+  await page.route(harness.cloudUrl + sendPath, (route) => route.fulfill({ json: { success: true } }));
+  await page.route(harness.cloudUrl + verifyPath, async (route: Route) => {
+    // Synthetic OTP acceptance backed by a real password-created fixture session. No mail delivery
+    // or provider OTP validation is claimed.
+    const response = await route.fetch({ url: `${harness.cloudUrl}/api/auth/sign-in/email`,
+      postData: JSON.stringify({ email: harness.email, password: harness.password }) });
+    await route.fulfill({ response });
+  });
+
+  await page.goto(`${harness.cloudUrl}/sign-in?ref=SLOW-2&next=${encodeURIComponent("/pair")}`);
+  await page.getByLabel("Email address for a sign-in code", { exact: true }).fill(harness.email);
+  await page.getByRole("button", { name: "Email me a code", exact: true }).click();
+  const code = page.getByLabel("6-digit code", { exact: true });
+  await expect(code).toBeVisible();
+  await code.fill("111111");
+
+  const started = Date.now();
+  await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`, { timeout: STALL_BUDGET_MS });
+  expect(Date.now() - started).toBeLessThan(STALL_BUDGET_MS);
+});
+
+test("a referral endpoint that never answers cannot block account creation", async ({ harness, openAuth }) => {
+  const page = await openAuth(harness.cloudUrl);
+  await page.route(`${harness.cloudUrl}/api/referral/redeem`, () => { /* held open on purpose */ });
+
+  const email = `referral-stall-${Date.now()}@example.test`;
+  await page.goto(`${harness.cloudUrl}/sign-up?ref=SLOW-3&next=${encodeURIComponent("/pair")}`);
+  await page.getByLabel("Your name", { exact: true }).fill("Referral Stall");
+  await page.getByLabel("Email address", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(harness.password);
+
+  const started = Date.now();
+  await page.getByRole("button", { name: "Create account", exact: true }).click();
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`, { timeout: STALL_BUDGET_MS });
+  expect(Date.now() - started).toBeLessThan(STALL_BUDGET_MS);
+});
+
+// ── Google first-account signup: the one path that used to drop the code ───────
+
+test("a Google first-account signup carries the referral across the return and redeems it once a session exists", async ({ harness, openAuth }) => {
+  const page = await openAuth(harness.cloudUrl);
+  const codes: string[] = [];
+  await page.route(`${harness.cloudUrl}/api/referral/redeem`, async (route) => {
+    codes.push(route.request().postDataJSON().code);
+    await route.fulfill({ status: 200, json: { ok: true } });
+  });
+  // No real provider is contacted: initiation is answered locally, exactly as the existing
+  // initiation spec does, so this stays a synthetic OAuth round trip.
+  await page.route(`${harness.cloudUrl}/api/auth/sign-in/social`, (route) =>
+    route.fulfill({ json: { redirect: false } }));
+
+  await page.goto(`${harness.cloudUrl}/sign-up?ref=REF-G&next=${encodeURIComponent("/pair")}`);
+  await page.getByRole("button", { name: "Continue with Google", exact: true }).click();
+
+  // The carry: the code is held for the duration of the redirect, because the OAuth return carries
+  // only the callback path and nothing else would still know it existed. The stash is a record now
+  // (ref + destination + attempt + expiry), so read the code back out of it.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const raw = sessionStorage.getItem("muster.referral");
+        if (!raw) return "";
+        try {
+          // SAFETY: this key is written only by stashReferral in src/lib/auth.tsx, which
+          // serialises a schema-validated record whose `ref` is a non-empty string.
+          const record = JSON.parse(raw) as { ref?: string };
+          return record.ref ?? "";
+        } catch {
+          return "";
+        }
+      }),
+    )
+    .toBe("REF-G");
+  expect(codes).toEqual([]);
+
+  // The return itself: session already established, landing on `next`, no `ref` in the URL. That is
+  // precisely the state in which the code used to be unrecoverable.
+  await page.evaluate(async ({ email, password }) => {
+    const response = await fetch("/api/auth/sign-in/email", {
+      method: "POST", headers: { "content-type": "application/json" }, credentials: "include",
+      body: JSON.stringify({ email, password }),
+    });
+    if (!response.ok) throw new Error(`fixture sign-in failed: ${response.status}`);
+  }, { email: harness.email, password: harness.password });
+
+  await page.goto(`${harness.cloudUrl}/pair`);
+  await expect.poll(() => codes).toEqual(["REF-G"]);
+});
+
+// ── Capability failure, visible retry, repeated failure, successful recovery ────
+
+test("a failed session discovery stays recoverable across two failures and a retry reveals methods without a reload", async ({ harness, openAuth }) => {
+  const page = await openAuth(harness.cloudUrl, {
+    expectedHttpErrors: [
+      { path: "/api/auth/get-session", status: 503, count: 2 },
+      { path: "/api/auth-capabilities", status: 503, count: 2 },
+    ],
+  });
+  let failing = true;
+  await page.route(`${harness.cloudUrl}/api/auth/get-session`, (route) =>
+    failing
+      ? route.fulfill({ status: 503, json: { error: "session store unavailable" } })
+      : route.continue(),
+  );
+  await page.route(`${harness.cloudUrl}/api/auth-capabilities`, (route) =>
+    failing
+      ? route.fulfill({ status: 503, json: { error: "capabilities unavailable" } })
+      : route.continue(),
+  );
+
+  await page.goto(`${harness.cloudUrl}/sign-in?next=${encodeURIComponent("/pair")}`);
+  // A genuine failure is VISIBLE, with a retry control rather than a dead page. Both reads fail
+  // here and each now reports on its own terms: the session error, and the capability error that
+  // used to be swallowed. Naming both is the point — one generic `alert` locator stopped
+  // resolving the moment a second, independently actionable notice could appear.
+  const retry = page.getByRole("button", { name: "Check sign-in again", exact: true });
+  await expect(page.getByRole("alert").filter({ hasText: "Muster couldn" })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "Could not load which sign-in" })).toBeVisible();
+  await expect(retry).toBeVisible();
+
+  // A second failure must leave the visitor recoverable: still on the page, retry still offered.
+  await retry.click();
+  await expect(retry).toBeVisible();
+
+  // Successful recovery makes the available methods visible with NO reload.
+  failing = false;
+  await retry.click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  const signInButton = page.getByRole("button", { name: "Sign in with email", exact: true });
+  await expect(signInButton).toBeVisible();
+  await signIn(page, harness);
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`);
+});
+
+test("a capability-only failure offers a retry, and that retry brings the hidden methods back", async ({ harness, openAuth }) => {
+  // Rewritten with the feature it documents. The previous version asserted that a failed
+  // /api/auth-capabilities read is swallowed on purpose - correct when written, because the code did
+  // swallow it, and it is exactly the gap the review raised: a silent failure left no way to tell
+  // "this server has no optional flows" from "the request never arrived". The failure is now
+  // surfaced on its own, distinct from the session, with a retry whose success restores visibility.
+  let failing = true;
+  const page = await openAuth(harness.cloudUrl, {
+    expectedHttpErrors: [{ path: "/api/auth-capabilities", status: 503, count: 1 }],
+  });
+  await page.route(`${harness.cloudUrl}/api/auth-capabilities`, (route) =>
+    failing
+      ? route.fulfill({ status: 503, json: { error: "capabilities unavailable" } })
+      : route.continue(),
+  );
+
+  await page.goto(`${harness.cloudUrl}/sign-in?next=${encodeURIComponent("/pair")}`);
+  await showPassword(page);
+
+  // The password path survives untouched: it does not depend on the capabilities read.
+  await expect(page.getByRole("button", { name: "Sign in with email", exact: true })).toBeVisible();
+  // The SESSION is not claimed to be broken — that control belongs to session discovery.
+  await expect(page.getByRole("button", { name: "Check sign-in again", exact: true })).toHaveCount(0);
+  // The CAPABILITY failure is visible and actionable instead of silent.
+  const capabilityRetry = page.getByRole("button", { name: "Check again", exact: true });
+  await expect(capabilityRetry).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("Could not load which sign-in methods");
+
+  // Methods the server could not vouch for stay withheld while the read is failing.
+  await expect(page.getByRole("button", { name: "Continue with Google", exact: true })).toHaveCount(0);
+
+  // One retry, no reload, and the previously hidden method is offered again.
+  failing = false;
+  await capabilityRetry.click();
+  await expect(page.getByRole("button", { name: "Continue with Google", exact: true })).toBeVisible();
+  await expect(capabilityRetry).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
+  await signIn(page, harness);
+  await expect(page).toHaveURL(`${harness.cloudUrl}/pair`);
+});
+
 test("a real displayed pairing code signs the desktop into the same account at 320px", async ({ harness, openAuth }) => {
   const cloud = await openAuth(harness.cloudUrl, { width: 320 });
   await cloud.goto(`${harness.cloudUrl}/sign-in?next=%2Fpair`);

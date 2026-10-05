@@ -2,14 +2,40 @@ import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AuthCapabilities } from "@/lib/auth";
+import { clearStashedReferral, stashReferral, type AuthCapabilities } from "@/lib/auth";
 import { LoginPage } from "./LoginPage";
 import { SignupPage } from "./SignupPage";
 
-const mocks = vi.hoisted(() => ({ useAuth: vi.fn() }));
-// SSR checks page markup only; it does not verify real provider or session behavior.
+const mocks = vi.hoisted(() => {
+  // `auth.tsx` reads `window.location.origin` as it evaluates, and the referral stash lives in
+  // `sessionStorage`; both must exist before that module is imported, which `vi.hoisted` is the
+  // only ordering that guarantees in a file whose environment is node.
+  const store = new Map<string, string>();
+  Object.defineProperty(globalThis, "window", {
+    value: { location: { origin: "http://127.0.0.1:5199" } },
+    configurable: true,
+    writable: true,
+  });
+  Object.defineProperty(globalThis, "sessionStorage", {
+    value: {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => { store.set(key, value); },
+      removeItem: (key: string) => { store.delete(key); },
+    },
+    configurable: true,
+    writable: true,
+  });
+  return { useAuth: vi.fn() };
+});
+
+// SSR checks page markup only; it does not verify real provider or session behavior. Everything
+// except the session hook stays real: the OAuth-error referral restore under test lives in this
+// module, and mocking it would mean asserting against the mock rather than the behaviour.
 // oxlint-disable-next-line anti-slop/no-module-mocking -- isolate browser/auth I/O from Node-only markup tests
-vi.mock("@/lib/auth", () => ({ useAuth: mocks.useAuth }));
+vi.mock("@/lib/auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth")>()),
+  useAuth: mocks.useAuth,
+}));
 
 const baseCapabilities: AuthCapabilities = {
   emailVerification: false,
@@ -21,11 +47,24 @@ const baseCapabilities: AuthCapabilities = {
   pairingCloudUrl: null,
 };
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  // A stash is tab-scoped state; leaving one behind would let it satisfy the next test's page.
+  clearStashedReferral();
+});
 
-function renderPage(Page: ComponentType, capabilities: Partial<AuthCapabilities> = {}, path = "/sign-in", sessionError: string | null = null) {
+interface ContextOverrides {
+  /** Mirrors a failed /api/auth-capabilities read: capabilities stay at their initial value. */
+  readonly capabilitiesError?: boolean;
+  readonly retryCapabilities?: () => Promise<boolean>;
+}
+
+function renderPage(Page: ComponentType, capabilities: Partial<AuthCapabilities> = {}, path = "/sign-in", sessionError: string | null = null, overrides: ContextOverrides = {}) {
   mocks.useAuth.mockReturnValue({
     capabilities: { ...baseCapabilities, ...capabilities },
+    capabilitiesError: false,
+    retryCapabilities: vi.fn(() => Promise.resolve(true)),
+    ...overrides,
     user: null,
     session: null,
     loading: false,
@@ -143,6 +182,24 @@ describe("auth form contracts", () => {
     expect(markup).toContain(`href="/sign-up?next=${encodeURIComponent(next)}"`);
   });
 
+  // Regression: the OAuth failure route rewrites the return down to `authError=<code>`, so the URL
+  // this page renders from carries neither the referral nor the destination. Both were stashed by
+  // the attempt that redirected, so the page has to put them back — reading the empty query string
+  // alone was what dropped the code and sent every retry to the default destination.
+  it("restores the referral and destination the OAuth error route stripped from the URL", () => {
+    stashReferral("REF-9", "/pair", "attempt-1");
+    const markup = renderPage(LoginPage, {}, "/sign-in?authError=state_mismatch");
+    expect(markup).toContain("That sign-in expired");
+    // `&` is entity-escaped by renderToStaticMarkup, so the separator arrives as `&amp;`.
+    expect(markup).toContain(`href="/sign-up?next=${encodeURIComponent("/pair")}&amp;ref=REF-9"`);
+  });
+
+  it("restores nothing when the failed attempt never carried a referral", () => {
+    const markup = renderPage(LoginPage, {}, "/sign-in?authError=state_mismatch");
+    expect(markup).toContain(`href="/sign-up?next=${encodeURIComponent("/app")}"`);
+    expect(markup).not.toContain("&amp;ref=");
+  });
+
   it("hides the one-time-code path unless the server advertises it", () => {
     const markup = renderPage(LoginPage);
     expect(markup).not.toContain("Email me a code");
@@ -182,4 +239,39 @@ it("makes email codes primary while keeping the password choice discoverable", (
   const markup = renderPage(LoginPage, { emailOtp: true });
   expect(markup.indexOf('id="otp-email"')).toBeLessThan(markup.indexOf('id="password"'));
   expect(markup).toMatch(/<details class="auth-password-option"><summary>Use a password instead/);
+});
+
+// A capability read that fails is not the same claim as "this server offers no optional flows":
+// the first is something we could not find out, the second is a fact. The page must say which,
+// because the only difference a user can act on is the one that offers a retry.
+describe("capability failure is visible and recoverable", () => {
+  it.each([LoginPage, SignupPage])("%s offers a retry and withholds methods it could not confirm", (Page) => {
+    const markup = renderPage(Page, {}, "/sign-in", null, { capabilitiesError: true });
+    expect(markup).toContain("Could not load which sign-in methods this server offers");
+    expect(markup).toContain("Check again</button>");
+    expect(markup).not.toContain("Continue with Google");
+    expect(markup).not.toContain('id="otp-email"');
+  });
+
+  it.each([LoginPage, SignupPage])("%s shows the methods again once the retry succeeds", (Page) => {
+    const failed = renderPage(Page, {}, "/sign-in", null, { capabilitiesError: true });
+    expect(failed).not.toContain("Continue with Google");
+    expect(failed).not.toContain("Email me a code");
+
+    const recovered = renderPage(
+      Page,
+      { socialProviders: ["google"], emailOtp: true },
+      "/sign-in",
+      null,
+      { capabilitiesError: false },
+    );
+    expect(recovered).toContain("Continue with Google");
+    expect(recovered).not.toContain("Check again</button>");
+  });
+
+  it("does not nag when the server simply has no optional flows", () => {
+    const markup = renderPage(LoginPage, {}, "/sign-in", null, { capabilitiesError: false });
+    expect(markup).not.toContain("Check again</button>");
+    expect(markup).toContain("Sign in with email");
+  });
 });
