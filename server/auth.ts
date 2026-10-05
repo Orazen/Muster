@@ -89,10 +89,27 @@ function resolveSecret(): string {
   const secretPath = join(DATA_DIR, "auth.secret");
   if (existsSync(secretPath)) {
     const existing = readFileSync(secretPath, "utf8").trim();
-    if (existing) return existing;
+    if (existing) {
+      // This is the only repair point for upgraded installs: the generation
+      // path below tightens only the inode it creates, so a file an older
+      // build left broad (the pre-fix write had no mode and chmod'd after
+      // the rename) would otherwise stay broad forever.
+      try {
+        chmodSync(secretPath, 0o600);
+      } catch {
+        // best effort — Windows has no POSIX mode bits
+      }
+      return existing;
+    }
   }
   const generated = randomBytes(32).toString("base64");
-  writeFileAtomic(secretPath, generated);
+  // Created 0600 at the temporary inode itself: this secret signs every
+  // session AND derives the drive-visible credential custody key, so the
+  // window between rename and chmod must not expose it at default perms —
+  // a crash there used to leave it readable by every local account for
+  // good. writeFileAtomic's mode applies to the temp inode, so no rename
+  // window remains on this path.
+  writeFileAtomic(secretPath, generated, { mode: 0o600 });
   try {
     chmodSync(secretPath, 0o600);
   } catch {

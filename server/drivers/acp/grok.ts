@@ -3,9 +3,11 @@
 // (~/.grok/auth.json), NOT the xAI API key (that driver is drivers/grok.ts).
 // The generic protocol runtime lives in acp/core.ts; this file is only the
 // per-harness quirks. Verified against grok 1.0.0.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+import { writeCredentialFile } from "./credential-write.ts";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
@@ -176,7 +178,7 @@ export function ensureGrokInjectSlug(
     "",
   ].join("\n");
   const next = text && !text.endsWith("\n") ? `${text}\n\n${block}` : `${text}${text ? "\n" : ""}${block}`;
-  writeFileSync(path, next);
+  writeCredentialFile(path, next);
   return slug;
 }
 

@@ -9,10 +9,11 @@
 // limited per IP so guessing is hopeless long before the code expires.
 
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
+import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 
 const CODE_TTL_MS = 5 * 60_000;
@@ -67,11 +68,12 @@ function persistStore(): void {
       pending: Object.fromEntries(pending),
       attempts: Object.fromEntries(verifyAttempts),
     };
-    const tmp = storePath() + ".tmp";
     // SAFETY: the only bytes ever written here are this module's own JSON
     // envelope (same trust level as the in-memory maps it mirrors).
-    writeFileSync(tmp, JSON.stringify(file));
-    renameSync(tmp, storePath());
+    // A live pairing code IS the credential, so the file is created 0600 at
+    // the temporary inode itself — a crash mid-write must never leave it
+    // readable by every other account on the machine (the config.json rule).
+    writeFileAtomic(storePath(), JSON.stringify(file), { mode: 0o600 });
   } catch {
     // Persistence is best-effort: in-memory behavior remains correct for
     // the current process even if the disk write fails.

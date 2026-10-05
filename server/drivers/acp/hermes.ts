@@ -4,9 +4,11 @@
 // without an OpenRouter key — that is the "HTTP 401: Missing Authentication
 // header" failure. Inject writes providers.<host> and session/set_model
 // `custom:<host>:<model>` instead.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+import { writeCredentialFile } from "./credential-write.ts";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
@@ -63,7 +65,7 @@ export function ensureHermesInjectProvider(
   if (!host) return modelId;
 
   const dir = hermesHome(env);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const path = join(dir, "config.yaml");
   let text = "";
   try {
@@ -72,7 +74,7 @@ export function ensureHermesInjectProvider(
     text = "";
   }
   const next = upsertHermesProvider(text, inject.host, host.baseUrl, hostApiKey(host, env));
-  if (next !== text) writeFileSync(path, next);
+  if (next !== text) writeCredentialFile(path, next);
   return hermesAcpModelId(modelId) ?? modelId;
 }
 

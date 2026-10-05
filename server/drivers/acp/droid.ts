@@ -15,11 +15,12 @@
 // ~/.factory/settings.json selected. Model and autonomy are session config
 // options set over the wire (session/set_model, session/set_mode), which is
 // why both live in configureSession() below and NOT in spawnArgs.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
+import { writeCredentialFile } from "./credential-write.ts";
 import type { JsonObject, JsonValue } from "../../schema.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -85,7 +86,7 @@ export function ensureDroidInjectModel(
 
   const id = droidInjectId(inject.host, inject.model);
   const dir = join(factoryHome(env), ".factory");
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const path = join(dir, "settings.json");
   let settings: FactorySettings = {};
   try {
@@ -104,7 +105,7 @@ export function ensureDroidInjectModel(
     if (!match.id) {
       match.id = id;
       settings.customModels = custom;
-      writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
+      writeCredentialFile(path, `${JSON.stringify(settings, null, 2)}\n`);
     }
     return match.id;
   }
@@ -117,7 +118,7 @@ export function ensureDroidInjectModel(
     provider: "generic-chat-completion-api",
   });
   settings.customModels = custom;
-  writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
+  writeCredentialFile(path, `${JSON.stringify(settings, null, 2)}\n`);
   return id;
 }
 
