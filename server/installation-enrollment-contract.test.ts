@@ -10,9 +10,13 @@
 // No network, no real account, no real protected storage, no route. Every
 // identity is synthetic and every store is an in-memory fake.
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
+import { FileFencePersistence } from "./installation-fence-persistence.ts";
 import {
   ENROLLMENT_INTENT_TTL_MS,
   ENROLLMENT_PROTOCOL_VERSION,
@@ -26,6 +30,7 @@ import {
   fenceEnrollmentKey,
   isEnrollmentKeyFenced,
   resetEnrollmentFences,
+  setEnrollmentFencePersistence,
   mintEnrollmentVerifier,
   ordinaryLoginEffect,
   secretsMatch,
@@ -63,6 +68,20 @@ const TRUSTED: TrustedCloudConfig = {
   } satisfies EnrollmentRedirectPolicy,
 };
 
+/** The shared fence registry persists by default under the data dir, so this
+ * suite points it at an ISOLATED temp file before any engine is constructed:
+ * tests neither touch a real data dir nor observe fences from another run.
+ * The suite's own persistence instance stays reachable so cases can swap a
+ * different store in through the seam and restore this one afterwards. */
+const fenceDirectory = mkdtempSync(join(tmpdir(), "muster-enrollment-fence-"));
+const suiteFencePersistence = new FileFencePersistence({
+  path: join(fenceDirectory, "enrollment-fence.json"),
+});
+setEnrollmentFencePersistence(suiteFencePersistence);
+afterAll(() => {
+  rmSync(fenceDirectory, { recursive: true, force: true });
+});
+
 /** Shipped posture: inert. */
 const inert = createEnrollmentEngine({ enabled: enrollmentEnabled, trusted: TRUSTED });
 /** Opted-in, so the rules can actually be driven. */
@@ -76,7 +95,10 @@ const CONTEXT: EnrollmentContext = {
 
 const BINDING: EnrollmentBinding = {
   cloudSubject: "cloud-subject-synthetic-a",
+  cloudIssuer: TRUSTED.issuer,
   cloudAuthority: TRUSTED.issuer,
+  workspaceId: "workspace-synthetic-a",
+  clientKey: CLIENT_KEY,
   localOwnerId: CONTEXT.ownerId,
   localSessionId: CONTEXT.sessionId,
   cloudSessionValid: true,
@@ -84,7 +106,10 @@ const BINDING: EnrollmentBinding = {
 
 const OTHER_ACCOUNT: EnrollmentBinding = {
   cloudSubject: "cloud-subject-synthetic-b",
+  cloudIssuer: TRUSTED.issuer,
   cloudAuthority: TRUSTED.issuer,
+  workspaceId: "workspace-synthetic-b",
+  clientKey: CLIENT_KEY,
   localOwnerId: "local-owner-synthetic-b",
   localSessionId: "local-session-synthetic-b",
   cloudSessionValid: true,
@@ -1788,6 +1813,318 @@ describe("W1b enrollment contract", () => {
       });
       resetEnrollmentFences();
       expect((await active.begin(clientProof().request, BINDING, CONTEXT, deps)).ok).toBe(true);
+    });
+  });
+
+  describe("W2 — persisted restart fence and canonical issuer binding", () => {
+    // The W2 register asked for a persisted restart fence, canonical issuer
+    // provenance on the binding, and race tests for all of it. These cases
+    // drive the SAME harness as the suites above — only the fence store and
+    // the issuer fields are new.
+
+    /** Begins on a SPECIFIC engine (the suites above always use `active`). */
+    async function beginOn(
+      engine: ReturnType<typeof createEnrollmentEngine>,
+      deps: Harness,
+      binding: EnrollmentBinding = BINDING,
+    ): Promise<{ intentId: string; verifier: string; state: string }> {
+      const proof = clientProof();
+      const started = await engine.begin(proof.request, binding, CONTEXT, deps);
+      if (!started.ok) throw new Error(`begin unexpectedly failed: ${started.reason}`);
+      return { intentId: started.value.intentId, verifier: proof.verifier, state: proof.state };
+    }
+
+    /** Forces unresolved custody the way production reaches it: a commit that
+     * really lands, then an invalidation the adapter cannot confirm. */
+    function armUnresolvedCleanup(deps: Harness, intentId: string): void {
+      const realCommit = deps.store.commit.bind(deps.store);
+      deps.store.commit = async (request, generation) => {
+        const result = await realCommit(request, generation);
+        await cancelEnrollment(intentId, deps);
+        return result;
+      };
+      deps.store.invalidate = async () => false;
+    }
+
+    it("(a) a fence survives a restart: a fresh engine instance observes what a prior instance persisted", async () => {
+      const path = join(fenceDirectory, "restart-engine.json");
+      const engineA = createEnrollmentEngine(
+        { enabled: true, trusted: TRUSTED },
+        { fencePersistence: new FileFencePersistence({ path }) },
+      );
+      const deps = makeDeps();
+      const { intentId, verifier } = await beginOn(engineA, deps);
+      armUnresolvedCleanup(deps, intentId);
+      expect(await engineA.complete(intentId, opts(verifier), deps)).toEqual({
+        ok: false,
+        reason: "custody-unresolved",
+      });
+
+      // The fence is durable: an entirely new store over the same file reads
+      // it back before any engine is constructed on top of it.
+      const persistenceB = new FileFencePersistence({ path });
+      expect(persistenceB.degraded).toBe(false);
+      expect(persistenceB.read()).toContain(CLIENT_KEY);
+
+      // RESTART: a new engine with EMPTY memory and the SAME persistence
+      // file. Its begin is refused on the persisted fence alone.
+      const engineB = createEnrollmentEngine(
+        { enabled: true, trusted: TRUSTED },
+        { fencePersistence: persistenceB },
+      );
+      const callsBefore = deps.exchangeCalls();
+      expect(await engineB.begin(clientProof().request, BINDING, CONTEXT, deps)).toEqual({
+        ok: false,
+        reason: "custody-unresolved",
+      });
+      expect(deps.exchangeCalls()).toBe(callsBefore);
+      // The refusal happened BEFORE anything was allocated: the persisted
+      // fence gates begin, not just completion.
+      expect(deps.attempts.generationFor(CLIENT_KEY)).toBe(1);
+
+      // Per-engine registries are ISOLATED: the module-level API reads the
+      // shared registry, which this engine's fence never touched.
+      expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(false);
+    });
+
+    it("(a) the module API observes a fence persisted by a prior registry (restart seam)", () => {
+      resetEnrollmentFences();
+      fenceEnrollmentKey(CLIENT_KEY, "prior-instance");
+      // RESTART: replace the shared registry with a fresh instance over the
+      // SAME file. Memory is gone; only what was persisted remains.
+      const restarted = new FileFencePersistence({ path: suiteFencePersistence.filePath });
+      setEnrollmentFencePersistence(restarted);
+      try {
+        expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(true);
+      } finally {
+        setEnrollmentFencePersistence(suiteFencePersistence);
+        resetEnrollmentFences();
+      }
+    });
+
+    it("(b) a completion still holding the NEWEST generation after a restart still loses to the persisted fence", async () => {
+      const path = join(fenceDirectory, "restart-newest-generation.json");
+      const persistenceA = new FileFencePersistence({ path });
+      const engineA = createEnrollmentEngine({ enabled: true, trusted: TRUSTED }, { fencePersistence: persistenceA });
+      const deps = makeDeps();
+      const { intentId, verifier } = await beginOn(engineA, deps);
+      expect(deps.attempts.generationFor(CLIENT_KEY)).toBe(1);
+
+      // The fence is established through the DURABLE store only — the way a
+      // concurrent or prior instance's cleanup would — never through this
+      // engine's memory.
+      persistenceA.add(CLIENT_KEY, { reason: "concurrent-cleanup" });
+
+      // RESTART: fresh engine, fresh memory, same attempt store (the intent
+      // survived it, still live and still generation-newest), same file.
+      const engineB = createEnrollmentEngine(
+        { enabled: true, trusted: TRUSTED },
+        { fencePersistence: new FileFencePersistence({ path }) },
+      );
+      const callsBefore = deps.exchangeCalls();
+      const result = await engineB.complete(intentId, opts(verifier), deps);
+      // The generation-conditional commit path re-reads the persisted fence
+      // and refuses BEFORE the exchange runs: nothing minted, nothing stored.
+      expect(result).toEqual({ ok: false, reason: "custody-unresolved" });
+      expect(deps.exchangeCalls()).toBe(callsBefore);
+      expect(deps.store.keys()).toEqual([]);
+      expect(deps.store.credential(CLIENT_KEY)).toBeNull();
+    });
+
+    it("(b) a superseded generation still loses to a newer one after a restart", async () => {
+      const path = join(fenceDirectory, "restart-superseded.json");
+      const engineA = createEnrollmentEngine(
+        { enabled: true, trusted: TRUSTED },
+        { fencePersistence: new FileFencePersistence({ path }) },
+      );
+      const deps = makeDeps();
+      const first = await beginOn(engineA, deps);
+      const second = await beginOn(engineA, deps);
+
+      // RESTART: the attempt store (and its generations) persist in `deps`;
+      // the engine does not.
+      const engineB = createEnrollmentEngine(
+        { enabled: true, trusted: TRUSTED },
+        { fencePersistence: new FileFencePersistence({ path }) },
+      );
+      // The stale generation-1 completion loses to generation 2.
+      expect(await engineB.complete(first.intentId, opts(first.verifier), deps)).toEqual({
+        ok: false,
+        reason: "superseded",
+      });
+      expect(deps.store.keys()).toEqual([]);
+      // And the newest generation still completes — supersession must not
+      // break the winner, across a restart any more than within one.
+      expect((await engineB.complete(second.intentId, opts(second.verifier), deps)).ok).toBe(true);
+      expect(deps.store.keys()).toEqual([CLIENT_KEY]);
+    });
+
+    it("(c) reset clears the DURABLE fence, not just memory", () => {
+      resetEnrollmentFences();
+      fenceEnrollmentKey(CLIENT_KEY, "reset-test");
+      expect(suiteFencePersistence.read()).toContain(CLIENT_KEY);
+      expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(true);
+
+      resetEnrollmentFences();
+      expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(false);
+      expect(suiteFencePersistence.read()).not.toContain(CLIENT_KEY);
+      // A brand-new instance over the same file sees the cleared state too.
+      expect(new FileFencePersistence({ path: suiteFencePersistence.filePath }).read()).toEqual([]);
+    });
+
+    it("(d) a corrupt fence file fails closed until an explicit reset heals it", async () => {
+      const corruptPath = join(fenceDirectory, "corrupt.json");
+      writeFileSync(corruptPath, "{ not json at all", { mode: 0o600 });
+      const corruptStore = new FileFencePersistence({ path: corruptPath });
+      expect(corruptStore.degraded).toBe(true);
+      expect(corruptStore.read()).toEqual([]);
+
+      setEnrollmentFencePersistence(corruptStore);
+      try {
+        // Fail closed at the API level: a key nobody fenced counts as fenced,
+        // because the store's contents are UNKNOWN.
+        expect(isEnrollmentKeyFenced("key-never-fenced-by-anyone")).toBe(true);
+        const deps = makeDeps();
+        expect(await active.begin(clientProof().request, BINDING, CONTEXT, deps)).toEqual({
+          ok: false,
+          reason: "custody-unresolved",
+        });
+        // A degraded store accepts no writes: fencing does not silently heal
+        // it by overwriting unknown contents with a known set.
+        fenceEnrollmentKey("some-key", "while-degraded");
+        expect(corruptStore.degraded).toBe(true);
+        expect(corruptStore.read()).toEqual([]);
+        // And a fresh instance over the corrupt file is degraded as well.
+        expect(new FileFencePersistence({ path: corruptPath }).degraded).toBe(true);
+
+        // Recovery is the explicit owner action — and it heals the file.
+        resetEnrollmentFences();
+        expect(corruptStore.degraded).toBe(false);
+        expect(isEnrollmentKeyFenced("some-key")).toBe(false);
+        expect((await active.begin(clientProof().request, BINDING, CONTEXT, deps)).ok).toBe(true);
+      } finally {
+        setEnrollmentFencePersistence(suiteFencePersistence);
+        resetEnrollmentFences();
+      }
+    });
+
+    it("(d) every unparseable or unvalidated shape is degraded, not just truncated JSON", async () => {
+      const corruptPayloads: Array<[string, string]> = [
+        ["truncated", '{"version":1,"fences":[{"key":"k","fencedAt":'],
+        ["wrong-version", JSON.stringify({ version: 2, fences: [] })],
+        ["wrong-field-type", JSON.stringify({ version: 1, fences: [{ key: 7, fencedAt: 1 }] })],
+        ["not-an-object", "[1,2,3]"],
+      ];
+      for (const [name, bytes] of corruptPayloads) {
+        const path = join(fenceDirectory, `corrupt-${name}.json`);
+        writeFileSync(path, bytes, { mode: 0o600 });
+        const store = new FileFencePersistence({ path });
+        expect(store.degraded, name).toBe(true);
+        // Fail closed through an engine built on it: begin refuses on every
+        // key, because the store's contents are UNKNOWN.
+        const engine = createEnrollmentEngine({ enabled: true, trusted: TRUSTED }, { fencePersistence: store });
+        const deps = makeDeps();
+        expect(await engine.begin(clientProof().request, BINDING, CONTEXT, deps), name).toEqual({
+          ok: false,
+          reason: "custody-unresolved",
+        });
+      }
+    });
+
+    it("(e) a binding whose canonical issuer is not the trusted one is refused", async () => {
+      const deps = makeDeps();
+      const foreign = "https://other.synthetic.invalid";
+      expect(await active.begin(validRequest(), { ...BINDING, cloudIssuer: foreign }, CONTEXT, deps)).toEqual({
+        ok: false,
+        reason: "issuer",
+      });
+      expect(deps.attempts.rows.size).toBe(0);
+      expect(deps.exchangeCalls()).toBe(0);
+    });
+
+    it("(e) a non-canonical issuer never reaches the trusted comparison at all", async () => {
+      // Each of these is refused at the SCHEMA — the boundary demands the
+      // canonical spelling, and never normalizes one into another issuer's
+      // identity.
+      const nonCanonical = [
+        "http://cloud.synthetic.invalid",
+        "https://cloud.synthetic.invalid/path",
+        "https://CLOUD.synthetic.invalid",
+        "https://cloud.synthetic.invalid/?x=1",
+        "https://user@cloud.synthetic.invalid",
+        "https://cloud.synthetic.invalid:443",
+        "not-an-origin",
+      ];
+      for (const issuer of nonCanonical) {
+        const deps = makeDeps();
+        expect(await active.begin(validRequest(), { ...BINDING, cloudIssuer: issuer }, CONTEXT, deps), issuer).toEqual({
+          ok: false,
+          reason: "issuer",
+        });
+        expect(deps.attempts.rows.size).toBe(0);
+      }
+    });
+
+    it("(e) a binding naming a different client key than the request is refused", async () => {
+      const deps = makeDeps();
+      expect(
+        await active.begin(validRequest(), { ...BINDING, clientKey: "client-key-synthetic-other" }, CONTEXT, deps),
+      ).toEqual({ ok: false, reason: "client-key" });
+      expect(deps.attempts.rows.size).toBe(0);
+    });
+
+    it("(e) an enabled engine cannot be constructed against a non-canonical trusted issuer", () => {
+      // Every downstream comparison treats the trusted issuer as the canonical
+      // form, so a non-canonical configuration must fail LOUDLY at
+      // construction rather than mismatch every legitimate binding.
+      expect(() =>
+        createEnrollmentEngine({ enabled: true, trusted: { ...TRUSTED, issuer: "http://cloud.synthetic.invalid" } }),
+      ).toThrow();
+      // The inert engine is unaffected: enabling is an explicit decision.
+      expect(() =>
+        createEnrollmentEngine({ enabled: false, trusted: { ...TRUSTED, issuer: "" } }),
+      ).not.toThrow();
+    });
+
+    it("(f) a fence written to the durable store by ANOTHER instance stops a held commit", async () => {
+      // The completing engine holds the newest generation and passes every
+      // guard. While its commit is held, a DIFFERENT registry instance —
+      // standing in for a concurrent completion's cleanup — writes the fence
+      // to the DURABLE store only, never to this registry's memory. The
+      // post-commit guard consults the persisted store and refuses adoption.
+      resetEnrollmentFences();
+      const crossInstance = new FileFencePersistence({ path: join(fenceDirectory, "cross-instance.json") });
+      setEnrollmentFencePersistence(crossInstance);
+      try {
+        const deps = makeDeps();
+        const entered = gate();
+        const held = gate();
+        const realCommit = deps.store.commit.bind(deps.store);
+        deps.store.commit = async (request, generation) => {
+          const result = await realCommit(request, generation);
+          entered.release();
+          await held.promise;
+          return result;
+        };
+        const { intentId, verifier } = await beginOk(deps);
+        const pending = active.complete(intentId, opts(verifier), deps);
+        await entered.promise;
+        // The concurrent instance fences through the durable store ONLY.
+        crossInstance.add(CLIENT_KEY, { reason: "concurrent-cleanup" });
+        held.release();
+        const result = await pending;
+        expect(result).toEqual({ ok: false, reason: "custody-unresolved" });
+        // The landed record was cleaned up, and nothing usable survives.
+        expect(deps.store.keys()).toEqual([]);
+        expect(deps.store.credential(CLIENT_KEY)).toBeNull();
+        // The fence is now visible through the module API too — via the
+        // persisted store, since this registry's memory never held it until
+        // the unresolved path fired.
+        expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(true);
+      } finally {
+        setEnrollmentFencePersistence(suiteFencePersistence);
+        resetEnrollmentFences();
+      }
     });
   });
 
