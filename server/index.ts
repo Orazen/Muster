@@ -1,4 +1,5 @@
 import "./drive-visible-startup-refusal.ts";
+import "./data-dir-exclusivity-boot.ts";
 import { CalendarEnrollmentRegistry } from "./calendar-enrollment.ts";
 import { revokeCalendarDeviceGrant, resolveCalendarDeviceGrant } from "./calendar-device-grants.ts";
 import { ForegroundCallRegistry, ForegroundCallError, type CallDispatch } from "./foreground-call.ts";
