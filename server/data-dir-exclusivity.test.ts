@@ -229,7 +229,7 @@ describe("boot guard recovery states", () => {
     // Same path, but the record was taken for a previous incarnation.
     const previous = { ...staleRecord(data, deadPid()), dataDirDev: 1, dataDirIno: 1 };
     writeMarker(data, previous);
-    expect(() => assertNoLiveExclusiveRestoreClaim(data)).toThrow(/names .*not .*reconcile manually/);
+    expect(() => assertNoLiveExclusiveRestoreClaim(data)).toThrow(/previous incarnation .*reconcile manually/);
     expect(existsSync(exclusiveClaimPath(data))).toBe(true);
   });
   it("refuses the ambiguous both-trees-present state instead of choosing", () => {

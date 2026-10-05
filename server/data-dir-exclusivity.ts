@@ -79,6 +79,15 @@ function recordClaimsDirectory(record: ExclusiveClaimRecord, root: string): bool
   return stat.dev === record.dataDirDev && stat.ino === record.dataDirIno;
 }
 
+/** Operator-facing wording for a marker this directory must not touch: either
+ * it names a different directory, or it is evidence about an earlier
+ * incarnation of this same path. */
+function foreignMarkerReason(record: ExclusiveClaimRecord, root: string): string {
+  return resolve(record.dataDir) === root
+    ? `Restore-exclusivity marker records a previous incarnation of ${root} (device/inode mismatch)`
+    : `Restore-exclusivity marker at this path names ${record.dataDir}, not ${root}`;
+}
+
 function assertRealDirectory(dataDir: string) {
   const stat = lstatSync(dataDir);
   if (!stat.isDirectory() || stat.isSymbolicLink() || resolve(dataDir) !== resolve(realpathSync(dataDir))) {
@@ -234,7 +243,7 @@ export function acquireDataDirExclusivity(
   if (existing.status === "live") {
     if (existing.record && !recordClaimsDirectory(existing.record, root)) {
       throw new DataDirExclusivityError("occupied",
-        `Restore-exclusivity marker at this path names ${existing.record.dataDir}, not ${root}; refusing to touch another directory's claim`, existing.record);
+        `${foreignMarkerReason(existing.record, root)}; refusing to touch another directory's claim`, existing.record);
     }
     throw new DataDirExclusivityError("occupied",
       `Exclusive restore already claimed by pid ${existing.record?.pid} (${existing.record?.reason}); refusing to start a competing exclusive restore`, existing.record ?? undefined);
@@ -243,7 +252,7 @@ export function acquireDataDirExclusivity(
   if ((existing.status === "stale" || existing.status === "abandoned") && existing.record
     && !recordClaimsDirectory(existing.record, root)) {
     throw new DataDirExclusivityError("occupied",
-      `Restore-exclusivity marker at this path names ${existing.record.dataDir}, not ${root}; its crash evidence belongs to another directory and is never adopted or removed here`);
+      `${foreignMarkerReason(existing.record, root)}; its crash evidence is never adopted or removed here`);
   }
   if (existing.status === "stale" || existing.status === "abandoned") {
     if (!options.recoverDeadOwner) {
@@ -386,9 +395,10 @@ export function assertNoLiveExclusiveRestoreClaim(dataDir: string): void {
   if (inspection.status === "absent") return;
   if (inspection.status === "live") {
     if (inspection.record && !recordClaimsDirectory(inspection.record, root)) {
-      // Another directory's claim: never refuse this boot on its behalf and
-      // never touch its crash evidence.
-      throw new Error(`Restore-exclusivity marker at this path names ${inspection.record.dataDir}, not ${root}; reconcile manually. Server startup refused before initialization.`);
+      // A foreign claim occupies this marker slot: the refusal protects the
+      // slot, and the foreign directory's own boot owns its crash evidence —
+      // nothing is read, moved or deleted here.
+      throw new Error(`${foreignMarkerReason(inspection.record, root)}; reconcile manually. Server startup refused before initialization.`);
     }
     throw new Error(`Exclusive restore is in progress by pid ${inspection.record?.pid} (${inspection.record?.reason}); server startup refused before initialization.`);
   }
@@ -398,7 +408,7 @@ export function assertNoLiveExclusiveRestoreClaim(dataDir: string): void {
   if (inspection.record && !recordClaimsDirectory(inspection.record, root)) {
     // A stale marker for another directory is foreign crash evidence: it is
     // never adopted, moved or deleted by this directory's boot.
-    throw new Error(`Restore-exclusivity marker at this path names ${inspection.record.dataDir}, not ${root}; reconcile manually. Server startup refused before initialization.`);
+    throw new Error(`${foreignMarkerReason(inspection.record, root)}; reconcile manually. Server startup refused before initialization.`);
   }
   if (inspection.status === "abandoned" && !existsSync(root)) {
     // Zero-byte marker with no data directory: the owner died during claim

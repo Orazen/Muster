@@ -164,7 +164,7 @@ describe("cross-process exclusive restore boundary", () => {
     expect(existsSync(data)).toBe(true);
     expect(readFileSync(join(data, "bots.json"), "utf8")).toBe('{"fixture":true}');
     expect(existsSync(backup)).toBe(false);
-    expect(existsSync(join(parent, ".muster-restore-exclusivity.json"))).toBe(false);
+    expect(existsSync(exclusiveClaimPath(data))).toBe(false);
     const allowed = await settle(spawn(process.execPath, ["--experimental-strip-types", join(artifacts, "boot-child.mjs")],
       { cwd: repo, env: childEnv({ OMB_DATA_DIR: data }), stdio: ["ignore", "pipe", "pipe"] }));
     expect(allowed.code).toBe(0);
