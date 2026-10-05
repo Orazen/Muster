@@ -6,8 +6,10 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { EXPO_TAR_PATCHES, prepareToolchain } from "./prepare-toolchain.mjs";
+import { DEPENDENCY_SECURITY_PATCHES, verifyDependencySecurityPatches } from "./dependency-security-policy.mjs";
 
 const require = createRequire(new URL("../package.json", import.meta.url));
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "muster-expo-compat-")));
@@ -47,6 +49,16 @@ async function main() {
   });
   if (systemRoot) process.env.SystemRoot = systemRoot;
   process.chdir(scratch);
+
+  // This prerequisite is deliberately outside check(): a failure must stop
+  // before resolving/evaluating any Expo or Metro dependency caller.
+  const securityReceipt = verifyDependencySecurityPatches(fileURLToPath(new URL("..", import.meta.url)));
+  await check("all installed vulnerable-package sources have reviewed mitigations before loading callers", () => {
+    const receipt = securityReceipt;
+    assert.equal(receipt.files, 5);
+    assert.equal(receipt.packages.length, 2);
+    assert(receipt.consumers >= 4);
+  });
 
   const cliRoot = dirname(require.resolve("@expo/cli/package.json"));
   const tarCaller = join(cliRoot, "build/src/utils/tar.js");
@@ -90,13 +102,27 @@ async function main() {
     writeFileSync(join(root, "node_modules/@expo/cli/package.json"), JSON.stringify({ name: "@expo/cli", version: "0.22.28" }));
     writeFileSync(join(root, "node_modules/tar/package.json"), JSON.stringify({ name: "tar", version: "7.5.22" }));
     for (const [file, source] of originalSources) writeFileSync(fixturePath(root, file), source);
+    const securityPackages = {};
+    for (const patch of DEPENDENCY_SECURITY_PATCHES) {
+      const packageRoot = join(root, "node_modules", patch.package);
+      mkdirSync(join(packageRoot, "lib"), { recursive: true });
+      writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: patch.package, version: patch.version }));
+      securityPackages[`node_modules/${patch.package}`] = { version: patch.version };
+      let source = readFileSync(require.resolve(`${patch.package}/${patch.file}`), "utf8");
+      if (createHash("sha256").update(source).digest("hex") === patch.patchedSha256) {
+        for (const [before, after] of [...patch.replacements].reverse()) source = source.split(after).join(before);
+      }
+      assert.equal(createHash("sha256").update(source).digest("hex"), patch.originalSha256);
+      writeFileSync(join(packageRoot, patch.file), source);
+    }
+    writeFileSync(join(root, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages: securityPackages }));
     return root;
   }
   const preparationRoot = preparationFixture("preparation");
   await check("trusted preparation changes both reviewed imports in an owned copy", () => {
     const result = prepareToolchain(preparationRoot);
     assert.equal(result.status, "prepared");
-    assert.equal(result.files.filter((file) => file.changed).length, 2);
+    assert.equal(result.files.filter((file) => file.changed).length, 7);
     for (const patch of EXPO_TAR_PATCHES) {
       assert.equal(createHash("sha256").update(readFileSync(fixturePath(preparationRoot, patch.name))).digest("hex"), patch.patchedSha256);
     }
@@ -137,7 +163,7 @@ async function main() {
     writeFileSync(fixturePath(root, "tar.js"), readFileSync(fixturePath(preparationRoot, "tar.js")));
     const result = prepareToolchain(root);
     assert.equal(result.status, "prepared");
-    assert.deepEqual(result.files.map(({ name, changed }) => ({ name, changed })), [{ name: "tar.js", changed: false }, { name: "npm.js", changed: true }]);
+    assert.deepEqual(result.files.filter((file) => ["tar.js", "npm.js"].includes(file.name)).map(({ name, changed }) => ({ name, changed })), [{ name: "tar.js", changed: false }, { name: "npm.js", changed: true }]);
     assert.equal(prepareToolchain(root).status, "unchanged");
   });
 

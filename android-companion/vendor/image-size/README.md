@@ -1,23 +1,31 @@
 # image-size (vendored, wired in)
 
 This directory **is** the `image-size` that Metro loads in `android-companion`.
-It replaces the npm package of the same name, which is affected by two open
-advisories in every published release.
+It replaces the registry package of the same name while preserving Metro
+0.81.5's reviewed callable API. The two advisories below have patched upstream
+2.x releases; this owned replacement remains wired in until a separately
+reviewed API/toolchain migration replaces it.
 
 ## Why it exists
 
 | Advisory | Affected range | Issue |
 | --- | --- | --- |
-| [GHSA-w3rx-r6r6-pgpr](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr) (CVE-2025-71330) | `<=2.0.2` | ICNS parser allows denial of service through an infinite loop |
-| [GHSA-5p2g-fcmc-qvqq](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq) (CVE-2025-71329) | `<=2.0.2` | JXL and HEIF parsers allow denial of service through infinite loops |
+| [GHSA-w3rx-r6r6-pgpr](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr) (CVE-2025-71330) | `>=0.6.3 <=2.0.2` | ICNS parser allows denial of service through an infinite loop |
+| [GHSA-5p2g-fcmc-qvqq](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq) (CVE-2025-71329) | `>=1.2.0 <=2.0.2` | JXL and HEIF parsers allow denial of service through infinite loops |
 
-`2.0.2` is both the top of the affected range and the newest release on npm, so
-**no published version is unaffected** and no `overrides` entry pointing at the
-registry can fix this. The upstream fix exists only on a Metro upgrade:
-`metro@0.87.1` no longer depends on `image-size` at all. That is why `npm audit`
-offers `react-native@0.87.1` — but this app is Expo SDK 52 /
-`react-native@0.76.7` / `metro@0.81.5`, so taking that Metro is a **framework
-migration, not a dependency bump**.
+As verified on 2026-10-05, both linked advisories list first patched version
+`2.0.3`, and npm's latest registry release is `2.0.4`. The earlier claim that no
+patched registry release existed is obsolete. This app remains Expo SDK 52 /
+`react-native@0.76.7` / `metro@0.81.5`, whose `image-size: ^1.0.2` caller expects
+a callable CommonJS module and synchronous buffer/file-path support. The 2.x
+package exposes a named CommonJS `imageSize` export and a separate `fromFile`
+entry; replacing the current package therefore requires an API compatibility
+review, not an unchecked major-version override.
+
+A coordinated upgrade to a Metro release that removes `image-size` is another
+possible route. Taking a newer React Native/Metro major requires framework
+compatibility and native acceptance gates; npm audit's suggested major change
+is not proof that those gates pass.
 
 Metro uses the package in exactly one place, `node_modules/metro/src/Assets.js`,
 which requires it as a bare module (`const getImageSize = require("image-size")`)
@@ -146,12 +154,22 @@ What is *not* covered: no Android device, emulator or native build was involved
 reads headers only; it does not validate image bodies. `sips`/`ffprobe`-verified
 fixtures are the ground truth for dimensions, not this parser.
 
-The durable fix is still the Expo / react-native upgrade that ships
-`metro@0.87.1`, after which the dependency disappears entirely. That is the
-moment to delete this directory rather than port it. It is tracked as the
-follow-up; **no Expo/RN upgrade was attempted here.**
+A future replacement can either adapt a patched registry 2.x release to the
+actual Metro callers or coordinate an Expo/React Native/Metro upgrade that
+removes this dependency. Each route must pass the buffer/file API checks,
+resolution/path-policy checks, ordinary asset regressions and native build
+acceptance appropriate to the resulting toolchain before deleting this owned
+parser. No replacement, API widening or Expo/RN upgrade is implemented here.
 
 ## Advisories: what is and is not proven
+
+The 2026-10-05 production audit reports 33 high dependency-package entries
+propagated from four distinct direct advisories: the two image-size advisories
+above, one braces advisory and one node-forge advisory. They are not 33 distinct
+unmitigated flaws. The owned image-size parser omits the affected parsers; the
+braces/node-forge source mitigations and their separate tests are documented in
+[the companion README](../../README.md). Registry affected-version findings
+remain visible and are not a whole-project security assessment.
 
 Removing this implementation from the tree is **not** the same as clearing the
 alerts, and neither is claimed here.

@@ -19,6 +19,7 @@ Use Node 22 or newer, npm, and an Android SDK/JDK for native builds.
 cd android-companion
 npm ci
 npm run verify:toolchain
+node --test scripts/dependency-security-policy.test.mjs
 npm run verify:metro-assets
 npm run verify:autolinking
 npm test
@@ -91,6 +92,30 @@ The offline compatibility checks exercise Expo's JavaScript archive fallback,
 local template extraction, plist parsing, UUID consumers and Metro's PostCSS
 path with owned fixtures. They complement the app tests and Android export;
 they do not prove native installation or device behavior.
+
+The same preparation step applies local, version/hash-bound mitigations to
+`braces` 3.0.3 and `node-forge` 1.4.0. Braces rejects parser nesting and recursive
+AST walking beyond 100 levels, including parentheses and direct compile,
+expand and stringify entry points. Node-forge rejects extra nested
+`DigestAlgorithm` children during RSA PKCS#1 v1.5 verification, backporting the
+fix proposed in upstream [forge PR 1152](https://github.com/digitalbazaar/forge/pull/1152)
+at `ceba34402e329f0365134f23fe19898756527d65`. Every lockfile copy and installed
+consumer resolution is checked before any reviewed source is replaced;
+unrecognized versions, bytes, symlinks and hardlinks fail preparation.
+
+These are local source mitigations for
+[GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) and
+[GHSA-86w9-cpqp-85rv](https://github.com/advisories/GHSA-86w9-cpqp-85rv).
+The npm versions remain within the upstream affected ranges and the audit
+findings remain visible; dismissing a Dependabot alert does not apply the
+mitigations. There is no patched upstream npm release as of 2026-10-05. An
+SDK upgrade needs its own compatibility and native acceptance checks and does
+not by itself establish repair. Installations made with `--ignore-scripts`
+must run `prepare:toolchain` before loading Expo/Metro. The focused Node tests
+reproduce both original flaws, reject malformed/deep inputs after mitigation,
+retain ordinary matching/RSA/Expo-certificate behavior and verify repeatable
+preparation. Those tests and `verify:toolchain` do not prove a native app build,
+installed-device behavior or a whole-project security assessment.
 
 Metro's `image-size` dependency **is the owned parser in `vendor/image-size/`**,
 declared as an npm workspace so `node_modules/image-size` links to it and the
