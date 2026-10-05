@@ -9,6 +9,8 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { planDependencySecurityPatches } from "./dependency-security-policy.mjs";
+
 const companionRoot = fileURLToPath(new URL("..", import.meta.url));
 const originalImport = 'const data = /*#__PURE__*/ _interopRequireDefault(require("tar"));';
 const patchedImport = 'const data = { default: require("tar") };';
@@ -59,6 +61,7 @@ export function prepareToolchain(root = companionRoot) {
 
   // Validate both inputs and both dependency resolutions before replacing any
   // source file. Mixed original/patched states can resume an interrupted run.
+  const securityPlan = planDependencySecurityPatches(root);
   const files = EXPO_TAR_PATCHES.map((patch) => {
     const target = join(cliRoot, "build", "src", "utils", patch.name);
     checkDirectories(root, target);
@@ -78,6 +81,8 @@ export function prepareToolchain(root = companionRoot) {
     return { ...patch, target, currentHash, bytes, mode: current.mode, changed: true };
   });
 
+  files.push(...securityPlan.files);
+
   const staged = [];
   try {
     for (const file of files.filter((file) => file.changed)) {
@@ -93,7 +98,7 @@ export function prepareToolchain(root = companionRoot) {
   } finally {
     for (const { temporary } of staged) rmSync(temporary, { force: true });
   }
-  return { status: staged.length ? "prepared" : "unchanged", expoCli: cliPackage.version, tar: "7.5.22", files: files.map(({ name, patchedSha256, changed }) => ({ name, sha256: patchedSha256, changed })) };
+  return { status: staged.length ? "prepared" : "unchanged", expoCli: cliPackage.version, tar: "7.5.22", mitigations: securityPlan.packages, files: files.map(({ name, patchedSha256, changed }) => ({ name, sha256: patchedSha256, changed })) };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
