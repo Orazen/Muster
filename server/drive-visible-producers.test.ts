@@ -14,6 +14,7 @@
 import { describe, expect, it } from "vitest";
 
 import { exportSoulMd } from "./soul-md.ts";
+import { parseVisibleFiles } from "./drive-visible.ts";
 import {
   DriveProjectionError,
   SETTINGS_ALLOWLIST,
@@ -608,18 +609,7 @@ describe("serialization invariants", () => {
   });
 
   describe("durable Drive-C / parser round-trip tests using PR #62 contract", () => {
-    it("round-trips all five produced files through the visible Drive parser", async () => {
-      // Import the PR #62 parser if present in the environment
-      let parser: { parseVisibleFiles: (files: Record<string, string>) => any } | null = null;
-      try {
-        const modulePath = "./drive-visible.ts";
-        // SAFETY: dynamically imported PR #62 contract exposes parseVisibleFiles with this signature
-        parser = (await import(/* @vite-ignore */ modulePath)) as { parseVisibleFiles: (files: Record<string, string>) => any };
-      } catch {
-        // When running on a branch where drive-visible.ts has not been merged into the tree,
-        // parser verification is evaluated conditionally.
-      }
-
+    it("round-trips all five produced files through the visible Drive parser", () => {
       const syntheticInput = {
         personas: [{ botId: "atlas", persona: atlas }],
         memoryBots: [{ botId: "atlas", text: "bot memory", topics: [{ name: "general", text: "topic note" }] }],
@@ -634,46 +624,38 @@ describe("serialization invariants", () => {
 
       const { files } = produceVisibleFiles(syntheticInput);
 
-      if (parser) {
-        const parsed = parser.parseVisibleFiles(files);
-        expect(parsed.ok).toBe(true);
-        if (parsed.ok) {
-          expect(parsed.soul.personas).toHaveLength(1);
-          expect(parsed.soul.personas[0]?.botId).toBe("atlas");
-          expect(parsed.memory.bots).toHaveLength(1);
-          expect(parsed.memory.bots[0]?.botId).toBe("atlas");
-          expect(parsed.sessions.threads).toHaveLength(1);
-          expect(parsed.sessions.threads[0]?.threadId).toBe("thread-1");
-          expect(parsed.tasks.tasks).toHaveLength(1);
-          expect(parsed.tasks.tasks[0]?.id).toBe("task-1");
-          expect(parsed.settings.settings).toEqual({ theme: "dark" });
-        }
-      } else {
-        // Assert json structure and framing directly
-        const memory = decode<any>(files[VISIBLE_FILE_NAMES.memory]);
-        expect(memory.schemaVersion).toBe(VISIBLE_SCHEMA_VERSION);
-        expect(memory.kind).toBe("memory");
-        expect(memory.bots[0].botId).toBe("atlas");
+      const parsed = parseVisibleFiles(files);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) throw new Error(`Projection failed parser contract: ${parsed.reason}`);
+      expect(parsed.soul.personas).toHaveLength(1);
+      expect(parsed.soul.personas[0]?.botId).toBe("atlas");
+      expect(parsed.memory.bots).toHaveLength(1);
+      expect(parsed.memory.bots[0]?.botId).toBe("atlas");
+      expect(parsed.sessions.threads).toHaveLength(1);
+      expect(parsed.sessions.threads[0]?.threadId).toBe("thread-1");
+      expect(parsed.tasks.tasks).toHaveLength(1);
+      expect(parsed.tasks.tasks[0]?.id).toBe("task-1");
+      expect(parsed.settings.settings).toEqual({ theme: "dark" });
+    });
 
-        const sessions = decode<any>(files[VISIBLE_FILE_NAMES.sessions]);
-        expect(sessions.schemaVersion).toBe(VISIBLE_SCHEMA_VERSION);
-        expect(sessions.kind).toBe("sessions");
-        expect(sessions.threads[0].threadId).toBe("thread-1");
+    it("round-trips optional defaults through the real parser", () => {
+      const { files } = produceVisibleFiles({
+        personas: [], memoryBots: [{ botId: "atlas" }], threads: [{ threadId: "t1" }],
+        tasks: [{ id: "task-1" }], settings: {},
+      });
+      const parsed = parseVisibleFiles(files);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) throw new Error(`Projection failed parser contract: ${parsed.reason}`);
+      expect(parsed.memory.bots[0]).toEqual({ botId: "atlas", text: "", truncated: false, topics: [] });
+      expect(parsed.sessions.threads[0]).toEqual({ threadId: "t1", title: "", messages: [] });
+      expect(parsed.tasks.tasks[0]).toEqual({ id: "task-1", title: "", status: "", updatedAt: 0 });
+      expect(parsed.settings.settings).toEqual({});
+    });
 
-        const tasks = decode<any>(files[VISIBLE_FILE_NAMES.tasks]);
-        expect(tasks.schemaVersion).toBe(VISIBLE_SCHEMA_VERSION);
-        expect(tasks.kind).toBe("tasks");
-        expect(tasks.tasks[0].id).toBe("task-1");
-
-        const settings = decode<any>(files[VISIBLE_FILE_NAMES.settings]);
-        expect(settings.schemaVersion).toBe(VISIBLE_SCHEMA_VERSION);
-        expect(settings.kind).toBe("settings");
-        expect(settings.settings).toEqual({ theme: "dark" });
-
-        expect(files[VISIBLE_FILE_NAMES.soul]).toContain("<!-- muster-visible schemaVersion=1 -->");
-        expect(files[VISIBLE_FILE_NAMES.soul]).toContain("<!-- muster-persona atlas -->");
-        expect(files[VISIBLE_FILE_NAMES.soul]).toContain("<!-- muster-body atlas -->");
-      }
+    it.each(Object.values(VISIBLE_FILE_NAMES))("rejects malformed produced %s with the real parser", (name) => {
+      const { files } = produceVisibleFiles({ personas: [], memoryBots: [], threads: [], tasks: [], settings: {} });
+      files[name] = "not a Muster document";
+      expect(parseVisibleFiles(files).ok).toBe(false);
     });
   });
 });
