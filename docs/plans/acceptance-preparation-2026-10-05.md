@@ -11,7 +11,8 @@ names its owner. It does not claim any acceptance that has not happened.
 Latest final-main runs — CI
 `https://github.com/Orazen/Muster/actions/runs/37352216635` and autodeploy
 `https://github.com/Orazen/Muster/actions/runs/37352216475` — failed with
-**zero executed steps**: every job carries the annotation "The job was not
+**zero executed steps**: 12 of 13 jobs failed with the billing annotation (the
+13th, `build`, was skipped with none): "The job was not
 started because recent account payments have failed or your spending limit
 needs to be increased." This is a billing no-start, not a product failure.
 
@@ -117,10 +118,12 @@ notice is a truthful accepted limitation; do not weaken opener protection.
 - **Mac** (Swift 133/133, ARM/Intel compile): install/upgrade/launch per
   `docs/mac-smoke-checklist.md`; Developer ID signing, notarization and
   Gatekeeper per `docs/mac-release.md` — requires Apple Developer credentials.
-  Compilation alone never implies installed acceptance.
+  Owner: release owner with Apple Developer credentials. Compilation alone
+  never implies installed acceptance.
 - **Windows/Linux**: packaging parity requirements in
   `docs/win-linux-packaging-parity.md`; actual GUI/runtime/install/upgrade
-  checks need Windows and Linux hosts. Until then, record the limitation.
+  checks need Windows and Linux hosts. Owner: platform owner with those
+  hosts. Until then, record the limitation.
 
 ## 4. Beta and product decisions (owner: Tharun)
 
@@ -140,12 +143,15 @@ decision unblocks dependent work immediately:
 
 ## 5. Exclusive-restore boundary status (new this round)
 
-`server/data-dir-exclusivity.ts` (+ boot guard wired at `server/index.ts:2`)
-provides: a crash-safe exclusive-restore claim bound to the named directory,
+`server/data-dir-exclusivity.ts` (integrated after this document's base via
+PR #79; see that PR for the module) provides: a crash-safe exclusive-restore
+claim bound to the named directory,
 a writer barrier (mode freeze + rename swap) that defeats non-cooperating
 same-user writers, kernel-visible quarantine of freeze-window writes, and a
 boot guard that recovers provable crash states and refuses ambiguous ones.
-Independently reviewed (three rounds) and covered by 100 tests including real
+Independently reviewed (three rounds, receipts recorded in PR #79) and covered
+by 100 focused tests across the boundary suites and their five adjacent suites
+(the new suites contribute 31), including real
 SIGKILL crash recovery and a non-cooperating writer child. **This is the
 exclusivity prerequisite for live existing-installation restore — it does not
 enable it.** Remaining before live apply can be exposed: separately claimed
