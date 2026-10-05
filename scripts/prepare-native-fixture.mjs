@@ -2,20 +2,22 @@
 //
 // Why this exists: pnpm-workspace.yaml deliberately permits install scripts
 // only for Electron and esbuild, so a fresh `pnpm install` (CI, release
-// runners) leaves better-sqlite3 WITHOUT its native binary. The
+// runners) can leave older better-sqlite3 versions without a built binary;
+// newer versions ship platform N-API prebuilds instead. The
 // tests-integration/native-load suite verifies real native operation —
-// open, query, close — so it needs a real built package. This script builds
-// that fixture under .omb-native-fixture/ and fails fatally when the binary
-// cannot be produced: absence is an environment failure, never a pass.
+// open, query, close — so it needs a real built package. This script prepares
+// a private package under .omb-native-fixture/ and fails fatally when its real
+// loader cannot operate: absence is an environment failure, never a pass.
 //
 // Usage: node scripts/prepare-native-fixture.mjs
 // Output: a receipt line on stdout ending with NATIVE_FIXTURE_OK and the
 // fixture path, so callers can confirm the exact tree that was prepared.
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { copyNativeFixtureDependencies, nativeFixtureLayout } from "./native-fixture-layout.mjs";
 
 const repoRoot = resolve(join(dirname(fileURLToPath(import.meta.url)), ".."));
 const fixtureRoot = join(repoRoot, ".omb-native-fixture");
@@ -34,52 +36,54 @@ try {
 } catch (error) {
   fail(`better-sqlite3 is not resolvable from the repository root: ${error?.message ?? error}`);
 }
-const packageRequire = createRequire(join(realPackage, "package.json"));
+let layout;
+try { layout = nativeFixtureLayout(realPackage); } catch (error) { fail(error.message); }
 
 // Dereference the pnpm symlink farm into a private, self-contained copy.
 rmSync(fixtureRoot, { recursive: true, force: true });
 mkdirSync(join(fixturePackage, "node_modules"), { recursive: true });
 cpSync(realPackage, fixturePackage, { recursive: true, dereference: true });
-// Helpers must live inside the fixture: the probe must never borrow
-// dependencies from the checkout above it.
+// Dependencies must live inside the fixture. Copy only the installed package's
+// actual declarations; better-sqlite3 13 removed the old bindings helpers.
 try {
-  cpSync(dirname(packageRequire.resolve("bindings/package.json")), join(fixturePackage, "node_modules", "bindings"), { recursive: true, dereference: true });
-  const bindingsRequire = createRequire(join(dirname(packageRequire.resolve("bindings/package.json")), "package.json"));
-  cpSync(dirname(bindingsRequire.resolve("file-uri-to-path/package.json")), join(fixturePackage, "node_modules", "file-uri-to-path"), { recursive: true, dereference: true });
+  copyNativeFixtureDependencies(realPackage, fixturePackage);
 } catch (error) {
-  fail(`helper resolution failed: ${error?.message ?? error}`);
+  fail(`declared dependency resolution failed: ${error?.message ?? error}`);
 }
 
-const binaryRelative = join("build", "Release", "better_sqlite3.node");
-const binary = join(fixturePackage, binaryRelative);
-if (existsSync(binary)) {
-  console.log(`[native-fixture] binary already present at ${binary} (abi ${process.versions.modules})`);
-} else {
+function probeFixture() {
+  return spawnSync(
+    process.execPath,
+    ["-e", `const D=require(${JSON.stringify(join(fixturePackage, "lib", "index.js"))});const db=new D(":memory:");if(db.prepare("SELECT 1 AS v").get().v!==1)throw new Error("query failed");db.close();`],
+    { encoding: "utf8", timeout: 60_000 },
+  );
+}
+
+// The actual package loader selects its binary. A v13 platform N-API prebuild
+// is valid even when there is no legacy build/Release file.
+let probe = probeFixture();
+if (probe.status !== 0) {
   // Build for the EXECUTING runtime. prebuild-install first (downloads the
   // prebuilt for this exact version+ABI), then node-gyp rebuild from source.
   // No global installs; both tools come from the fixture's own dependency
   // context or the pnpm store.
-  let built = false;
-  const prebuildBin = findUpBin("prebuild-install", "bin.js", realPackage);
-  if (prebuildBin) {
+  if (layout.dependencies["prebuild-install"]) {
+    const fixtureRequire = createRequire(join(fixturePackage, "package.json"));
+    const prebuildBin = fixtureRequire.resolve("prebuild-install/bin.js");
     const result = spawnSync(process.execPath, [prebuildBin], { cwd: fixturePackage, stdio: "inherit" });
-    built = result.status === 0 && existsSync(binary);
+    if (result.status === 0) probe = probeFixture();
   }
-  if (!built) {
+  if (probe.status !== 0) {
     console.log("[native-fixture] prebuild-install unavailable or failed — building from source with node-gyp");
-    const gyp = spawnSync("npx", ["--yes", "node-gyp", "rebuild"], { cwd: fixturePackage, stdio: "inherit" });
-    built = gyp.status === 0 && existsSync(binary);
+    let gypBin;
+    try { gypBin = require.resolve("node-gyp/bin/node-gyp.js"); } catch (error) { fail(`declared node-gyp is unavailable: ${error.message}`); }
+    const gyp = spawnSync(process.execPath, [gypBin, "rebuild"], { cwd: fixturePackage, stdio: "inherit" });
+    if (gyp.status === 0) probe = probeFixture();
   }
-  if (!built) fail(`could not produce ${binaryRelative} for node ${process.version} (abi ${process.versions.modules})`);
 }
 
 // The fixture must actually operate before the suite trusts it: open, query,
 // close against the freshly prepared copy.
-const probe = spawnSync(
-  process.execPath,
-  ["-e", `const D=require(${JSON.stringify(join(fixturePackage, "lib", "index.js"))});const db=new D(":memory:");if(db.prepare("SELECT 1 AS v").get().v!==1)throw new Error("query failed");db.close();`],
-  { encoding: "utf8", timeout: 60_000 },
-);
 if (probe.status !== 0) {
   fail(`fixture probe failed under node ${process.version} (abi ${process.versions.modules}):\n${[probe.stderr, probe.stdout].filter(Boolean).join("\n").slice(-2000)}`);
 }
@@ -92,30 +96,10 @@ writeFileSync(
     abi: process.versions.modules,
     arch: process.arch,
     platform: process.platform,
+    packageVersion: layout.version,
+    loader: layout.loader,
     preparedAt: new Date().toISOString(),
   }, null, 2),
   "utf8",
 );
 console.log(`NATIVE_FIXTURE_OK ${fixturePackage} node=${process.version} abi=${process.versions.modules}`);
-
-// Walk up from fromDir looking for node_modules/.pnpm/<packageName>@<ver>/
-// node_modules/<packageName>/<binName>. Returns undefined when nothing is
-// found; the caller falls back to npx.
-function findUpBin(packageName, binName, fromDir) {
-  let dir = fromDir;
-  for (;;) {
-    try {
-      const pnpmDir = join(dir, "node_modules", ".pnpm");
-      for (const entry of readdirSync(pnpmDir)) {
-        if (!entry.startsWith(`${packageName}@`)) continue;
-        const candidate = join(pnpmDir, entry, "node_modules", packageName, binName);
-        if (existsSync(candidate)) return candidate;
-      }
-    } catch {
-      /* no node_modules/.pnpm here — keep walking */
-    }
-    const parent = join(dir, "..");
-    if (parent === dir) return undefined;
-    dir = parent;
-  }
-}
