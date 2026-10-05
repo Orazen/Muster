@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  acquireDataDirExclusivity, assertNoLiveExclusiveRestoreClaim,
+  acquireDataDirExclusivity, assertNoLiveExclusiveRestoreClaim, exclusiveClaimPath,
   runWithWriterBarrier, writerBarrierSupported,
 } from "./data-dir-exclusivity.ts";
 
@@ -146,7 +146,7 @@ describe("cross-process exclusive restore boundary", () => {
     expect(() => assertNoLiveExclusiveRestoreClaim(data)).toThrow(/interrupted while the data directory was frozen/);
     expect(readFileSync(join(data, "bots.json"), "utf8")).toBe('{"fixture":true}');
     expect(statSync(data).mode & 0o777).toBe(0o755);
-    expect(existsSync(join(parent, ".muster-restore-exclusivity.json"))).toBe(false);
+    expect(existsSync(exclusiveClaimPath(data))).toBe(false);
     const allowed = await settle(spawn(process.execPath, ["--experimental-strip-types", join(artifacts, "boot-child.mjs")],
       { cwd: repo, env: childEnv({ OMB_DATA_DIR: data }), stdio: ["ignore", "pipe", "pipe"] }));
     expect(allowed.code).toBe(0);
@@ -214,6 +214,6 @@ describe("cross-process exclusive restore boundary", () => {
       { cwd: repo, env: childEnv({ OMB_DATA_DIR: data }), stdio: ["ignore", "pipe", "pipe"] }));
     expect(allowed.code).toBe(0);
     expect(allowed.output).toContain("BOOT_OK");
-    expect(existsSync(join(parent, ".muster-restore-exclusivity.json"))).toBe(false);
+    expect(existsSync(exclusiveClaimPath(data))).toBe(false);
   }, 30_000);
 });

@@ -1,19 +1,27 @@
 // Exclusive-restore boundary for the shared data directory. The claim marker
-// lives NEXT TO the data directory (not inside it) so it survives the rename
-// window and a boot during an apply can refuse instead of creating a fresh
-// directory under a running restore. The claim is the cooperating marker; the
-// writer barrier (mode freeze + directory rename window) is the part that
-// stops writers which never check anything: while the old tree is frozen and
-// renamed away, non-cooperating writers fail with EACCES or ENOENT instead of
-// silently interleaving with a restore. Writers holding already-open file
-// descriptors keep writing to the orphaned inode; those bytes diverge onto the
-// detached tree and never mix into the live one. A root process or Windows
-// cannot be excluded by mode bits, so the barrier refuses to run there rather
-// than pretending to be exclusive.
+// lives NEXT TO the data directory (not inside it, named after it) so it
+// survives the rename window, a boot during an apply can refuse instead of
+// creating a fresh directory under a running restore, and sibling data
+// directories under one parent never share a marker slot. The claim is the
+// cooperating marker; the writer barrier (mode freeze + directory rename
+// window) is the part that stops writers which never check anything: during
+// the freeze, creating/deleting/renaming entries in the data directory itself
+// fails with EACCES; writes into existing files or subdirectories still
+// succeed but are quarantined onto the detached old tree by the atomic rename
+// and never mix into the live one; during the rename window every path-based
+// access fails with ENOENT. Writers holding already-open file descriptors
+// keep writing to the orphaned inode; those bytes diverge onto the detached
+// tree and never mix into the live one. A root process, a writer with
+// CAP_DAC_OVERRIDE, or Windows cannot be excluded by mode bits, so the
+// barrier refuses to run there rather than pretending to be exclusive. A
+// marker write torn by a crash is refused indefinitely with reconciliation
+// instructions (its owner cannot be proven), and a restore that completed but
+// crashed before release() is refused as an ambiguous both-trees state — both
+// are fail-closed, documented outcomes rather than silent recoveries.
 import { randomUUID } from "node:crypto";
 import { accessSync, chmodSync, closeSync, constants, existsSync, fsyncSync, fstatSync, ftruncateSync, lstatSync,
   openSync, readSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 
 const MAX_CLAIM_BYTES = 4096;
@@ -51,10 +59,25 @@ export class DataDirExclusivityError extends Error {
 // prove mode bits exclude this process, so the barrier reports unsupported.
 export const writerBarrierSupported = (): boolean => process.platform !== "win32" && (process.getuid?.() ?? 0) !== 0;
 
-/** The marker is a sibling of the data directory: a swap renames the data
- * directory itself, which must never take the crash evidence with it. */
-export const exclusiveClaimPath = (dataDir: string): string =>
-  join(dirname(resolve(dataDir)), ".muster-restore-exclusivity.json");
+/** The marker is a sibling of the data directory, named after it: a swap
+ * renames the data directory itself, which must never take the crash evidence
+ * with it, and two sibling data directories under one parent must never share
+ * one marker slot. */
+export const exclusiveClaimPath = (dataDir: string): string => {
+  const root = resolve(dataDir);
+  return join(dirname(root), `.muster-restore-exclusivity.${basename(root)}.json`);
+};
+
+/** A marker only speaks for the directory its record names, proven by path
+ * equality and — when the directory exists — by device/inode identity, so a
+ * displaced or replaced directory can never adopt (or be adopted by) another
+ * directory's crash evidence. */
+function recordClaimsDirectory(record: ExclusiveClaimRecord, root: string): boolean {
+  if (resolve(record.dataDir) !== root) return false;
+  if (!existsSync(root)) return true;
+  const stat = lstatSync(root);
+  return stat.dev === record.dataDirDev && stat.ino === record.dataDirIno;
+}
 
 function assertRealDirectory(dataDir: string) {
   const stat = lstatSync(dataDir);
@@ -168,7 +191,12 @@ export class ExclusiveRestoreClaim {
     const bytes = Buffer.from(JSON.stringify(next), "utf8");
     const fd = openSync(this.path, constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0));
     try {
-      fstatSync(fd);
+      // The marker inode must still be the one this claim acquired; writing
+      // into a replaced inode would be adoption of a foreign marker.
+      const current = fstatSync(fd);
+      if (current.dev !== this.identity.dev || current.ino !== this.identity.ino) {
+        throw new DataDirExclusivityError("changed", "Exclusive-restore claim was replaced mid-operation; failing closed");
+      }
       writeFileSync(fd, bytes);
       ftruncateSync(fd, bytes.length);
       fsyncSync(fd);
@@ -204,10 +232,19 @@ export function acquireDataDirExclusivity(
   const stat = assertRealDirectory(root);
   const existing = inspectExclusiveRestoreClaim(root);
   if (existing.status === "live") {
+    if (existing.record && !recordClaimsDirectory(existing.record, root)) {
+      throw new DataDirExclusivityError("occupied",
+        `Restore-exclusivity marker at this path names ${existing.record.dataDir}, not ${root}; refusing to touch another directory's claim`, existing.record);
+    }
     throw new DataDirExclusivityError("occupied",
       `Exclusive restore already claimed by pid ${existing.record?.pid} (${existing.record?.reason}); refusing to start a competing exclusive restore`, existing.record ?? undefined);
   }
   if (existing.status === "corrupt") throw new DataDirExclusivityError("corrupt", existing.reason);
+  if ((existing.status === "stale" || existing.status === "abandoned") && existing.record
+    && !recordClaimsDirectory(existing.record, root)) {
+    throw new DataDirExclusivityError("occupied",
+      `Restore-exclusivity marker at this path names ${existing.record.dataDir}, not ${root}; its crash evidence belongs to another directory and is never adopted or removed here`);
+  }
   if (existing.status === "stale" || existing.status === "abandoned") {
     if (!options.recoverDeadOwner) {
       throw new DataDirExclusivityError("occupied",
@@ -348,10 +385,20 @@ export function assertNoLiveExclusiveRestoreClaim(dataDir: string): void {
   const inspection = inspectExclusiveRestoreClaim(root);
   if (inspection.status === "absent") return;
   if (inspection.status === "live") {
+    if (inspection.record && !recordClaimsDirectory(inspection.record, root)) {
+      // Another directory's claim: never refuse this boot on its behalf and
+      // never touch its crash evidence.
+      throw new Error(`Restore-exclusivity marker at this path names ${inspection.record.dataDir}, not ${root}; reconcile manually. Server startup refused before initialization.`);
+    }
     throw new Error(`Exclusive restore is in progress by pid ${inspection.record?.pid} (${inspection.record?.reason}); server startup refused before initialization.`);
   }
   if (inspection.status === "corrupt") {
     throw new Error(`Restore-exclusivity claim is unreadable (${inspection.reason}); server startup refused before initialization.`);
+  }
+  if (inspection.record && !recordClaimsDirectory(inspection.record, root)) {
+    // A stale marker for another directory is foreign crash evidence: it is
+    // never adopted, moved or deleted by this directory's boot.
+    throw new Error(`Restore-exclusivity marker at this path names ${inspection.record.dataDir}, not ${root}; reconcile manually. Server startup refused before initialization.`);
   }
   if (inspection.status === "abandoned" && !existsSync(root)) {
     // Zero-byte marker with no data directory: the owner died during claim

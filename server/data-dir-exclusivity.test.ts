@@ -3,7 +3,7 @@
 // refusal, real SIGKILL recovery, non-cooperator exclusion) live in
 // data-dir-exclusivity-process.test.ts; this file keeps the API-level
 // contracts tight without spawning.
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync,
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync,
   renameSync, rmSync, statSync, symlinkSync, writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -34,11 +34,17 @@ const statMode = (path: string): number => statSync(path).mode & 0o777;
 const writeMarker = (dataDir: string, record: ExclusiveClaimRecord): void => {
   writeFileSync(exclusiveClaimPath(dataDir), JSON.stringify(record));
 };
-const staleRecord = (dataDir: string, pid: number, extra: Partial<ExclusiveClaimRecord> = {}): ExclusiveClaimRecord => ({
-  version: 1, kind: "data-dir-exclusivity", pid, nonce: "2f0e6d5a-9b1c-4a2e-8d3f-0a1b2c3d4e5f",
-  reason: "owned stale fixture", acquiredAt: new Date().toISOString(),
-  dataDir: resolve(dataDir), dataDirDev: 1, dataDirIno: 1, originalMode: 0o755, ...extra,
-});
+const staleRecord = (dataDir: string, pid: number, extra: Partial<ExclusiveClaimRecord> = {}): ExclusiveClaimRecord => {
+  const root = resolve(dataDir);
+  // Real identity when the directory exists: the marker must be bound to the
+  // directory it names, and fixtures are not exempt from that binding.
+  const stat = existsSync(root) ? lstatSync(root) : { dev: 0, ino: 0 };
+  return {
+    version: 1, kind: "data-dir-exclusivity", pid, nonce: "2f0e6d5a-9b1c-4a2e-8d3f-0a1b2c3d4e5f",
+    reason: "owned stale fixture", acquiredAt: new Date().toISOString(),
+    dataDir: root, dataDirDev: stat.dev, dataDirIno: stat.ino, originalMode: 0o755, ...extra,
+  };
+};
 beforeAll(() => { expect(writerBarrierSupported(), "writer-barrier tests require POSIX mode bits and a non-root process").toBe(true); });
 afterAll(() => {
   // A failed mid-barrier assertion can leave frozen trees behind; thaw every
@@ -63,7 +69,7 @@ describe("exclusive restore claim ownership", () => {
     const parent = temporary("muster-excl-own-"), data = join(parent, "data");
     mkdirSync(data, { mode: 0o755 });
     const claim = acquireDataDirExclusivity(data, "owned unit acquire");
-    expect(claim.path).toBe(join(parent, ".muster-restore-exclusivity.json"));
+    expect(claim.path).toBe(join(parent, ".muster-restore-exclusivity.data.json"));
     expect(claim.record.pid).toBe(process.pid);
     expect(claim.record.dataDir).toBe(resolve(data));
     expect(existsSync(claim.path)).toBe(true);
@@ -184,6 +190,48 @@ describe("boot guard recovery states", () => {
     expect(existsSync(exclusiveClaimPath(data))).toBe(false);
     expect(() => assertNoLiveExclusiveRestoreClaim(data)).not.toThrow();
   });
+  it("never lets a sibling directory's crash evidence be moved or deleted", () => {
+    const parent = temporary("muster-excl-boot-sibling-");
+    const one = join(parent, "one"), two = join(parent, "two");
+    mkdirSync(one);
+    writeFileSync(join(one, "bots.json"), '{"owner":"one precious tree"}');
+    const backup = join(parent, "one.backup");
+    renameSync(one, backup);
+    // A crash marker bound to "one" — "two" is an unrelated sibling directory.
+    writeMarker(one, staleRecord(one, deadPid(), { backupPath: resolve(backup) }));
+    mkdirSync(two);
+    writeFileSync(join(two, "bots.json"), '{"sibling":true}');
+    // Booting "two" must pass without touching "one"'s evidence.
+    expect(() => assertNoLiveExclusiveRestoreClaim(two)).not.toThrow();
+    expect(existsSync(backup)).toBe(true);
+    expect(existsSync(exclusiveClaimPath(one))).toBe(true);
+    // "one" still recovers its own tree afterwards.
+    expect(() => assertNoLiveExclusiveRestoreClaim(one)).toThrow(/interrupted between its swap steps/);
+    expect(readFileSync(join(one, "bots.json"), "utf8")).toBe('{"owner":"one precious tree"}');
+    expect(existsSync(two)).toBe(true);
+    expect(readFileSync(join(two, "bots.json"), "utf8")).toBe('{"sibling":true}');
+  });
+  it("refuses a marker whose record names a different directory, without mutating anything", () => {
+    const parent = temporary("muster-excl-boot-foreign-");
+    const one = join(parent, "one"), two = join(parent, "two");
+    mkdirSync(one); mkdirSync(two);
+    // Hand-crafted displacement: the marker at "two"'s slot names "one".
+    const foreign = { ...staleRecord(one, deadPid()) };
+    writeFileSync(exclusiveClaimPath(two), JSON.stringify(foreign));
+    expect(() => assertNoLiveExclusiveRestoreClaim(two)).toThrow(/names .*not .*reconcile manually/);
+    expect(existsSync(exclusiveClaimPath(two))).toBe(true);
+    expect(() => acquireDataDirExclusivity(two, "any", { recoverDeadOwner: true })).toThrow(/names .*not/);
+    expect(existsSync(exclusiveClaimPath(two))).toBe(true);
+  });
+  it("refuses a marker whose recorded identity does not match the existing directory", () => {
+    const parent = temporary("muster-excl-boot-identity-"), data = join(parent, "data");
+    mkdirSync(data);
+    // Same path, but the record was taken for a previous incarnation.
+    const previous = { ...staleRecord(data, deadPid()), dataDirDev: 1, dataDirIno: 1 };
+    writeMarker(data, previous);
+    expect(() => assertNoLiveExclusiveRestoreClaim(data)).toThrow(/names .*not .*reconcile manually/);
+    expect(existsSync(exclusiveClaimPath(data))).toBe(true);
+  });
   it("refuses the ambiguous both-trees-present state instead of choosing", () => {
     const parent = temporary("muster-excl-boot-ambig-"), data = join(parent, "data");
     mkdirSync(data);
@@ -229,6 +277,30 @@ describe("writer barrier", () => {
     expect(existsSync(join(data, "probe.log"))).toBe(false);
     claim.release();
     expect(existsSync(exclusiveClaimPath(data))).toBe(false);
+  });
+  it("quarantines writes to existing files made during the freeze onto the old tree", async () => {
+    // The freeze blocks entry mutation in the directory itself; it does not
+    // block writes into existing files. The atomic rename is what keeps such
+    // bytes out of the live tree — this test pins that containment contract.
+    const parent = temporary("muster-excl-barrier-quarantine-"), data = join(parent, "data");
+    mkdirSync(data, { mode: 0o755 });
+    writeFileSync(join(data, "bots.json"), '{"old":true}');
+    mkdirSync(join(data, "workspaces"));
+    const claim = acquireDataDirExclusivity(data, "quarantine proof");
+    const staging = join(parent, "staging"), backup = join(parent, "backup");
+    mkdirSync(staging);
+    writeFileSync(join(staging, "bots.json"), '{"staged":true}');
+    await runWithWriterBarrier(data, claim, async swap => {
+      appendFileSync(join(data, "bots.json"), "FROZEN-APPEND");
+      writeFileSync(join(data, "workspaces", "stray.md"), "FROZEN-STRAY");
+      swap.beginSwap(backup);
+      swap.completeSwap(staging);
+    });
+    expect(readFileSync(join(data, "bots.json"), "utf8")).toBe('{"staged":true}');
+    expect(existsSync(join(data, "workspaces"))).toBe(false);
+    expect(readFileSync(join(backup, "bots.json"), "utf8")).toBe('{"old":true}FROZEN-APPEND');
+    expect(readFileSync(join(backup, "workspaces", "stray.md"), "utf8")).toBe("FROZEN-STRAY");
+    claim.release();
   });
   it("holds the freeze across awaits inside perform", async () => {
     const parent = temporary("muster-excl-barrier-await-"), data = join(parent, "data");
