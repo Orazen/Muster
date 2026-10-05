@@ -92,7 +92,13 @@ function resolveSecret(): string {
     if (existing) return existing;
   }
   const generated = randomBytes(32).toString("base64");
-  writeFileAtomic(secretPath, generated);
+  // Created 0600 at the temporary inode itself: this secret signs every
+  // session AND derives the drive-visible credential custody key, so the
+  // window between rename and chmod must not expose it at default perms —
+  // a crash there used to leave it readable by every local account for
+  // good. The chmod stays: it tightens a file an older build created too
+  // broadly (writeFileAtomic's mode only applies to the inode it creates).
+  writeFileAtomic(secretPath, generated, { mode: 0o600 });
   try {
     chmodSync(secretPath, 0o600);
   } catch {
