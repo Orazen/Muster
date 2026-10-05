@@ -177,10 +177,11 @@ for (const outcome of ["reject", "refuse"] as const) {
       } });
     }, outcome);
     const next = "/pair?return=%2Fapp#owned";
-    await page.goto(`${harness.desktopUrl}/sign-in?next=${encodeURIComponent(next)}`);
+    await page.goto(`${harness.desktopUrl}/sign-in?ref=REF-DESKTOP&next=${encodeURIComponent(next)}`);
     await page.getByRole("button", { name: "Continue with Google", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("Could not open Google sign-in. Please try again.");
     await expect(page.getByRole("button", { name: "Continue with Google", exact: true })).toBeEnabled();
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("muster.referral"))).toBeNull();
     const opened = new URL(await page.evaluate(() => sessionStorage.getItem("auth-fixture:handoff-url")) ?? "");
     expect(opened.origin).toBe(harness.cloudUrl);
     expect(opened.searchParams.get("redirect")).toBe(harness.desktopUrl);
@@ -189,6 +190,22 @@ for (const outcome of ["reject", "refuse"] as const) {
     await expectFits(page, 320);
   });
 }
+
+test("desktop Google begin failure clears the referral held for that attempt", async ({ harness, openAuth }) => {
+  const page = await openAuth(harness.desktopUrl, {
+    width: 320,
+    expectedHttpErrors: [{ path: "/oauth/attempt/begin", status: 503, count: 1 }],
+  });
+  await page.route(`${harness.desktopUrl}/oauth/attempt/begin`, (route) =>
+    route.fulfill({ status: 503, json: { error: "attempt store unavailable" } }),
+  );
+  await page.goto(`${harness.desktopUrl}/sign-in?ref=REF-BEGIN&next=${encodeURIComponent("/pair")}`);
+  await page.getByRole("button", { name: "Continue with Google", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not start Google sign-in. Please try again.");
+  await expect(page.getByRole("button", { name: "Continue with Google", exact: true })).toBeEnabled();
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("muster.referral"))).toBeNull();
+  await expectFits(page, 320);
+});
 
 test("existing session continues to its local next target without another sign-in", async ({ harness, openAuth }) => {
   const page = await openAuth(harness.cloudUrl);

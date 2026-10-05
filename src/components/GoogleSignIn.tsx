@@ -116,7 +116,10 @@ export function GoogleSignIn({ next, ref, onError }: { next: string; ref?: strin
         // (server/index.ts); both fields are server-minted opaque strings.
         binding = (await begin.json()) as { state: string; codeChallenge: string };
       } catch {
-        if (currentAttempt === attempt.current) onError("Could not start Google sign-in. Please try again.");
+        if (currentAttempt === attempt.current) {
+          clearStashedReferral();
+          onError("Could not start Google sign-in. Please try again.");
+        }
         return;
       }
       if (currentAttempt !== attempt.current) {
@@ -140,7 +143,10 @@ export function GoogleSignIn({ next, ref, onError }: { next: string; ref?: strin
       if (currentAttempt === attempt.current) setWaiting(true);
     } catch {
       cancelAttempt();
-      if (currentAttempt === attempt.current) onError("Could not open Google sign-in. Please try again.");
+      if (currentAttempt === attempt.current) {
+        clearStashedReferral();
+        onError("Could not open Google sign-in. Please try again.");
+      }
     } finally {
       launching.current = false;
       if (currentAttempt === attempt.current) setPending(false);
