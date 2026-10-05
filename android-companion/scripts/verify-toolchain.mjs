@@ -2,7 +2,7 @@
 // Offline compatibility checks for the actual Expo 52 callers of overridden
 // dependencies. This does not build a native app or constitute a security scan.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { constants, createHash, generateKeyPairSync, privateEncrypt, sign as nodeSign } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -84,6 +84,88 @@ async function main() {
 
   await check("actual caller resolution uses the intended dependency versions", () => {
     assert.deepEqual(versions, { tar: "7.5.22", npmTar: "7.5.22", xmldom: "0.8.15", postcss: "8.5.28", xcodeUuid: "11.1.1", bunyanUuid: "11.1.1" });
+  });
+
+  // Behavioral regression checks for the reviewed braces and node-forge
+  // mitigations, exercised through the real installed consumers. The hash
+  // receipt above proves which bytes are loaded; these prove what they do.
+  const braces = require("braces");
+  const micromatch = createRequire(require.resolve("metro-file-map/package.json"))("micromatch");
+  const fastGlob = require("fast-glob");
+  const forge = require("node-forge");
+  const certificates = require("@expo/code-signing-certificates");
+  const selfsigned = require("selfsigned");
+  const deepPattern = (open, close, depth) => open.repeat(depth) + "a,b" + close.repeat(depth);
+  const nestingError = /Muster braces nesting/;
+
+  await check("mitigated braces keeps reviewed expansions identical and fails closed through real callers", () => {
+    assert.deepEqual(braces("src/{a,b}.js", { expand: true }), ["src/a.js", "src/b.js"]);
+    assert.deepEqual(braces("a/{b,{c,d}}/e", { expand: true }), ["a/b/e", "a/c/e", "a/d/e"]);
+    assert.deepEqual(braces("file-{1..3}.txt", { expand: true }), ["file-1.txt", "file-2.txt", "file-3.txt"]);
+    assert.deepEqual(braces("{a,b}/{c,d}"), ["(a|b)/(c|d)"]);
+    assert.deepEqual(micromatch(["src/a.js", "src/b.js", "other.js"], "src/{a,b}.js"), ["src/a.js", "src/b.js"]);
+    for (const depth of [101, 3500]) {
+      for (const [open, close] of [["{", "}"], ["(", ")"]]) {
+        const pattern = deepPattern(open, close, depth);
+        for (const method of [braces, braces.parse, braces.expand, braces.compile, braces.stringify]) {
+          assert.throws(() => method(pattern), nestingError);
+        }
+        // micromatch short-circuits patterns without "{" before reaching braces.
+        if (open === "{") {
+          assert.throws(() => micromatch.braces(pattern), nestingError);
+          assert.throws(() => fastGlob.sync([pattern], { cwd: scratch }), nestingError);
+        }
+      }
+    }
+  });
+
+  // The positive RSA vectors are signed with Node's OpenSSL backend (and one
+  // raw-signed DigestInfo pair), so legitimate PKCS#1 v1.5 signatures must keep
+  // verifying after the strict DigestInfo patch.
+  const vectorKeys = (() => {
+    const generated = generateKeyPairSync("rsa", { modulusLength: 2048,
+      publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "pkcs8", format: "pem" } });
+    return { pem: generated, pair: { publicKey: forge.pki.publicKeyFromPem(generated.publicKey), privateKey: forge.pki.privateKeyFromPem(generated.privateKey) } };
+  })();
+  const vectorMessage = Buffer.from("muster offline advisory regression");
+  const vectorDigest = () => forge.md.sha256.create().update(vectorMessage.toString("binary"));
+  const sha256Oid = () => forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OID, false, forge.asn1.oidToDer(forge.pki.oids.sha256).getBytes());
+  const nullParameters = () => forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.NULL, false, "");
+  const digestInfoDer = (algorithmChildren, trailing = []) => forge.asn1.toDer(forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [
+    forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, algorithmChildren),
+    forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OCTETSTRING, false, vectorDigest().digest().getBytes()),
+    ...trailing,
+  ])).getBytes();
+  const rawSign = (binaryDigestInfo) => {
+    const body = Buffer.from(binaryDigestInfo, "binary");
+    const modulusLength = (vectorKeys.pair.privateKey.n.bitLength() + 7) >> 3;
+    const encoded = Buffer.concat([Buffer.from([0, 1]), Buffer.alloc(modulusLength - body.length - 3, 0xff), Buffer.from([0]), body]);
+    return privateEncrypt({ key: vectorKeys.pem.privateKey, padding: constants.RSA_NO_PADDING }, encoded).toString("binary");
+  };
+
+  await check("mitigated node-forge verifies OpenSSL and forge signatures and real Expo certificates", () => {
+    const digest = vectorDigest().digest().getBytes();
+    const verify = (signature) => vectorKeys.pair.publicKey.verify(digest, signature);
+    assert.equal(verify(nodeSign("sha256", vectorMessage, vectorKeys.pem.privateKey).toString("binary")), true);
+    assert.equal(verify(vectorKeys.pair.privateKey.sign(vectorDigest())), true);
+    assert.equal(verify(rawSign(digestInfoDer([sha256Oid(), nullParameters()]))), true);
+    assert.equal(verify(rawSign(digestInfoDer([sha256Oid()]))), true);
+    const now = Date.now();
+    const certificate = certificates.generateSelfSignedCodeSigningCertificate({ keyPair: vectorKeys.pair,
+      validityNotBefore: new Date(now - 60000), validityNotAfter: new Date(now + 60000), commonName: "owned offline fixture" });
+    certificates.validateSelfSignedCertificate(certificate, vectorKeys.pair);
+    assert.equal(typeof certificates.signBufferRSASHA256AndVerify(vectorKeys.pair.privateKey, certificate, vectorMessage), "string");
+    const generated = selfsigned.generate([{ name: "commonName", value: "owned offline fixture" }], { keySize: 2048, days: 1, algorithm: "sha256" });
+    const parsed = forge.pki.certificateFromPem(generated.cert);
+    assert.equal(parsed.verify(parsed), true);
+  });
+
+  await check("mitigated node-forge rejects extra nested DigestAlgorithm elements in signatures", () => {
+    const nested = forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OCTETSTRING, false, "nested garbage");
+    for (const algorithmChildren of [[sha256Oid(), nullParameters(), nested], [sha256Oid(), sha256Oid()]]) {
+      assert.throws(() => vectorKeys.pair.publicKey.verify(vectorDigest().digest().getBytes(), rawSign(digestInfoDer(algorithmChildren))),
+        /valid RSASSA-PKCS1-v1_5 DigestInfo/);
+    }
   });
 
   // Copy only the reviewed source bytes and package metadata. Preparation
