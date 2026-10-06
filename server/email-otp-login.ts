@@ -163,6 +163,46 @@ const lastCodeSentAt = new Map<string, number>();
 const sendWindowByIp = new Map<string, { count: number; windowStart: number }>();
 const acceptedSends = new Map<string, AcceptedSend>();
 
+/** Delivery bookkeeping is keyed by mailbox, so admission through outcome
+ * commit must be exclusive for that mailbox. Keep at most 64 active mailboxes
+ * and one queued caller per mailbox: at most 128 requests are retained even
+ * when the mail transport is held. The existing sender timeout bounds each
+ * active delivery; a single waiter avoids an arbitrarily long send FIFO. */
+const MAX_PENDING_MAILBOXES = 64;
+interface PendingMailboxSend {
+  next: (() => void) | null;
+}
+const pendingMailboxSends = new Map<string, PendingMailboxSend>();
+
+function releaseMailboxSend(email: string, pending: PendingMailboxSend): () => void {
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const next = pending.next;
+    if (next) {
+      pending.next = null;
+      next();
+    } else {
+      pendingMailboxSends.delete(email);
+    }
+  };
+}
+
+function reserveMailboxSend(email: string): Promise<() => void> | null {
+  const pending = pendingMailboxSends.get(email);
+  if (pending) {
+    if (pending.next) return null;
+    return new Promise((resolve) => {
+      pending.next = () => resolve(releaseMailboxSend(email, pending));
+    });
+  }
+  if (pendingMailboxSends.size >= MAX_PENDING_MAILBOXES) return null;
+  const entry: PendingMailboxSend = { next: null };
+  pendingMailboxSends.set(email, entry);
+  return Promise.resolve(releaseMailboxSend(email, entry));
+}
+
 /** Drop everything past its window/TTL — run on every send so the three
  * maps stay bounded by live windows only. */
 function pruneSendState(now: number): void {
@@ -474,6 +514,34 @@ function idempotencyKeyOf(req: IncomingMessage): string | null {
   return key.length > 0 && key.length <= IDEMPOTENCY_KEY_MAX ? key : null;
 }
 
+/** Admission order is unchanged, and is repeated after waiting for the
+ * mailbox: the preceding send's genuine outcome may have armed cooldown or
+ * replay, while a failed send must leave a queued retry free to try again. */
+function answerSendPolicy(req: IncomingMessage, res: ServerResponse, email: string, idemKey: string | null): boolean {
+  const now = Date.now();
+  pruneSendState(now);
+  if (idemKey) {
+    const replay = replayOf(email, idemKey, now);
+    if (replay) {
+      relayReplayedSend(res, replay);
+      return true;
+    }
+  }
+  const cooldown = cooldownRemainingMs(email, now);
+  if (cooldown > 0) {
+    const seconds = Math.ceil(cooldown / 1000);
+    rejectSend(res, 429, { message: `A code was already sent to this address. Try again in ${seconds} seconds.`, code: "RESEND_COOLDOWN" }, seconds);
+    return true;
+  }
+  const windowMs = ipWindowRemainingMs(clientIpOf(req), now);
+  if (windowMs > 0) {
+    const seconds = Math.ceil(windowMs / 1000);
+    rejectSend(res, 429, { message: "Too many code requests. Please wait and try again.", code: "RATE_LIMITED" }, seconds);
+    return true;
+  }
+  return false;
+}
+
 /** Entry point for POST /api/auth/email-otp/send-verification-otp and
  * POST /api/auth/sign-in/email-otp (server/index.ts routes both here before
  * its generic Better Auth delegation). */
@@ -532,89 +600,80 @@ export async function handleEmailOtpAuthRequest(
     // The plugin's send schema requires `type`; default it so a bare
     // { email } request behaves as sign-in instead of failing validation.
     if (body.type === undefined) body.type = "sign-in";
-    const now = Date.now();
-    pruneSendState(now);
     idemKey = idempotencyKeyOf(req);
-    if (idemKey) {
-      const replay = replayOf(email, idemKey, now);
-      if (replay) return relayReplayedSend(res, replay);
-    }
-    const cooldown = cooldownRemainingMs(email, now);
-    if (cooldown > 0) {
-      const seconds = Math.ceil(cooldown / 1000);
-      return rejectSend(
-        res,
-        429,
-        {
-          message: `A code was already sent to this address. Try again in ${seconds} seconds.`,
-          code: "RESEND_COOLDOWN",
-        },
-        seconds,
-      );
-    }
-    const windowMs = ipWindowRemainingMs(clientIpOf(req), now);
-    if (windowMs > 0) {
-      const seconds = Math.ceil(windowMs / 1000);
-      return rejectSend(
-        res,
-        429,
-        { message: "Too many code requests. Please wait and try again.", code: "RATE_LIMITED" },
-        seconds,
-      );
-    }
+    if (answerSendPolicy(req, res, email, idemKey)) return;
   }
 
-  // 4. Delegate the real route. Send stores + emails/logs the code; sign-in
-  //    consumes it and mints the session (creating the account first when
-  //    the address is new — gated in step 2 above). For a pre-existing
-  //    emailVerified: false user the plugin runs its database-locked
-  //    revokeUnprovenAccountAccess during this delegation — deleting the
-  //    unproven account's links (password included) and standing sessions
-  //    before flipping emailVerified — which is the custody contract this
-  //    wrapper must not shortcut: see the header note and
-  //    server/email-otp-custody.test.ts. The per-IP window is spent at the
-  //    point the request reaches the plugin — mirroring what the plugin's
-  //    own limiter counts — while cooldown and replay map are armed only for
-  //    an accepted send, and delegated send rejections are relayed through
-  //    the same uniform shape as the wrapper's own.
-  if (isSend) spendIpSend(clientIpOf(req), Date.now());
-  const delegated = await delegateToAuth(req, path, body);
-  if (isSend && delegated.status >= 200 && delegated.status < 300) {
-    // A 2xx here is the PLUGIN's answer, not the mail's. The plugin stores
-    // the code and then awaits our sender through runInBackgroundOrAwait,
-    // which catches a rejection and still resolves — so this branch used to
-    // read as "the provider accepted the message" when it only meant "the
-    // plugin was called". A refused or undelivered send therefore armed the
-    // 60s cooldown and stored a replayable success: the user was told a code
-    // was on its way and then blocked from asking again for a minute. The
-    // recorded outcome is the only honest signal (server/otp-delivery.ts).
-    //
-    // Undefined means no delivery was attempted — the plugin short-circuits
-    // the send route for an unknown address when sign-up-on-verify is off, and
-    // answers success without ever calling the sender. That is not a failure
-    // and keeps its existing behavior.
-    const outcome = deliveryOutcome(email);
-    clearDelivery(email);
-    if (outcome && !outcome.ok) {
-      // Nothing armed: no cooldown, no replay entry. A failed send must leave
-      // the mailbox exactly as able to try again as it was before.
-      return rejectSend(res, 503, deliveryRejection(outcome), DELIVERY_RETRY_SECONDS);
-    }
-    armCooldown(email, Date.now());
-    if (idemKey) {
-      rememberAcceptedSend(
-        email,
-        idemKey,
-        delegated.status,
-        delegated.body,
-        delegated.headers.get("content-type") ?? "application/json",
-        delegated.setCookies,
-        Date.now(),
-      );
-    }
-    return relay(res, delegated);
+  const reservation = isSend ? reserveMailboxSend(email) : undefined;
+  if (reservation === null) {
+    return rejectSend(res, 503, { message: "Code requests are busy. Please try again in a moment.", code: "EMAIL_SEND_BUSY" }, DELIVERY_RETRY_SECONDS);
   }
-  if (isSend) clearDelivery(email);
-  if (isSend && delegated.status >= 400) return relaySendRejection(res, delegated);
-  return relay(res, delegated);
+  const release = reservation ? await reservation : undefined;
+  try {
+    // A disconnected queued caller needs no new send. An already admitted
+    // sender still completes and commits its genuine outcome for retries;
+    // the original response socket never controls that shared operation.
+    if (isSend && res.destroyed) return;
+    if (isSend && answerSendPolicy(req, res, email, idemKey)) return;
+
+    // 4. Delegate the real route. Send stores + emails/logs the code; sign-in
+    //    consumes it and mints the session (creating the account first when
+    //    the address is new — gated in step 2 above). For a pre-existing
+    //    emailVerified: false user the plugin runs its database-locked
+    //    revokeUnprovenAccountAccess during this delegation — deleting the
+    //    unproven account's links (password included) and standing sessions
+    //    before flipping emailVerified — which is the custody contract this
+    //    wrapper must not shortcut: see the header note and
+    //    server/email-otp-custody.test.ts. The per-IP window is spent at the
+    //    point the request reaches the plugin — mirroring what the plugin's
+    //    own limiter counts — while cooldown and replay map are armed only for
+    //    an accepted send, and delegated send rejections are relayed through
+    //    the same uniform shape as the wrapper's own.
+    if (isSend) {
+      clearDelivery(email);
+      spendIpSend(clientIpOf(req), Date.now());
+    }
+    const delegated = await delegateToAuth(req, path, body);
+    if (isSend && delegated.status >= 200 && delegated.status < 300) {
+      // A 2xx here is the PLUGIN's answer, not the mail's. The plugin stores
+      // the code and then awaits our sender through runInBackgroundOrAwait,
+      // which catches a rejection and still resolves — so this branch used to
+      // read as "the provider accepted the message" when it only meant "the
+      // plugin was called". A refused or undelivered send therefore armed the
+      // 60s cooldown and stored a replayable success: the user was told a code
+      // was on its way and then blocked from asking again for a minute. The
+      // recorded outcome is the only honest signal (server/otp-delivery.ts).
+      //
+      // Undefined means no delivery was attempted — the plugin short-circuits
+      // the send route for an unknown address when sign-up-on-verify is off, and
+      // answers success without ever calling the sender. That is not a failure
+      // and keeps its existing behavior.
+      const outcome = deliveryOutcome(email);
+      clearDelivery(email);
+      if (outcome && !outcome.ok) {
+        // Nothing armed: no cooldown, no replay entry. A failed send must leave
+        // the mailbox exactly as able to try again as it was before.
+        return rejectSend(res, 503, deliveryRejection(outcome), DELIVERY_RETRY_SECONDS);
+      }
+      armCooldown(email, Date.now());
+      if (idemKey) {
+        rememberAcceptedSend(
+          email,
+          idemKey,
+          delegated.status,
+          delegated.body,
+          delegated.headers.get("content-type") ?? "application/json",
+          delegated.setCookies,
+          Date.now(),
+        );
+      }
+      return relay(res, delegated);
+    }
+    if (isSend) clearDelivery(email);
+    if (isSend && delegated.status >= 400) return relaySendRejection(res, delegated);
+    return relay(res, delegated);
+  } finally {
+    if (isSend) clearDelivery(email);
+    release?.();
+  }
 }

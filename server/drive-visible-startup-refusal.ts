@@ -6,6 +6,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, opendirSync, read
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { DATA_DIR } from "./data-root-path.ts";
+import { assertLiveRestoreStartupReady } from "./drive-visible-live-journal.ts";
 
 const MAX_FILE = 96 * 1024 * 1024;
 const MAX_TOTAL = 128 * 1024 * 1024;
@@ -118,3 +119,4 @@ export function assertAccountRecoveryStartupReady(dataDir: string): void {
 // No await: throwing here stops dependency evaluation before auth/database,
 // provider construction, sync flush or any server-body startup statements.
 assertAccountRecoveryStartupReady(DATA_DIR);
+assertLiveRestoreStartupReady(DATA_DIR);

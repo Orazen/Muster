@@ -24,6 +24,7 @@ import { createVisibleRuntimeProtector } from "./drive-visible-runtime-key.ts";
 import { captureAccountSettings, readAccountSettings } from "./drive-visible-settings.ts";
 import { normalizeRecoveryCode } from "./workspace-bundle-v2.ts";
 import { parseJson, type JsonValue } from "./schema.ts";
+import { applyLiveAccountRestore, readLiveRestoreReceipt, LiveRestoreFailure, liveSelectionSchema, type LiveRestoreRuntime } from "./drive-visible-live-restore.ts";
 
 export const VISIBLE_DRIVE_ROUTE_PREFIX = "/api/workspace/drive-visible";
 const callbackPath = `${VISIBLE_DRIVE_ROUTE_PREFIX}/callback`;
@@ -42,6 +43,9 @@ export interface VisibleDriveRouteContext {
   google: { clientId: string; clientSecret: string } | null;
   source(): Pick<AccountRecoverySourceInput, "store" | "plans" | "dataDir"> | null;
   appVersion: string;
+  /** Host-owned cooperating runtime capability. Production supplies none
+   * until lifetime writer and boot ownership is implemented and verified. */
+  liveRestore?: LiveRestoreRuntime;
   now?: () => number;
   /** Isolated test transport/identity ports. Production registration supplies neither. */
   fetch?: typeof globalThis.fetch;
@@ -67,6 +71,11 @@ const backupBody = z.object({ format: archiveFormat.optional(), passphrase, reco
 const restoreBody = z.object({ format: archiveFormat.optional(), fileId: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/),
   passphrase: passphrase.optional(), recoveryCode: recoveryCode.optional() }).strict()
   .refine(body => (body.passphrase === undefined) !== (body.recoveryCode === undefined));
+const applyBody = z.object({ format: z.literal("account-recovery-v1"), fileId: z.string().regex(/^[A-Za-z0-9_-]{1,200}$/),
+  passphrase: passphrase.optional(), recoveryCode: recoveryCode.optional(), operationId: z.string().uuid(),
+  expectedSourceDigest: z.string().regex(/^[a-f0-9]{64}$/), selection: liveSelectionSchema }).strict()
+  .refine(body => (body.passphrase === undefined) !== (body.recoveryCode === undefined));
+const receiptBody = z.object({ operationId: z.string().uuid() }).strict();
 
 function configuredUrl(base: string): URL {
   try {
@@ -162,6 +171,9 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
   if (path !== VISIBLE_DRIVE_ROUTE_PREFIX && !path.startsWith(`${VISIBLE_DRIVE_ROUTE_PREFIX}/`)) return false;
   const routes = new Map([["status", "GET"], ["consent", "POST"], ["callback", "GET"], ["cancel", "POST"],
     ["disconnect", "POST"], ["settings", "POST"], ["projection", "GET"], ["backup", "POST"], ["restore/inspect", "POST"]]);
+  // A host that supplies no live capability has no live action registration.
+  // Preserve that boundary before identity/body/source or transport access.
+  if (ctx.liveRestore) { routes.set("restore/apply", "POST"); routes.set("restore/receipt", "POST"); }
   const action = path.slice(VISIBLE_DRIVE_ROUTE_PREFIX.length + 1);
   if (!routes.has(action)) { json(res, 404, { error: "visible-route-unavailable" }); return true; }
   if (method !== routes.get(action) || req.method === "HEAD") { json(res, 405, { error: "method-not-allowed" }); return true; }
@@ -249,11 +261,15 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
       json(res, 200, { ...value, ...receipts() });
     };
     const providerConfigured = !!ctx.google?.clientId.trim() && !!ctx.google.clientSecret.trim();
+    const liveReady = () => { try { ctx.liveRestore?.assertReady(); return !!ctx.liveRestore; } catch { return false; } };
     if (action === "status") {
       const grant = grantSchemaReady(db) ? getVisibleGrant(db, account.userId, protector) : null;
       assertCurrent();
+      const ready = liveReady();
+      const engineChoices = ready ? z.array(z.object({ label: z.string().min(1).max(200), selection: liveSelectionSchema }).strict()).max(64)
+        .parse(ctx.liveRestore!.engineChoices?.(account) ?? []) : undefined;
       reply({ available: providerConfigured, connected: !!grant, scope: "account-owned",
-        restoreApply: "unsupported", settingsCaptured: readAccountSettings(db, account) !== null });
+        restoreApply: ready ? "additive" : "unsupported", settingsCaptured: readAccountSettings(db, account) !== null, engineChoices });
       return true;
     }
     // Local control never requires a working Google provider and never
@@ -281,6 +297,15 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
     }
     const backupInput = action === "backup" ? parse(backupBody, offered) : undefined;
     const restoreInput = action === "restore/inspect" ? parse(restoreBody, offered) : undefined;
+    const applyInput = action === "restore/apply" ? parse(applyBody, offered) : undefined;
+    if (action === "restore/receipt") {
+      const input = parse(receiptBody, offered);
+      if (!liveReady()) refuse(409, "live-restore-unavailable");
+      await recheck();
+      const result = readLiveRestoreReceipt(ctx.liveRestore!, input.operationId, account);
+      reply(result); return true;
+    }
+    if (applyInput && !liveReady()) refuse(409, "live-restore-unavailable");
     if (!providerConfigured) refuse(503, "provider-unavailable");
 
     let consentGuard: (() => void) | undefined;
@@ -416,6 +441,15 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
       const current = currentAccount();
       return current ? { account: current, googleSub: lease.googleSub } : null;
     };
+    if (applyInput) {
+      const downloaded = await client.getBinaryFile(applyInput.fileId);
+      await recheck(); lease.assertCurrent();
+      const restored = await applyLiveAccountRestore({ runtime: ctx.liveRestore!, resolveAccount, archive: downloaded.body,
+        key: { custody: "user-held", passphrase: applyInput.passphrase, recoveryCode: applyInput.recoveryCode },
+        selection: applyInput.selection, operationId: applyInput.operationId, expectedSourceDigest: applyInput.expectedSourceDigest,
+        signal: controller.signal });
+      await recheck(); lease.assertCurrent(); reply(restored); return true;
+    }
     if (action === "restore/inspect") {
       const input = restoreInput ?? refuse(400, "invalid-body");
       const downloaded = await client.getBinaryFile(input.fileId);
@@ -426,7 +460,7 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
         lease.assertCurrent();
         if (inspected.status !== "ready") refuse(422, "restore-inspection-unavailable");
         const state = inspected.state;
-        reply({ status: "ready", format: "account-recovery-v1", scope: "account-owned", apply: "unsupported",
+        reply({ status: "ready", format: "account-recovery-v1", scope: "account-owned", apply: liveReady() ? "additive" : "unsupported",
           sourceDigest: state.sourceDigest, counts: { bots: state.bots.length, groups: state.groups.length,
             threads: state.threads.length, messages: state.threads.reduce((total, thread) => total + thread.messages.length, 0),
             plans: state.plans.length, transitions: state.transitions.length }, excludes: inspected.excludes });
@@ -456,13 +490,14 @@ export async function handleVisibleDriveRoute(req: IncomingMessage, res: ServerR
       ? await writeAccountRecoveryBackup({ lease, client, archive })
       : await writeAccountVisibleBackup({ lease, client, bundle: archive });
     await recheck(); lease.assertCurrent();
-    reply(result); return true;
+    reply({ ...result, apply: inputKey.format === "account-recovery-v1" && liveReady() ? "additive" : result.apply }); return true;
   } catch (error) {
     if (consentState && pinned) {
       try { cancelVisibleConsentState(ctx.db(), { ...pinned, state: consentState }, now()); }
       catch { /* Preserve an older usable grant even if cleanup is unavailable. */ }
     }
     if (error instanceof RouteFailure) json(res, error.status, { error: error.code });
+    else if (error instanceof LiveRestoreFailure) json(res, 409, { error: error.code });
     else if (error instanceof VisibleAccessError) json(res, 409, { error: error.code, reconnectRequired: error.reconnectRequired });
     else if (error instanceof VisibleBackupError) json(res, 409, { error: error.code,
       createdFileId: error.createdFileId, copyPreserved: error.createdFileId ? true : undefined });
