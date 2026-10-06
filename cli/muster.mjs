@@ -32,7 +32,6 @@ import { fileURLToPath } from "node:url";
 import { renderTerminal } from "./qr.mjs";
 import { loadCliConfig, saveCliConfig, readPairPassword, rejectPasswordArgument, sessionCookie } from "./credentials.mjs";
 import { clearRunRecordAt, inspectRecordedServer, parseSetupInstances, readRunRecordAt, stopRecordedServer } from "./runtime-contracts.mjs";
-import { evaluateDataDirClaim } from "../scripts/data-dir-claim-check.mjs";
 
 // Every on-disk path hangs off MUSTER_DIR (default ~/.muster). The env
 // override keeps multi-instance testing and second installs off a real one.
@@ -516,6 +515,37 @@ async function mintAndPrint(port, { detached }) {
  *  setup). The server refuses to boot on a non-loopback host without
  *  BETTER_AUTH_SECRET (resolveSecret throws): generate once, persist 0600,
  *  reuse forever — sessions must survive restarts. */
+
+// Launcher-side restore-exclusivity claim check, mirrored inline from the
+// canonical scripts/data-dir-claim-check.mjs. The release CLI artifact is
+// bundled from cli/ alone (the reproducible-artifact build cannot resolve
+// ../scripts), and the desktop parent and Docker entrypoint carry their own
+// comment-pinned mirrors for the same shipping reason. Keep the marker rule
+// byte-identical to exclusiveClaimPath in server/data-dir-exclusivity.ts:
+// <parent>/.muster-restore-exclusivity.<basename>.json over the resolved
+// data directory. Launchers refuse; they never recover — the server's boot
+// guard owns recovery (see docs/plans/restore-reconciliation-runbook.md).
+function evaluateDataDirClaimMirror(dataDir) {
+  if (!dataDir || typeof dataDir !== "string" || dataDir.trim() === ""
+    // SAFETY: constructor identity is the repo's structural probe for
+    // JSON/CLI values; primitives carry String as their constructor.
+    || dataDir.constructor !== String) {
+    return { clear: false, message: "Restore-exclusivity claim check ran without a data directory; refusing is the only safe action." };
+  }
+  const root = resolve(dataDir);
+  const markerPath = join(dirname(root), `.muster-restore-exclusivity.${basename(root)}.json`);
+  let stat;
+  try { stat = lstatSync(markerPath); }
+  catch (error) {
+    if (error?.code === "ENOENT") return { clear: true, message: "" };
+    return { clear: false, message: `Restore-exclusivity claim check could not inspect ${markerPath} (${error?.code ?? String(error)}); refusing to start is the only safe action. See docs/plans/restore-reconciliation-runbook.md.` };
+  }
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    return { clear: false, message: `${markerPath} exists but is ${stat.isSymbolicLink() ? "a symbolic link" : "not a plain file"}; launchers never follow links or recover. Reconcile it manually (see docs/plans/restore-reconciliation-runbook.md) before starting anything that writes this data directory.` };
+  }
+  return { clear: false, message: `A restore-exclusivity claim exists at ${markerPath}; the data directory it guards must not be touched until it is reconciled manually (see docs/plans/restore-reconciliation-runbook.md).` };
+}
+
 function serverEnv(port, runtime) {
   // Before the first protected write (and before spawning a server that
   // would only die later at its own boot guard): a data directory carrying a
@@ -523,7 +553,7 @@ function serverEnv(port, runtime) {
   // they do not recover (see server/data-dir-exclusivity.ts and
   // docs/plans/restore-reconciliation-runbook.md).
   const dataDir = arg("--data-dir") ?? process.env.OMB_DATA_DIR ?? join(MUSTER_DIR, "data");
-  const claim = evaluateDataDirClaim(dataDir);
+  const claim = evaluateDataDirClaimMirror(dataDir);
   if (!claim.clear) throw new Error(claim.message);
   const secretPath = join(MUSTER_DIR, "auth.secret");
   mkdirSync(MUSTER_DIR, { recursive: true });
