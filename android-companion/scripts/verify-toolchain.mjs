@@ -137,6 +137,16 @@ async function main() {
       assert.equal(extraPositional.status, 2);
       assert.equal(extraPositional.stdout, usage);
       assert.equal(extraPositional.stderr, "js-yaml: error: Unrecognized arguments: two.\n");
+      const ambiguousOption = invoke(["--t"]);
+      assert.equal(ambiguousOption.status, 2);
+      assert.equal(ambiguousOption.stdout, usage);
+      assert.equal(ambiguousOption.stderr, "js-yaml: error: Ambiguous option: \"--t\" could match --to-json, --trace.\n");
+      for (const flag of ["--compact=x", "-c=x", "--trace=x", "-t=x", "--to-json=x", "-j=x"]) {
+        const explicitBooleanValue = invoke([flag]);
+        assert.equal(explicitBooleanValue.status, 2);
+        assert.equal(explicitBooleanValue.stdout, usage);
+        assert.equal(explicitBooleanValue.stderr, "js-yaml: error: [sprintf] unexpected placeholder\n");
+      }
       const yaml = invoke([], "name: Muster\ncount: 2\n");
       assert.equal(yaml.status, 0);
       assert.equal(yaml.stdout, "{\n  \"name\": \"Muster\",\n  \"count\": 2\n}\n");
