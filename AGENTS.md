@@ -1,3 +1,7 @@
+## Current owner acceptance directive — 6 October 2026, successor
+
+Astra/root and its own subagents own this round; preserve shared work and use isolated branches/normal independently reviewed integration. Account-selected live restore scope is already approved and unattended boot apply excluded. Production live enablement still requires genuine pre-import/lifetime writer authority; production native enrollment stays disabled until recorded issuer/audience/registered macOS callback/protected-key bridge is reviewed and tested. Reuse existing protected custody; do not invent issuer from a public hostname or equate Google issuer/email/local IDs with enrollment identity. Latest source candidate `014ac84344eae08bcbfe6516e27e24add507e88c`, local full 518/8700/8+84; detailed actual results and NOT READY gates are in current-state and remaining-work register. This current directive supersedes conflicting historical coordination/scope statements below; historical receipts remain intact.
+
 # AGENTS.md — Muster
 
 ## Current completion round — Astra and own subagents (2026-10-06)
