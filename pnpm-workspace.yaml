@@ -38,19 +38,16 @@ overrides:
   # selector targets absent 5.20260923.0-alpha and is therefore unmatched.
   # Confirm the exact graph selector against the lockfile before updating it.
   "miniflare@5.20260923.0-alpha>undici": "7.29.1"
-  # Configuration only: tracks the newest published http-cache-semantics, which
-  # satisfies cacheable-request's declared `^4.0.0`.
-  #
-  # This does NOT fix CVE-2026-93748 / GHSA-ch52-4w7c-c8xp, and the published
-  # 4.3.0 still carries the flaw. Verified against the registry tarball: 4.3.0's
-  # gitHead is b1d4bd682fbab0252985de45219f4e7497c0067c, whose index.js honours
-  # `max-stale` for security-zeroed responses and defines no
-  # `_requiresRevalidation()` guard. The upstream repair is commit
-  # 14a8c2ad51740dc39bf3e8f1a11c845a5003f217, which is not reachable from
-  # origin/main and is therefore in no published release. The GHSA still lists
-  # "Patched versions: None". Dependabot alert #75 stays open until a release
-  # containing that commit ships. Do not read this pin as remediation.
+  # 4.3.0 satisfies cacheable-request's declared ^4.0.0. The version pin alone
+  # does not repair protected-response reuse: published 4.3.0 still lets stale
+  # allowances bypass validation restrictions. Use the exact local patch below.
   "http-cache-semantics@<4.3.0": "4.3.0"
+patchedDependencies:
+  # Local backport of protected reuse semantics discussed in upstream #62/#63,
+  # including failed validation. Preserve 4.3.0 API/Vary/serialization and fresh
+  # must/proxy/s-maxage behavior; this is not an official patched release or an
+  # alert-disposition receipt. Tests resolve the real cacheable-request consumer.
+  "http-cache-semantics@4.3.0": "patches/http-cache-semantics@4.3.0.patch"
 allowBuilds:
   electron: true # postinstall downloads the Electron dist
   esbuild: true # postinstall validates the platform binary

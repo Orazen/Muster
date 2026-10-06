@@ -1,0 +1,70 @@
+diff --git a/index.js b/index.js
+--- a/index.js
++++ b/index.js
+@@ -370,6 +370,28 @@
+     }
+ 
+     /**
++     * Reuse restrictions are distinct from ordinary expiration. No-cache and
++     * the existing shared-cookie safeguard always require validation; the
++     * must/proxy/s-maxage directives prohibit reuse only once stale.
++     * @returns {boolean} Whether this response needs successful validation.
++     */
++    _requiresRevalidation() {
++        return !!(
++            !this.storable() ||
++            this._rescc['no-cache'] ||
++            (this._isShared &&
++                this._resHeaders['set-cookie'] &&
++                !this._rescc.public &&
++                !this._rescc.immutable) ||
++            (this.stale() &&
++                (this._rescc['must-revalidate'] ||
++                    (this._isShared &&
++                        (this._rescc['proxy-revalidate'] ||
++                            this._rescc['s-maxage']))))
++        );
++    }
++
++    /**
+      * Checks if the given request matches this cache entry, and how the cache can be used to satisfy it. Returns an object with:
+      *
+      * ```
+@@ -395,8 +417,8 @@
+     evaluateRequest(req) {
+         this._assertRequestHasHeaders(req);
+ 
+-        // In all circumstances, a cache MUST NOT ignore the must-revalidate directive
+-        if (this._rescc['must-revalidate']) {
++        // Request stale allowances cannot override response reuse restrictions.
++        if (this._requiresRevalidation()) {
+             return this._evaluateRequestMissResult(req);
+         }
+ 
+@@ -640,9 +662,6 @@
+         }
+ 
+         if (this._isShared) {
+-            if (this._rescc['proxy-revalidate']) {
+-                return 0;
+-            }
+             // if a response includes the s-maxage directive, a shared cache recipient MUST ignore the Expires field.
+             if (this._rescc['s-maxage']) {
+                 return toNumberOrZero(this._rescc['s-maxage']);
+@@ -855,7 +874,15 @@
+     revalidatedPolicy(request, response) {
+         this._assertRequestHasHeaders(request);
+ 
+-        if (this._useStaleIfError() && isErrorResponse(response)) {
++        const requestCC = parseCacheControl(request.headers['cache-control']);
++        if (
++            !this._requiresRevalidation() &&
++            this._requestMatches(request, true) &&
++            !requestCC['no-cache'] &&
++            !/no-cache/.test(request.headers.pragma) &&
++            this._useStaleIfError() &&
++            isErrorResponse(response)
++        ) {
+           return {
+               policy: this,
+               modified: false,
