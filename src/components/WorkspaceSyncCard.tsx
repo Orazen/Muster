@@ -89,6 +89,13 @@ export function TelegramChatChannelCard() {
 const exportReply = z.object({ payload: z.string().min(1) });
 const restoreReply = z.object({ restored: z.object({ botsRestored: z.number().int().nonnegative(), memoryFilesRestored: z.number().int().nonnegative() }) });
 const uploadReply = z.object({ uploaded: z.string().min(1) });
+const disconnectDriveReply = z.object({
+  connected: z.literal(false),
+  localTokensRemoved: z.literal(true),
+  googleAuthorizationRevoked: z.literal(false),
+  backupFilesDeleted: z.literal(false),
+  message: z.string().min(1),
+});
 const telegramReply = z.object({ connected: z.literal(true), bot: z.string(), chat: z.string() });
 
 export function WorkspaceSyncCard() {
@@ -198,6 +205,23 @@ function WorkspaceSyncSession() {
       return `Restored ${data.restored.botsRestored} bots, ${data.restored.memoryFilesRestored} memory files from Drive.`;
     });
 
+  const disconnectGoogleDrive = () =>
+    run("Removing local Drive tokens…", "workspace", async (request) => {
+      const data = await readWorkspaceReply(request, "/api/workspace/drive/disconnect", "{}", disconnectDriveReply);
+      if (!data) return null;
+      request.commit(() => {
+        const current = capabilityRef.current;
+        if (!current) return;
+        const value = {
+          ...current,
+          installationDrive: { ...current.installationDrive, configured: false, operationsAvailable: false },
+        };
+        capabilityRef.current = value;
+        setCapability({ kind: "ready", value });
+      });
+      return data.message;
+    });
+
   const connectTelegram = () =>
     run("Connecting Telegram…", "workspace", async (request) => {
       const token = botToken.trim();
@@ -288,6 +312,11 @@ function WorkspaceSyncSession() {
         <button type="button" disabled={busy || !driveAllowed} onClick={() => void googlePull()} className={cn(button, "text-accent font-medium")}>
           <HardDriveDownload size={13} /> Restore from Drive
         </button>
+        {capability.kind === "ready" && capability.value.workspaceBackupAvailable && (
+          <button type="button" disabled={busy || !workspaceAllowed} onClick={() => void disconnectGoogleDrive()} className={button}>
+            Disconnect Drive here
+          </button>
+        )}
         <span className="mx-1 w-px self-stretch bg-hairline/40" aria-hidden="true" />
         <button type="button" disabled={busy || !workspaceAllowed} onClick={() => void telegramPush()} className={cn(button, "text-accent font-medium")}>
           <Send size={13} /> Back up to Telegram
@@ -305,6 +334,12 @@ function WorkspaceSyncSession() {
           Connect Telegram…
         </button>
       </div>
+
+      {capability.kind === "ready" && capability.value.workspaceBackupAvailable && (
+        <p className="mt-1 text-[11px] leading-snug text-ink-secondary">
+          Disconnect removes only local Drive tokens. Google's remote authorization and backup files are not revoked or deleted.
+        </p>
+      )}
 
       {showTelegram && (
         <div className="mt-2 rounded-lg border border-hairline/40 bg-inset p-2.5">

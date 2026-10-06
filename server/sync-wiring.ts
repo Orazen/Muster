@@ -61,22 +61,27 @@ export interface DriveTransportFns {
     payload: string,
     fileName?: string,
     guard?: () => Promise<void>,
+    signal?: AbortSignal,
   ): Promise<{ id: string }>;
   downloadBundle(
     accessToken: string,
     fileName?: string,
     guard?: () => Promise<void>,
+    signal?: AbortSignal,
   ): Promise<string | null>;
   statBundleFile(
     accessToken: string,
     fileName?: string,
     guard?: () => Promise<void>,
+    signal?: AbortSignal,
   ): Promise<{ id: string; modifiedTime: string } | null>;
 }
 
 export interface DriveTransportOptions {
   getAccessToken(): Promise<string>;
   drive?: DriveTransportFns;
+  guard?: () => Promise<void>;
+  signal?: AbortSignal;
 }
 
 /** Strict where it can be, honest where it cannot: exactly-our-base64
@@ -112,27 +117,40 @@ export function googleDriveStorageProvider(options: DriveTransportOptions): Stor
   };
   const transport: SyncTransportDeps = {
     async upload(fileName: string, bytes: Buffer): Promise<void> {
+      await options.guard?.();
       const token = await options.getAccessToken();
-      await drive.uploadBundle(token, bytes.toString("base64"), fileName);
+      await options.guard?.();
+      await drive.uploadBundle(token, bytes.toString("base64"), fileName, options.guard, options.signal);
+      await options.guard?.();
     },
     async download(fileName: string): Promise<Buffer | null> {
+      await options.guard?.();
       const token = await options.getAccessToken();
-      const text = await drive.downloadBundle(token, fileName);
+      await options.guard?.();
+      const text = await drive.downloadBundle(token, fileName, options.guard, options.signal);
+      await options.guard?.();
       return text === null ? null : drivePayloadBytes(text);
     },
     async loadRemoteManifest(): Promise<{ bytes: Buffer; guard: string | null } | null> {
+      await options.guard?.();
       const token = await options.getAccessToken();
       // stat BEFORE download — see the header note on guard ordering.
-      const meta = await drive.statBundleFile(token, SYNC_MANIFEST_FILE_NAME);
+      await options.guard?.();
+      const meta = await drive.statBundleFile(token, SYNC_MANIFEST_FILE_NAME, options.guard, options.signal);
+      await options.guard?.();
       if (meta === null) return null;
-      const text = await drive.downloadBundle(token, SYNC_MANIFEST_FILE_NAME);
+      const text = await drive.downloadBundle(token, SYNC_MANIFEST_FILE_NAME, options.guard, options.signal);
+      await options.guard?.();
       // vanished between stat and read: honest first-run absence again
       if (text === null) return null;
       return { bytes: drivePayloadBytes(text), guard: meta.modifiedTime };
     },
     async saveRemoteManifest(bytes: Buffer, expectedGuard: string | null): Promise<void> {
+      await options.guard?.();
       const token = await options.getAccessToken();
-      const meta = await drive.statBundleFile(token, SYNC_MANIFEST_FILE_NAME);
+      await options.guard?.();
+      const meta = await drive.statBundleFile(token, SYNC_MANIFEST_FILE_NAME, options.guard, options.signal);
+      await options.guard?.();
       if (expectedGuard === null) {
         if (meta !== null) {
           throw new Error("the remote manifest already exists — refusing a first-run create over it");
@@ -147,7 +165,8 @@ export function googleDriveStorageProvider(options: DriveTransportOptions): Stor
       }
       // verify-before-write; the remaining stat→write window is the
       // documented cost of Drive v3 having no If-Match.
-      await drive.uploadBundle(token, bytes.toString("base64"), SYNC_MANIFEST_FILE_NAME);
+      await drive.uploadBundle(token, bytes.toString("base64"), SYNC_MANIFEST_FILE_NAME, options.guard, options.signal);
+      await options.guard?.();
     },
   };
   return asStorageProvider(transport);
@@ -178,6 +197,10 @@ export type SyncEngineResult = SyncPassResult;
 export interface SyncEngineOptions {
   db: DatabaseSync;
   transport: SyncTransportDeps;
+  /** Build a lifecycle-bound transport for each pass. When provided, it
+   * supersedes the fixed transport and prevents a later reconnect from lending
+   * its credentials to an already-running pass. */
+  transportForRun?: () => SyncTransportDeps;
   local: LocalManifestStore;
   readObject: SyncPassDeps["readObject"];
   applyObject: SyncPassDeps["applyObject"];
@@ -249,7 +272,7 @@ export function startSyncEngine(options: SyncEngineOptions): SyncEngine {
       try {
         return await runPass({
           db: options.db,
-          transport: options.transport,
+          transport: options.transportForRun?.() ?? options.transport,
           local: options.local,
           readObject: options.readObject,
           applyObject: options.applyObject,

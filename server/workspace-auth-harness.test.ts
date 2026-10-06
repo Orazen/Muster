@@ -337,7 +337,7 @@ describe.skipIf(process.platform === "win32")("configured local Drive over actua
       expect(changed.status).toBe(200);
       local.transport.setMode("ok");
       const response = await pending;
-      expect({ status: response.status, body: await response.json() }).toEqual({ status: 409, body: { error: "Google Drive connection changed during download — check the connection and try again." } });
+      expect({ status: response.status, body: await response.json() }).toEqual({ status: 409, body: { error: "Google Drive connection changed during the operation — check the connection and try again." } });
       expect(existsSync(local.memoryFile)).toBe(false);
       expect(accountState(local.dataDirectory)).toEqual(before);
     } finally {
@@ -382,6 +382,7 @@ const WORKSPACE_ROUTES = [
   { method: "POST", path: "/api/workspace/restore" },
   { method: "GET", path: "/api/workspace/drive/url" },
   { method: "POST", path: "/api/workspace/drive/connect" },
+  { method: "POST", path: "/api/workspace/drive/disconnect" },
   { method: "POST", path: "/api/workspace/drive/push" },
   { method: "POST", path: "/api/workspace/drive/pull" },
   { method: "POST", path: "/api/workspace/google/push" },
