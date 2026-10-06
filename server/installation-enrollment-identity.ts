@@ -22,15 +22,21 @@ import {
 
 const identifier = z.string().min(1).max(200).refine(value => value.trim() === value);
 const nonempty = z.string().min(1).refine(value => value.trim().length > 0);
-const redirectPolicy = z.object({
+/** Exported (was private) so the trust-configuration request can be checked
+ *  against the REAL schema rather than a restatement of it. Note what this
+ *  narrows relative to the contract: the issuer is capped at 128 characters
+ *  here, while `canonicalIssuerWire` alone allows 256, and every one of the
+ *  eight platform redirects is a REQUIRED key bounded only by length. Exposing
+ *  the schema does not change any behavior. */
+export const enrollmentIdentityRedirectPolicyWire = z.object({
   macos: z.string().max(2048), ios: z.string().max(2048),
   watchos: z.string().max(2048), android: z.string().max(2048),
   windows: z.string().max(2048), linux: z.string().max(2048),
   cli: z.string().max(2048), web: z.string().max(2048),
 });
-const configurationWire = z.object({
+export const enrollmentIdentityConfigurationWire = z.object({
   clientId: nonempty.max(512).refine(value => value.trim() === value),
-  trusted: z.object({ issuer: canonicalIssuerWire.max(128), approvedRedirects: redirectPolicy }),
+  trusted: z.object({ issuer: canonicalIssuerWire.max(128), approvedRedirects: enrollmentIdentityRedirectPolicyWire }),
 });
 const contextWire = z.object({
   session: z.object({ userId: identifier, sessionId: identifier }),
@@ -138,7 +144,7 @@ export function createEnrollmentIdentityResolver(
 ): (idToken: string, signal?: AbortSignal) => Promise<EnrollmentIdentityResult> {
   // Parse into fresh objects so mutating the caller's configuration while
   // verification awaits cannot silently change the accepted trust binding.
-  const config = configurationWire.safeParse(configuration);
+  const config = enrollmentIdentityConfigurationWire.safeParse(configuration);
   const verify = config.success ? createGoogleIdTokenVerifier(config.data.clientId, dependencies.keyResolver) : null;
   const now = dependencies.now ?? Date.now;
   return async (idToken, signal) => {
