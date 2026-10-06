@@ -14,6 +14,11 @@ overrides:
   miniflare@5.20260923.0-alpha>undici: 7.29.1
   http-cache-semantics@<4.3.0: 4.3.0
 
+patchedDependencies:
+  http-cache-semantics@4.3.0:
+    hash: 316855145f8fb13988b383a9b710f7c38930fa48ea1a14210564e6fcde27d814
+    path: patches/http-cache-semantics@4.3.0.patch
+
 importers:
 
   .:
@@ -5128,7 +5133,7 @@ snapshots:
     dependencies:
       clone-response: 1.0.3
       get-stream: 5.2.0
-      http-cache-semantics: 4.3.0
+      http-cache-semantics: 4.3.0(patch_hash=316855145f8fb13988b383a9b710f7c38930fa48ea1a14210564e6fcde27d814)
       keyv: 4.5.4
       lowercase-keys: 2.0.0
       normalize-url: 6.1.0
@@ -5706,7 +5711,7 @@ snapshots:
 
   html-void-elements@3.0.0: {}
 
-  http-cache-semantics@4.3.0: {}
+  http-cache-semantics@4.3.0(patch_hash=316855145f8fb13988b383a9b710f7c38930fa48ea1a14210564e6fcde27d814): {}
 
   http-proxy-agent@7.0.2:
     dependencies:
