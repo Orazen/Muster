@@ -14,7 +14,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { FileFencePersistence } from "./installation-fence-persistence.ts";
 import {
@@ -37,6 +37,7 @@ import {
   verifyEnrollmentProof,
 } from "./installation-enrollment-contract.ts";
 import type {
+  CustodyRead,
   EnrollmentBinding,
   EnrollmentContext,
   EnrollmentDeps,
@@ -251,11 +252,13 @@ describe("W1b enrollment contract", () => {
     });
 
     it("refuses to begin while disabled and mints nothing", async () => {
-      const deps = makeDeps();
+      let announcements = 0;
+      const deps = makeDeps({ noteGeneration: () => { announcements += 1; } });
       expect(await inert.begin(validRequest(), BINDING, CONTEXT, deps)).toEqual({ ok: false, reason: "disabled" });
       expect(deps.attempts.rows.size).toBe(0);
       expect(deps.store.keys()).toEqual([]);
       expect(deps.exchangeCalls()).toBe(0);
+      expect(announcements).toBe(0);
     });
 
     it("refuses to complete while disabled, spending nothing", async () => {
@@ -280,6 +283,223 @@ describe("W1b enrollment contract", () => {
       // Review: this helper returns constants and proves nothing about a real
       // route. It is retained as a declaration, and the naming says so.
       expect(ordinaryLoginEffect()).toEqual({ registrations: 0, authority: 0, permissions: 0 });
+    });
+  });
+
+  describe("awaited generation announcement", () => {
+    afterEach(() => resetEnrollmentFences());
+
+    it("does not return a successful begin before a held announcement finishes", async () => {
+      resetEnrollmentFences();
+      const deps = makeDeps();
+      const entered = gate();
+      const held = gate();
+      deps.noteGeneration = async (clientKey, generation) => {
+        entered.release();
+        await held.promise;
+        deps.store.noteGeneration(clientKey, generation);
+      };
+      const proof = clientProof();
+      let returned = false;
+      const pending = active.begin(proof.request, BINDING, CONTEXT, deps).then((result) => {
+        returned = true;
+        return result;
+      });
+      await entered.promise;
+      await settle();
+      try {
+        expect(returned).toBe(false);
+        expect(deps.exchangeCalls()).toBe(0);
+        expect(deps.store.keys()).toEqual([]);
+      } finally {
+        held.release();
+      }
+      const started = await pending;
+      expect(started.ok).toBe(true);
+      if (!started.ok) throw new Error("current begin failed");
+      expect(await active.complete(started.value.intentId, opts(proof.verifier), deps)).toMatchObject({ ok: true });
+      expect(deps.exchangeCalls()).toBe(1);
+      expect(deps.store.credential(CLIENT_KEY)).toBe(CREDENTIAL);
+    });
+
+    it.each(["synchronous", "omitted"] as const)("retains a %s announcement adapter", async (kind) => {
+      resetEnrollmentFences();
+      const deps = makeDeps(kind === "omitted" ? { noteGeneration: undefined } : {});
+      const started = await beginOk(deps);
+      expect(await active.complete(started.intentId, opts(started.verifier), deps)).toMatchObject({ ok: true });
+      expect(deps.exchangeCalls()).toBe(1);
+    });
+
+    it.each(["throw", "reject-after-write"] as const)("fences a failed %s announcement and retires its intent", async (kind) => {
+      resetEnrollmentFences();
+      const deps = makeDeps();
+      deps.noteGeneration = kind === "throw"
+        ? () => { throw new Error("synthetic announcement failed"); }
+        : async (clientKey, generation) => {
+          deps.store.noteGeneration(clientKey, generation);
+          throw new Error("synthetic announcement wrote then failed");
+        };
+      const proof = clientProof();
+      expect(await active.begin(proof.request, BINDING, CONTEXT, deps)).toEqual({ ok: false, reason: "custody-unresolved" });
+      const intent = deps.attempts.listIntents()[0];
+      expect(intent.invalidatedAt).toBe(NOW);
+      expect(await active.complete(intent.id, opts(proof.verifier), deps)).toMatchObject({ ok: false });
+      expect(deps.exchangeCalls()).toBe(0);
+      expect(deps.store.keys()).toEqual([]);
+      expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(true);
+      expect(suiteFencePersistence.read()).toContain(CLIENT_KEY);
+      expect(await active.begin(clientProof().request, BINDING, CONTEXT, deps)).toEqual({ ok: false, reason: "custody-unresolved" });
+
+      // A key-local failure does not cancel another device's enrollment.
+      deps.noteGeneration = (clientKey, generation) => deps.store.noteGeneration(clientKey, generation);
+      const otherKey = "client-key-synthetic-unrelated";
+      const otherProof = clientProof({ clientKey: otherKey });
+      const other = await beginOk(deps, otherProof, { ...BINDING, clientKey: otherKey });
+      expect(await active.complete(other.intentId, opts(other.verifier), deps)).toMatchObject({ ok: true });
+      expect(deps.store.keys()).toEqual([otherKey]);
+    });
+
+    const invalidators = [
+      { kind: "cancel", reason: "cancelled" },
+      { kind: "end-context", reason: "cancelled" },
+      { kind: "owner", reason: "local-owner" },
+      { kind: "session", reason: "session-changed" },
+      { kind: "endpoint", reason: "endpoint-changed" },
+      { kind: "cloud-session", reason: "subject" },
+      { kind: "expiry", reason: "expired" },
+      { kind: "fence", reason: "custody-unresolved" },
+    ] as const;
+
+    it.each(invalidators)("rechecks $kind after a held announcement", async ({ kind, reason }) => {
+      resetEnrollmentFences();
+      const deps = makeDeps();
+      const entered = gate();
+      const held = gate();
+      deps.noteGeneration = async (clientKey, generation) => {
+        entered.release();
+        await held.promise;
+        deps.store.noteGeneration(clientKey, generation);
+      };
+      const proof = clientProof();
+      const pending = active.begin(proof.request, BINDING, CONTEXT, deps);
+      await entered.promise;
+      const intent = deps.attempts.listIntents()[0];
+      try {
+        switch (kind) {
+          case "cancel": await cancelEnrollment(intent.id, deps); break;
+          case "end-context": await endEnrollmentContext(CONTEXT, deps); break;
+          case "owner": deps.setLiveContext({ ...CONTEXT, ownerId: "owner-replacement" }); break;
+          case "session": deps.setLiveContext({ ...CONTEXT, sessionId: "session-replacement" }); break;
+          case "endpoint": deps.setLiveContext({ ...CONTEXT, endpoint: "https://replacement.synthetic.invalid" }); break;
+          case "cloud-session": deps.setLiveCloudSessionValid(false); break;
+          case "expiry": deps.setClock(NOW + ENROLLMENT_INTENT_TTL_MS); break;
+          case "fence": fenceEnrollmentKey(CLIENT_KEY); break;
+        }
+      } finally {
+        held.release();
+      }
+      expect(await pending).toEqual({ ok: false, reason });
+      expect((await deps.attempts.peekIntent(intent.id))?.invalidatedAt).not.toBeNull();
+      expect(await active.complete(intent.id, opts(proof.verifier), deps)).toMatchObject({ ok: false });
+      expect(deps.exchangeCalls()).toBe(0);
+      expect(deps.store.keys()).toEqual([]);
+      expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(kind === "fence");
+    });
+
+    it("a held older announcement cannot report success or erase a committed newer winner", async () => {
+      resetEnrollmentFences();
+      const deps = makeDeps();
+      const entered = gate();
+      const held = gate();
+      deps.noteGeneration = async (clientKey, generation) => {
+        if (generation === "1") {
+          entered.release();
+          await held.promise;
+        }
+        deps.store.noteGeneration(clientKey, generation);
+      };
+      const olderProof = clientProof();
+      const older = active.begin(olderProof.request, BINDING, CONTEXT, deps);
+      await entered.promise;
+      const olderIntent = deps.attempts.listIntents()[0];
+      let winner: CustodyRead | undefined;
+      try {
+        const newer = await beginOk(deps);
+        expect(await active.complete(newer.intentId, opts(newer.verifier), deps)).toMatchObject({ ok: true });
+        winner = await deps.store.read(CLIENT_KEY);
+        expect(winner).toMatchObject({ kind: "present", record: { storedGeneration: "2" } });
+      } finally {
+        held.release();
+      }
+      expect(await older).toEqual({ ok: false, reason: "superseded" });
+      expect(await deps.store.read(CLIENT_KEY)).toEqual(winner);
+      expect(deps.store.credential(CLIENT_KEY)).toBe(CREDENTIAL);
+      expect(await active.complete(olderIntent.id, opts(olderProof.verifier), deps)).toEqual({ ok: false, reason: "superseded" });
+      expect(deps.exchangeCalls()).toBe(1);
+      expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(false);
+    });
+
+    it.each(["refused", "rejected", "read-rejected"] as const)("fences %s intent retirement instead of claiming cleanup", async (fault) => {
+      resetEnrollmentFences();
+      const deps = makeDeps();
+      const entered = gate();
+      const held = gate();
+      deps.noteGeneration = async (clientKey, generation) => {
+        entered.release();
+        await held.promise;
+        deps.store.noteGeneration(clientKey, generation);
+      };
+      const pending = active.begin(clientProof().request, BINDING, CONTEXT, deps);
+      await entered.promise;
+      deps.setLiveContext({ ...CONTEXT, sessionId: "session-replacement" });
+      if (fault === "refused") deps.attempts.invalidateIntent = async () => false;
+      if (fault === "rejected") deps.attempts.invalidateIntent = async () => { throw new Error("synthetic invalidation failed"); };
+      if (fault === "read-rejected") {
+        const peek = deps.attempts.peekIntent.bind(deps.attempts);
+        let reads = 0;
+        deps.attempts.peekIntent = async (id) => {
+          if (++reads === 2) throw new Error("synthetic retirement read failed");
+          return peek(id);
+        };
+      }
+      held.release();
+      expect(await pending).toEqual({ ok: false, reason: "custody-unresolved" });
+      expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(true);
+      expect(suiteFencePersistence.read()).toContain(CLIENT_KEY);
+      expect(deps.exchangeCalls()).toBe(0);
+      expect(deps.store.keys()).toEqual([]);
+      expect(await active.begin(clientProof().request, BINDING, CONTEXT, deps)).toEqual({ ok: false, reason: "custody-unresolved" });
+    });
+
+    it("a failing older announcement fences uncertainty while retaining the newer credential", async () => {
+      resetEnrollmentFences();
+      const deps = makeDeps();
+      const entered = gate();
+      const held = gate();
+      deps.noteGeneration = async (clientKey, generation) => {
+        if (generation === "1") {
+          entered.release();
+          await held.promise;
+          throw new Error("synthetic older announcement failed");
+        }
+        deps.store.noteGeneration(clientKey, generation);
+      };
+      const older = active.begin(clientProof().request, BINDING, CONTEXT, deps);
+      await entered.promise;
+      let winner: CustodyRead | undefined;
+      try {
+        const newer = await beginOk(deps);
+        expect(await active.complete(newer.intentId, opts(newer.verifier), deps)).toMatchObject({ ok: true });
+        winner = await deps.store.read(CLIENT_KEY);
+      } finally {
+        held.release();
+      }
+      expect(await older).toEqual({ ok: false, reason: "custody-unresolved" });
+      expect(await deps.store.read(CLIENT_KEY)).toEqual(winner);
+      expect(deps.store.credential(CLIENT_KEY)).toBe(CREDENTIAL);
+      expect(deps.exchangeCalls()).toBe(1);
+      expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(true);
+      expect(suiteFencePersistence.read()).toContain(CLIENT_KEY);
     });
   });
 
@@ -902,7 +1122,8 @@ describe("W1b enrollment contract", () => {
         active.begin(first.request, BINDING, CONTEXT, deps),
         active.begin(second.request, BINDING, CONTEXT, deps),
       ]);
-      expect(a.ok && b.ok).toBe(true);
+      expect([a, b].filter((result) => result.ok)).toHaveLength(1);
+      expect([a, b].filter((result) => !result.ok)).toEqual([{ ok: false, reason: "superseded" }]);
 
       // No assumption about WHICH concurrent begin wins — only that exactly one
       // completion is allowed to succeed and issue.
@@ -1423,9 +1644,10 @@ describe("W1b enrollment contract", () => {
         expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(false);
         return realExchange(binding, intent);
       };
-      // The guard calls currentContext() for its live-context comparison. The
-      // SECOND such call is the post-claim guard's; queueing the fence there
-      // lands it in the window between that guard and the exchange.
+      const { intentId, verifier } = await beginOk(deps);
+      // Arm only AFTER begin: its awaited announcement also reads the live
+      // context. Within complete, the SECOND call is the post-claim guard's;
+      // queueing there lands the fence between that guard and the exchange.
       let contextCalls = 0;
       const realContext = deps.currentContext;
       deps.currentContext = () => {
@@ -1433,12 +1655,12 @@ describe("W1b enrollment contract", () => {
         if (contextCalls === 2) queueMicrotask(() => fenceEnrollmentKey(CLIENT_KEY));
         return realContext();
       };
-      const { intentId, verifier } = await beginOk(deps);
       const result = await active.complete(intentId, opts(verifier), deps);
       // A RESULT, not a thrown error.
       expect(result).toEqual({ ok: false, reason: "custody-unresolved" });
       // And no credential was ever issued.
       expect(exchangeCalls).toBe(0);
+      expect(contextCalls).toBe(2);
       expect(deps.store.keys()).toEqual([]);
       expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(true);
     });
@@ -1780,7 +2002,9 @@ describe("W1b enrollment contract", () => {
       expect(fast.ok).toBe(true);
       held.release();
       const slowResult = await slow;
-      expect(slowResult.ok).toBe(true);
+      // The held allocation no longer owns generation 1 when it returns. Begin
+      // must refuse it before announcing custody or handing out a usable id.
+      expect(slowResult).toEqual({ ok: false, reason: "superseded" });
       if (!fast.ok) throw new Error("fast begin failed");
 
       // The newest generation-2 intent must complete normally.
@@ -1788,7 +2012,6 @@ describe("W1b enrollment contract", () => {
       expect(result.ok).toBe(true);
       expect(deps.store.keys()).toEqual([CLIENT_KEY]);
       expect(isEnrollmentKeyFenced(CLIENT_KEY)).toBe(false);
-      void slowResult;
     });
 
     it("fencing blocks a new begin on an unresolved key until reset", async () => {

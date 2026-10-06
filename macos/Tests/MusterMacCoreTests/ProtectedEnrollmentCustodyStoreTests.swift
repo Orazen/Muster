@@ -42,6 +42,8 @@ private final class FakeCustodyKeychain: EnrollmentCustodyKeychainOps, @unchecke
 
     /// Forced status for read/readAll, per service (unavailable-custody cases).
     var readFaults: [String: OSStatus] = [:]
+    /// Successful attribute results that cannot establish a valid fence list.
+    var readAllRows: [String: [[String: Any]]] = [:]
     /// Forced status for add, per service.
     var addFaults: [String: OSStatus] = [:]
     /// Forced status for delete, per service.
@@ -95,6 +97,7 @@ private final class FakeCustodyKeychain: EnrollmentCustodyKeychainOps, @unchecke
         let service = self.service(query)
         operations.append(Operation(op: "readAll", service: service, account: nil))
         if let forced = readFaults[service] { return (forced, nil) }
+        if let rows = readAllRows[service] { return (errSecSuccess, rows) }
         let accounts = items[service] ?? [:]
         guard !accounts.isEmpty else { return (errSecItemNotFound, nil) }
         let rows: [[String: Any]] = accounts.map { account, data in
@@ -136,6 +139,11 @@ private final class FakeCustodyKeychain: EnrollmentCustodyKeychainOps, @unchecke
         return items[ProtectedEnrollmentCustodyStore.Service.fence]?[clientKey]
     }
 
+    func tombstoneData(_ clientKey: String) -> Data? {
+        lock.lock(); defer { lock.unlock() }
+        return items[ProtectedEnrollmentCustodyStore.Service.tombstone]?[clientKey]
+    }
+
     func fenceCount() -> Int {
         lock.lock(); defer { lock.unlock() }
         return items[ProtectedEnrollmentCustodyStore.Service.fence]?.count ?? 0
@@ -174,6 +182,30 @@ private func fixtureRequest(clientKey: String = fixtureClientKey,
 // MARK: - Tests
 
 final class ProtectedEnrollmentCustodyStoreTests: XCTestCase {
+    // Production construction is restricted by the private initializer. The
+    // explicit seam still permits independent actors with isolated fake stores.
+    func testExplicitInjectedStoresKeepIndependentCustody() async throws {
+        let backendA = FakeCustodyKeychain()
+        let backendB = FakeCustodyKeychain()
+        let storeA = ProtectedEnrollmentCustodyStore(ops: backendA)
+        let storeB = ProtectedEnrollmentCustodyStore(ops: backendB)
+        XCTAssertNotEqual(ObjectIdentifier(storeA), ObjectIdentifier(storeB))
+
+        try await storeA.commit(fixtureRequest(), expectedGeneration: "4")
+        let recordA = backendA.recordData(fixtureClientKey)
+        let ledgerA = backendA.ledgerData(fixtureClientKey)
+        XCTAssertNil(backendB.recordData(fixtureClientKey))
+        XCTAssertNil(backendB.ledgerData(fixtureClientKey))
+        XCTAssertTrue(backendB.operations.isEmpty)
+
+        try await storeB.commit(fixtureRequest(credential: "credential-synthetic-independent"),
+                                expectedGeneration: "1")
+        XCTAssertEqual(backendA.recordData(fixtureClientKey), recordA)
+        XCTAssertEqual(backendA.ledgerData(fixtureClientKey), ledgerA)
+        let newestB = try await storeB.storedNewestGeneration(clientKey: fixtureClientKey)
+        XCTAssertEqual(newestB, "1")
+    }
+
     // W2 (a): a fence survives a restart — a fresh store instance over the
     // same durable Keychain observes what a prior instance persisted, and
     // the refusal happens before anything is allocated or written.
@@ -304,17 +336,19 @@ final class ProtectedEnrollmentCustodyStoreTests: XCTestCase {
         }
 
         // The explicit owner action: remove the unusable record, reset the
-        // fence, and the key is begin-able again.
+        // fence, then announce a newer enrollment generation. The delete
+        // tombstone remains authoritative for the deleted generation.
         backend.garbageAccounts.remove(fixtureClientKey)
         let removed = try await storeB.delete(fixtureClientKey)
         XCTAssertTrue(removed)
         try await storeB.resetFences()
-        try await storeB.commit(fixtureRequest(), expectedGeneration: "1")
+        try await storeB.noteGeneration(clientKey: fixtureClientKey, generation: "2")
+        try await storeB.commit(fixtureRequest(), expectedGeneration: "2")
         let recovered = await storeB.read(fixtureClientKey)
         guard case let .present(recoveredRecord) = recovered else {
             return XCTFail("expected recovery after the owner actions, got \(recovered)")
         }
-        XCTAssertEqual(recoveredRecord.storedGeneration, "1")
+        XCTAssertEqual(recoveredRecord.storedGeneration, "2")
     }
 
     // W2 (d): an unavailable (faulted, not merely corrupt) custody read is
@@ -435,6 +469,7 @@ final class ProtectedEnrollmentCustodyStoreTests: XCTestCase {
         let afterInvalidate = await store.read(fixtureClientKey)
         XCTAssertEqual(afterInvalidate, .absent)
         // Delete is unconditional: it removes even a newest winner.
+        try await store.noteGeneration(clientKey: fixtureClientKey, generation: "2")
         try await store.commit(fixtureRequest(), expectedGeneration: "2")
         let deletedWinner = try await store.delete(fixtureClientKey)
         XCTAssertTrue(deletedWinner)
@@ -442,6 +477,147 @@ final class ProtectedEnrollmentCustodyStoreTests: XCTestCase {
         XCTAssertEqual(afterDelete, .absent)
         let deletedAgain = try await store.delete(fixtureClientKey)
         XCTAssertFalse(deletedAgain)
+    }
+
+    func testDeleteTombstoneSurvivesRestartAndRequiresANewerAnnouncedGeneration() async throws {
+        let backend = FakeCustodyKeychain()
+        let storeA = ProtectedEnrollmentCustodyStore(ops: backend)
+        let otherKey = "client-key-synthetic-other"
+        try await storeA.noteGeneration(clientKey: fixtureClientKey, generation: "4")
+        try await storeA.commit(fixtureRequest(), expectedGeneration: "4")
+        try await storeA.noteGeneration(clientKey: otherKey, generation: "1")
+        try await storeA.commit(fixtureRequest(clientKey: otherKey, credential: "credential-other"), expectedGeneration: "1")
+
+        let deleted = try await storeA.delete(fixtureClientKey)
+        XCTAssertTrue(deleted)
+        XCTAssertNotNil(backend.recordData(otherKey), "Deleting one account must preserve unrelated custody")
+        XCTAssertNotNil(backend.ledgerData(fixtureClientKey), "Deletion must retain the generation ledger")
+        XCTAssertNotNil(backend.tombstoneData(fixtureClientKey))
+
+        let storeB = ProtectedEnrollmentCustodyStore(ops: backend)
+        let deletedRead = await storeB.read(fixtureClientKey)
+        XCTAssertEqual(deletedRead, .absent)
+        let unrelatedRead = await storeB.read(otherKey)
+        guard case let .present(existingOther) = unrelatedRead else {
+            return XCTFail("expected unrelated account custody to survive")
+        }
+        XCTAssertEqual(existingOther.envelope.sealed, "credential-other")
+        await XCTAssertThrowsErrorAsync(
+            try await storeB.commit(fixtureRequest(), expectedGeneration: "4")) { error in
+            XCTAssertEqual(error as? ProtectedEnrollmentCustodyError, .keyDeleted)
+        }
+        await XCTAssertThrowsErrorAsync(
+            try await storeB.noteGeneration(clientKey: fixtureClientKey, generation: "4")) { error in
+            XCTAssertEqual(error as? ProtectedEnrollmentCustodyError, .keyDeleted)
+        }
+
+        try await storeB.noteGeneration(clientKey: fixtureClientKey, generation: "5")
+        try await storeB.commit(fixtureRequest(credential: "credential-new"), expectedGeneration: "5")
+        guard case let .present(newWinner) = await storeB.read(fixtureClientKey) else {
+            return XCTFail("expected the newer enrollment to replace the tombstone")
+        }
+        XCTAssertEqual(newWinner.storedGeneration, "5")
+        XCTAssertEqual(newWinner.envelope.sealed, "credential-new")
+        guard case let .present(unrelated) = await storeB.read(otherKey) else {
+            return XCTFail("expected unrelated account custody to survive")
+        }
+        XCTAssertEqual(unrelated.envelope.sealed, "credential-other")
+    }
+
+    func testDegradedFenceReadFailsClosedBeforeAnyCustodyWrite() async throws {
+        let backend = FakeCustodyKeychain()
+        let store = ProtectedEnrollmentCustodyStore(ops: backend)
+        backend.readFaults[ProtectedEnrollmentCustodyStore.Service.fence] = errSecInteractionNotAllowed
+
+        let fenced = await store.isFenced(clientKey: fixtureClientKey)
+        XCTAssertTrue(fenced)
+        await XCTAssertThrowsErrorAsync(
+            try await store.commit(fixtureRequest(), expectedGeneration: "1")) { error in
+            XCTAssertEqual(error as? ProtectedEnrollmentCustodyError, .fenceStoreDegraded)
+        }
+        XCTAssertNil(backend.recordData(fixtureClientKey))
+        XCTAssertNil(backend.ledgerData(fixtureClientKey))
+    }
+
+    func testSuccessfulNilFenceReadRefusesFreshAndReplacementCommits() async throws {
+        try await assertInvalidFenceReadPreservesCustody { backend in
+            backend.readFaults[ProtectedEnrollmentCustodyStore.Service.fence] = errSecSuccess
+        }
+    }
+
+    func testValidatedUnrelatedFenceAllowsCommitWithoutChangingThatFence() async throws {
+        let backend = FakeCustodyKeychain()
+        let store = ProtectedEnrollmentCustodyStore(ops: backend)
+        let otherKey = "client-key-synthetic-other"
+        try await store.fence(clientKey: otherKey, reason: "unrelated-custody")
+        let originalFence = backend.fenceData(otherKey)
+
+        let fenced = await store.isFenced(clientKey: fixtureClientKey)
+        XCTAssertFalse(fenced)
+        try await store.commit(fixtureRequest(), expectedGeneration: "1")
+        XCTAssertNotNil(backend.recordData(fixtureClientKey))
+        XCTAssertEqual(backend.fenceData(otherKey), originalFence)
+        let otherFenced = await store.isFenced(clientKey: otherKey)
+        XCTAssertTrue(otherFenced)
+    }
+
+    func testSuccessfulEmptyFenceReadRefusesFreshAndReplacementCommits() async throws {
+        try await assertInvalidFenceReadPreservesCustody { backend in
+            backend.readAllRows[ProtectedEnrollmentCustodyStore.Service.fence] = []
+        }
+    }
+
+    func testMalformedFenceRowsRefuseFreshAndReplacementCommits() async throws {
+        let accountAttribute = kSecAttrAccount as String
+        let malformedRows: [[String: Any]] = [
+            [:],
+            [accountAttribute: 42],
+            [accountAttribute: NSNull()],
+            [accountAttribute: ""],
+            [accountAttribute: " \t\n"],
+        ]
+        for row in malformedRows {
+            // A valid unrelated fence must not hide a malformed row, regardless
+            // of order. No row may be silently dropped to infer absence.
+            for rows in [[row, [accountAttribute: "client-key-synthetic-other"]],
+                         [[accountAttribute: "client-key-synthetic-other"], row]] {
+                try await assertInvalidFenceReadPreservesCustody { backend in
+                    backend.readAllRows[ProtectedEnrollmentCustodyStore.Service.fence] = rows
+                }
+            }
+        }
+    }
+
+    private func assertInvalidFenceReadPreservesCustody(
+        configure: (FakeCustodyKeychain) -> Void,
+        file: StaticString = #filePath, line: UInt = #line
+    ) async throws {
+        for hasExistingCustody in [false, true] {
+            let backend = FakeCustodyKeychain()
+            let store = ProtectedEnrollmentCustodyStore(ops: backend)
+            if hasExistingCustody {
+                try await store.commit(fixtureRequest(), expectedGeneration: "4")
+            }
+            let beforeRecord = backend.recordData(fixtureClientKey)
+            let beforeLedger = backend.ledgerData(fixtureClientKey)
+            let beforeOperations = backend.operations.count
+            configure(backend)
+
+            let fenced = await store.isFenced(clientKey: fixtureClientKey)
+            XCTAssertTrue(fenced, file: file, line: line)
+            let otherFenced = await store.isFenced(clientKey: "client-key-synthetic-new")
+            XCTAssertTrue(otherFenced, "Unknown fence contents must refuse every key", file: file, line: line)
+            await XCTAssertThrowsErrorAsync(
+                try await store.commit(fixtureRequest(credential: "credential-synthetic-replacement"),
+                                       expectedGeneration: "5"), file: file, line: line) { error in
+                XCTAssertEqual(error as? ProtectedEnrollmentCustodyError, .fenceStoreDegraded,
+                               file: file, line: line)
+            }
+            XCTAssertEqual(backend.recordData(fixtureClientKey), beforeRecord, file: file, line: line)
+            XCTAssertEqual(backend.ledgerData(fixtureClientKey), beforeLedger, file: file, line: line)
+            XCTAssertTrue(backend.operations.dropFirst(beforeOperations).allSatisfy { $0.op == "readAll" },
+                          "Degraded fences must refuse before touching custody or its ledger", file: file, line: line)
+        }
     }
 
     // Concurrent commit/invalidate interleaving, at the API level: whatever
@@ -594,6 +770,43 @@ final class ProtectedEnrollmentCustodyStoreTests: XCTestCase {
         XCTAssertNil(newest)
     }
 
+    func testNonCanonicalIssuerAndEmailSubjectAreRefusedBeforeWriting() async throws {
+        let invalidIssuers = [
+            "https://Cloud.synthetic.invalid",
+            "https://cloud.synthetic.invalid:443",
+            "https://cloud.synthetic.invalid/",
+            "https://cloud.synthetic.invalid/path",
+            "https://user@cloud.synthetic.invalid",
+            "https://cloud.synthetic.invalid?query=1",
+            "https://cloud.synthetic.invalid#fragment",
+            "http://cloud.synthetic.invalid",
+        ]
+
+        for issuer in invalidIssuers {
+            let backend = FakeCustodyKeychain()
+            let store = ProtectedEnrollmentCustodyStore(ops: backend)
+            var request = fixtureRequest()
+            request.binding.cloudIssuer = issuer
+            await XCTAssertThrowsErrorAsync(
+                try await store.commit(request, expectedGeneration: "1")) { error in
+                XCTAssertEqual(error as? ProtectedEnrollmentCustodyError, .invalidBinding)
+            }
+            XCTAssertNil(backend.recordData(fixtureClientKey), "Rejected issuer must not be stored")
+            XCTAssertNil(backend.ledgerData(fixtureClientKey), "Rejected issuer must not advance the ledger")
+        }
+
+        let backend = FakeCustodyKeychain()
+        let store = ProtectedEnrollmentCustodyStore(ops: backend)
+        var emailSubject = fixtureRequest()
+        emailSubject.binding.cloudSubject = "person@example.invalid"
+        await XCTAssertThrowsErrorAsync(
+            try await store.commit(emailSubject, expectedGeneration: "1")) { error in
+            XCTAssertEqual(error as? ProtectedEnrollmentCustodyError, .invalidBinding)
+        }
+        XCTAssertNil(backend.recordData(fixtureClientKey))
+        XCTAssertNil(backend.ledgerData(fixtureClientKey))
+    }
+
     // Re-committing the SAME generation is allowed and replaces in place —
     // the retry path for a commit whose ledger write landed but whose record
     // write did not.
@@ -658,8 +871,11 @@ final class ProtectedEnrollmentCustodyStoreTests: XCTestCase {
             .fenceStoreDegraded,
             .custodyUnreadable(status: errSecInteractionNotAllowed),
             .ledgerUnreadable(status: nil),
+            .tombstoneUnreadable(status: errSecInteractionNotAllowed),
+            .keyDeleted,
             .generationUnorderable(fixtureClientKey),
             .bindingKeyMismatch(request: fixtureClientKey, binding: fixtureCredential),
+            .invalidBinding,
             .writeRefused(errSecAuthFailed),
             .deleteRefused(errSecAuthFailed),
         ]

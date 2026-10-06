@@ -188,6 +188,12 @@ enum ProtectedEnrollmentCustodyError: Error, Equatable, LocalizedError, Sendable
     /// The generation ledger cannot be read, so a commit cannot be proven
     /// conditional. Writes are refused; reads are unaffected.
     case ledgerUnreadable(status: OSStatus?)
+    /// The delete tombstone cannot be read, so a stale credential must not be
+    /// allowed to reappear.
+    case tombstoneUnreadable(status: OSStatus?)
+    /// This key was deleted. A new, explicitly announced custody generation is
+    /// required before it can be committed again.
+    case keyDeleted
     /// A generation that is not an integer string cannot be ordered against
     /// the newest known one. Fail-closed: this build's custody generations
     /// are integer strings (the attempt store allocates per-key counters);
@@ -196,6 +202,9 @@ enum ProtectedEnrollmentCustodyError: Error, Equatable, LocalizedError, Sendable
     /// The binding names a different device than the request (:1210's
     /// `client-key` refusal, mapped at the adapter seam).
     case bindingKeyMismatch(request: String, binding: String)
+    /// Required provenance is missing or the issuer is not in canonical
+    /// HTTPS-origin form. This validates shape, not issuer trust or a token.
+    case invalidBinding
     case writeRefused(OSStatus)
     case deleteRefused(OSStatus)
 
@@ -211,10 +220,16 @@ enum ProtectedEnrollmentCustodyError: Error, Equatable, LocalizedError, Sendable
             return "Stored enrollment custody could not be validated, so the record was fenced."
         case .ledgerUnreadable:
             return "The enrollment generation record could not be read, so nothing may be written."
+        case .tombstoneUnreadable:
+            return "The enrollment deletion state could not be read, so the record was refused."
+        case .keyDeleted:
+            return "This enrollment was deleted. A newer enrollment generation is required."
         case .generationUnorderable:
             return "The enrollment generation could not be ordered, so the write was refused."
         case .bindingKeyMismatch:
             return "The enrollment binding names a different device than the request."
+        case .invalidBinding:
+            return "The enrollment identity binding is incomplete or non-canonical."
         case let .writeRefused(status):
             return "Could not protect this enrollment credential (status \(status))."
         case let .deleteRefused(status):
@@ -314,11 +329,25 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
         static let record = "com.muster.MusterMac.enrollment-custody"
         static let ledger = "com.muster.MusterMac.enrollment-custody.generation"
         static let fence = "com.muster.MusterMac.enrollment-custody.fence"
+        static let tombstone = "com.muster.MusterMac.enrollment-custody.tombstone"
     }
+
+    /// The one production instance for the native process. Enrollment remains
+    /// inert; a future, separately-authorized consumer must use this shared
+    /// instance rather than constructing one store per window or coordinator.
+    static let shared = ProtectedEnrollmentCustodyStore()
 
     private let ops: any EnrollmentCustodyKeychainOps
 
-    init(ops: any EnrollmentCustodyKeychainOps = SystemEnrollmentCustodyKeychainOps()) {
+    /// Only `shared` can construct the real System-Keychain actor. Independent
+    /// actors cannot conditionally write the same Keychain namespace safely.
+    private init() {
+        self.ops = SystemEnrollmentCustodyKeychainOps()
+    }
+
+    /// Explicit injection for isolated backends. The real System implementation
+    /// is private to this file and cannot be selected by another module caller.
+    init(ops: any EnrollmentCustodyKeychainOps) {
         self.ops = ops
     }
 
@@ -336,6 +365,14 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Service.ledger,
+            kSecAttrAccount as String: clientKey,
+        ]
+    }
+
+    private func tombstoneQuery(_ clientKey: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Service.tombstone,
             kSecAttrAccount as String: clientKey,
         ]
     }
@@ -361,6 +398,37 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
         return ops.read(q)
     }
 
+    private func readTombstone(_ clientKey: String) throws -> DeletionTombstone? {
+        var q = tombstoneQuery(clientKey)
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        let (status, data) = ops.read(q)
+        switch status {
+        case errSecItemNotFound:
+            return nil
+        case errSecSuccess:
+            guard let data,
+                  let tombstone = try? JSONDecoder().decode(DeletionTombstone.self, from: data),
+                  tombstone.deletedGeneration.map({ Int($0) != nil }) ?? true else {
+                throw ProtectedEnrollmentCustodyError.tombstoneUnreadable(status: nil)
+            }
+            return tombstone
+        default:
+            throw ProtectedEnrollmentCustodyError.tombstoneUnreadable(status: status)
+        }
+    }
+
+    /// A tombstone without a generation can only be cleared by explicitly
+    /// announcing a positive, new custody generation. Otherwise compare the
+    /// enrollment-domain integer strings without borrowing either other
+    /// generation counter.
+    private func isNewer(_ candidate: String, than tombstone: DeletionTombstone) -> Bool {
+        guard let candidateValue = Int(candidate) else { return false }
+        guard let deletedGeneration = tombstone.deletedGeneration else { return candidateValue > 0 }
+        guard let deletedValue = Int(deletedGeneration) else { return false }
+        return candidateValue > deletedValue
+    }
+
     /// The persisted fence, measured on every consultation — no in-memory
     /// cache — so a fence a prior or concurrent instance wrote is honored
     /// immediately, including after a restart (the restart property the W2
@@ -372,8 +440,19 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
         let (status, items) = ops.readAll(fenceListQuery)
         switch status {
         case errSecSuccess:
-            let keys = (items ?? []).compactMap { $0[kSecAttrAccount as String] as? String }
-            return (keys.contains(clientKey), false)
+            // Success without decoded rows is unknown, not healthy absence.
+            // The Keychain reports an empty service as errSecItemNotFound.
+            guard let items, !items.isEmpty else { return (true, true) }
+            var fenced = false
+            for item in items {
+                guard let key = item[kSecAttrAccount as String] as? String,
+                      !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return (true, true)
+                }
+                // Validate EVERY row, even after finding this key's fence.
+                fenced = fenced || key == clientKey
+            }
+            return (fenced, false)
         case errSecItemNotFound:
             return (false, false)
         default:
@@ -430,6 +509,9 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
     /// per-key counters, `putIntentWithGeneration` :790-807) is refused
     /// rather than guessed at.
     func noteGeneration(clientKey: String, generation: String) throws {
+        if let tombstone = try readTombstone(clientKey), !isNewer(generation, than: tombstone) {
+            throw ProtectedEnrollmentCustodyError.keyDeleted
+        }
         if let newest = try newestGeneration(clientKey) {
             guard let candidate = Int(generation), let current = Int(newest) else {
                 throw ProtectedEnrollmentCustodyError.generationUnorderable(generation)
@@ -504,12 +586,28 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
             throw ProtectedEnrollmentCustodyError.bindingKeyMismatch(
                 request: request.clientKey, binding: request.binding.clientKey)
         }
+        guard Self.hasCanonicalBinding(request) else {
+            throw ProtectedEnrollmentCustodyError.invalidBinding
+        }
+
+        let tombstone = try readTombstone(request.clientKey)
 
         // Conditionality, decided BEFORE any write. The newest known
         // generation for the key (announced by `noteGeneration` or
         // established by an accepted commit) is the gate: an older caller
         // refuses, the newest caller proceeds.
         let newest = try newestGeneration(request.clientKey)
+        if let tombstone {
+            // After deletion, a commit must use the exact, strictly newer
+            // generation explicitly announced by the enrollment attempt store.
+            // A direct retry carrying the deleted generation is not a new
+            // enrollment and cannot resurrect the old credential.
+            guard let newest,
+                  newest == expectedGeneration,
+                  isNewer(newest, than: tombstone) else {
+                throw ProtectedEnrollmentCustodyError.keyDeleted
+            }
+        }
         if let newest {
             guard let expected = Int(expectedGeneration), let known = Int(newest) else {
                 throw ProtectedEnrollmentCustodyError.generationUnorderable(expectedGeneration)
@@ -524,6 +622,10 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
         let (recordStatus, recordData) = readRecord(request.clientKey)
         if recordStatus == errSecSuccess {
             guard let recordData, let stored = Self.decodeRecord(recordData) else {
+                armFenceBestEffort(clientKey: request.clientKey)
+                throw ProtectedEnrollmentCustodyError.custodyUnreadable(status: nil)
+            }
+            guard stored.envelope.clientKey == request.clientKey else {
                 armFenceBestEffort(clientKey: request.clientKey)
                 throw ProtectedEnrollmentCustodyError.custodyUnreadable(status: nil)
             }
@@ -566,10 +668,23 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
         // generation is allowed and a stale one is not — the safe failure
         // direction.
         try upsert(recordQuery(request.clientKey), data: Self.encode(payload))
+        if tombstone != nil {
+            let status = ops.delete(tombstoneQuery(request.clientKey))
+            guard status == errSecSuccess || status == errSecItemNotFound else {
+                throw ProtectedEnrollmentCustodyError.deleteRefused(status)
+            }
+        }
         return envelope
     }
 
     func get(_ clientKey: String) throws -> ProtectedEnrollmentCustodyEnvelope? {
+        let tombstone: DeletionTombstone?
+        do {
+            tombstone = try readTombstone(clientKey)
+        } catch {
+            armFenceBestEffort(clientKey: clientKey)
+            throw error
+        }
         let (status, data) = readRecord(clientKey)
         switch status {
         case errSecItemNotFound:
@@ -582,6 +697,7 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
                 armFenceBestEffort(clientKey: clientKey)
                 throw ProtectedEnrollmentCustodyError.custodyUnreadable(status: nil)
             }
+            if let tombstone, !isNewer(stored.storedGeneration, than: tombstone) { return nil }
             return stored.envelope
         default:
             armFenceBestEffort(clientKey: clientKey)
@@ -590,6 +706,13 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
     }
 
     func read(_ clientKey: String) -> ProtectedEnrollmentCustodyRead {
+        let tombstone: DeletionTombstone?
+        do {
+            tombstone = try readTombstone(clientKey)
+        } catch {
+            armFenceBestEffort(clientKey: clientKey)
+            return .unknown
+        }
         let (status, data) = readRecord(clientKey)
         switch status {
         case errSecItemNotFound:
@@ -601,6 +724,7 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
                 armFenceBestEffort(clientKey: clientKey)
                 return .unknown
             }
+            if let tombstone, !isNewer(stored.storedGeneration, than: tombstone) { return .absent }
             return .present(stored)
         default:
             // A faulted read is unknown, never absent — the conflation the
@@ -612,6 +736,12 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
     }
 
     func invalidate(_ clientKey: String, generation: String) throws -> Bool {
+        do {
+            _ = try readTombstone(clientKey)
+        } catch {
+            armFenceBestEffort(clientKey: clientKey)
+            throw error
+        }
         // Conditioned on the row ACTUALLY STORED, not on the newest
         // announcement: a newer intent alone must never shield an older
         // stored record, while a newer COMMITTED winner is never deleted by
@@ -646,6 +776,11 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
     }
 
     func delete(_ clientKey: String) throws -> Bool {
+        // Tombstone first. If the process stops between these writes, reads
+        // hide the old generation and its ledger still refuses stale commits.
+        let newest = try newestGeneration(clientKey)
+        try upsert(tombstoneQuery(clientKey), data: Self.encode(
+            DeletionTombstone(deletedGeneration: newest, deletedAt: Self.nowMilliseconds())))
         let status = ops.delete(recordQuery(clientKey))
         switch status {
         case errSecSuccess: return true
@@ -678,6 +813,11 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
         var fencedAt: Int64
     }
 
+    private struct DeletionTombstone: Codable, Equatable {
+        var deletedGeneration: String?
+        var deletedAt: Int64
+    }
+
     /// The stored record payload. Decoding is strict: a record missing ANY
     /// authenticated binding (or the generation it was committed under)
     /// fails to decode and is therefore UNKNOWN custody — a record that
@@ -708,10 +848,48 @@ actor ProtectedEnrollmentCustodyStore: ProtectedCredentialStore {
         guard !payload.storedGeneration.isEmpty,
               payload.envelope.version >= 1,
               bindingsComplete,
+              !e.cloudSubject.contains("@"),
+              isCanonicalIssuer(e.cloudIssuer),
               !e.sealed.isEmpty else {
             return nil
         }
         return StoredProtectedEnrollmentRecord(envelope: e, storedGeneration: payload.storedGeneration)
+    }
+
+    /// Structural validation only. The caller must obtain the provider subject
+    /// and trusted issuer from the upstream identity layer; this store never
+    /// authenticates a token or decides which issuer is trusted.
+    private static func hasCanonicalBinding(_ request: ProtectedEnrollmentCustodyRequest) -> Bool {
+        let binding = request.binding
+        return !request.clientKey.isEmpty
+            && !request.installationId.isEmpty
+            && !request.credential.isEmpty
+            && !binding.cloudSubject.isEmpty
+            && !binding.cloudSubject.contains("@")
+            && !binding.cloudAuthority.isEmpty
+            && isCanonicalIssuer(binding.cloudIssuer)
+            && !binding.workspaceId.isEmpty
+            && !binding.localOwnerId.isEmpty
+            && !binding.localSessionId.isEmpty
+    }
+
+    /// Refuse non-canonical issuer spellings without normalizing them. This
+    /// checks representation only, not whether the issuer is trusted.
+    private static func isCanonicalIssuer(_ value: String) -> Bool {
+        guard let components = URLComponents(string: value),
+              components.scheme == "https",
+              let host = components.host,
+              !host.isEmpty,
+              host == host.lowercased(),
+              components.user == nil,
+              components.password == nil,
+              components.path.isEmpty,
+              components.query == nil,
+              components.fragment == nil,
+              components.port != 443 else {
+            return false
+        }
+        return components.string == value
     }
 
     private static func nowMilliseconds() -> Int64 {
