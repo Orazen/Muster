@@ -1,3 +1,38 @@
+# Lead verification round — 7 October 2026, session/deployed evidence
+
+Verified against remote main `cf2bafbc1f5c87f6f8328c1d8cc786015525def2` (PR #98 merged; PR #99 the only open PR). This section records only what was executed in this round and corrects two labels that were previously stated too strongly. It supersedes nothing below and releases no claim by silence. No security claim is made anywhere in this section.
+
+**Label corrections.** An authenticated browser session proves session ACCESS, not a newly completed login. Pre-existing transcripts prove history is READABLE, not that current execution or restart persistence passed. Both are recorded at their weaker, true strength below.
+
+| Requirement | Verdict | Executed evidence | Blocker / owner |
+|---|---|---|---|
+| Deployed session access | PASS | Live `https://muster.today/app` authenticated as the real account; live `GET /api/auth/list-sessions` returned 200 with keys `expiresAt, createdAt, updatedAt, ipAddress, userAgent, userId, activeOrganizationId, id, current` and no `token` key anywhere | none |
+| Newly completed login | UNVERIFIED | No fresh authentication was performed; the browser profile already held a session, so the Google consent step was never exercised | Consented QA to run one fresh sign-in |
+| Session-token redaction, deployed | PASS | Same live response as above; only `userId`/`id` are long opaque strings, and both are identifiers rather than bearer secrets | none |
+| History readable | PASS | Live roster rendered three bots (Ziggy, Bramble, Turnip) and a prior transcript from the server | none |
+| Current agent execution | UNVERIFIED | No provider instance is configured on the deployment (`/api/instances` empty; `/api/config` exposes no configured secret field) and no allowance is authorized | Owner: provider credential + allowance decision |
+| Restart persistence | UNVERIFIED | The deployment was not and may not be restarted for acceptance | Owner: platform/release operator |
+| Muster Cloud runtime entitlement | ABSENT | `config.musterCloud` carries no non-empty field; `/api/muster-cloud/entitlement`, `/api/cloud/entitlement`, `/api/billing` and `/api/usage` all returned 404 | Route not proposed; not assumed from any subscription |
+| Core agent journey wiring | PASS (synthetic) | Independent read-only audit: all eight journey steps have a live route, reachable component, durable store and stream path; no missing step. Focused run 8 files / 155 tests passed. Fixture engines only | Real-provider acceptance separate |
+| Ownership-guard consistency | DEFECT FIX IN REVIEW | Audit found the API guard treats an ownerless record as operator-only while the SSE filter treats it as visible to every session client; reachability narrowed but untested for the ownerless case | Fix + coverage under independent review |
+| Email OTP requirements | PASS with one defect fixed | Source-verified 600 s lifetime, 3 attempts, 60 s cooldown, per-IP window, six-digit codes, concurrent-send and concurrent-verify bounds. One real defect found and fixed (a non-sign-in request armed the sign-in cooldown) | Fix under rework: first attempt introduced a worse mail-flood bound |
+| Email OTP real mailbox delivery | BLOCKED | No mailer configured; enablement is `Boolean(RESEND_API_KEY)` | Owner: Resend API key + verified sender domain |
+| Mailer deployment configuration | PASS (source) | `d59a2e2`: the mailer variables are now declared in all three compose files; a guard fails when the server reads a variable no compose service declares. Verified with real `docker compose config` and mutation-tested | Under independent re-review. Configuration forwarding is NOT delivery evidence |
+| Account-scoped live restore | IN PROGRESS | Writer-exclusion primitive `runWithWriterBarrier` verified to have zero callers; the PR #98 adapter has no production registration | Implementation lane |
+| Native enrollment | IN PROGRESS | Engine inert by construction; macOS has no registered callback; `approvedRedirects` require canonical HTTPS origins so a custom scheme cannot satisfy them | Owner: exact enrollment issuer, redirect origins, cloud authority |
+| Dependency baseline | ENVIRONMENTAL FAILURE | Full suite on `cf2bafbc`: 518 files, 8569 passed, 19 skipped, 59 failed across 4 files. Observed failures assert that an installed package version equals the lockfile-pinned version (`source-map-js` 1.2.1 installed vs 1.2.2 asserted), so the installed tree does not match this source. NOT a valid green baseline | `node_modules` was installed from a stale branch lockfile |
+| Hosted CI | BLOCKED | Main `cf2bafbc` run: every job `steps=0`, failing in 2-7 s with no logs — a billing rejection, not a source failure. Verified, not inherited | Repo billing administrator |
+| TestSprite discovery | BLOCKED | Pre-Check reports "No tests detected" on the current PR head; absence is never a pass | TestSprite project administrator |
+| PR #99 (Android legacy formatter) | UNVERIFIED | It is a local mitigation that removes the vulnerable `sprintf-js@1.0.3` edge; no recorded independent review on the PR and hosted checks never executed. Main has no branch protection, so merging would be a bypass by omission — not done | Owner: recorded review + billing |
+| macOS installed/signed/notarized | BLOCKED (ready) | `Developer ID Application` identity, Xcode 26.6 and `notarytool` all present, so the run is executable | Owner: explicit authorization to consume Apple credentials |
+| Linux headless | BLOCKED (host found) | A real Ubuntu 24.04 aarch64 host is reachable through Docker | Owner: confirm use; GUI/install acceptance still unexecuted |
+| Android physical | BLOCKED | `adb devices` lists zero devices | Authorized platform QA with a device |
+| iPhone/Watch installed | BLOCKED | App Store Connect credentials are present, but no physical device | Consented iPhone/Watch QA |
+
+Private beta: **NOT READY**. Public desktop/web MVP: **NOT READY**. macOS, Android, Windows, Linux, iPhone and Apple Watch: each **NOT READY** on installed/physical evidence. No blocked or unverified row above is counted as complete.
+
+---
+
 # Current acceptance register — 6 October 2026, successor
 
 Source candidate`014ac84344eae08bcbfe6516e27e24add507e88c`; https://github.com/Orazen/Muster/pull/98. This matrix supersedes stale scope/enablement statements below; no historical claim is released by silence. Account scope approved; no unattended boot apply; source acceptance and enablement/real outcomes separate.
