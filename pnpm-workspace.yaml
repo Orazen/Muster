@@ -37,6 +37,10 @@ overrides:
   # PostCSS and Tailwind node both declare ^1.2.1. 1.2.2 adds bounded indexed
   # offsets and source-node fixes for CVE-2026-93749 without changing their major.
   "source-map-js@<1.2.2": "1.2.2"
+  # Deliberate major override only for this downloader's optional proxy module:
+  # 4.1.3 removes Roarr/sprintf-js and keeps the bootstrap API. Compatibility
+  # is gated by real checked downloads, TLS, NO_PROXY and error/cleanup tests.
+  "@electron/get@3.1.0>global-agent": "4.1.3"
   # The committed lockfile resolves Miniflare 5.20260930.0-alpha, but this
   # selector targets absent 5.20260923.0-alpha and is therefore unmatched.
   # Confirm the exact graph selector against the lockfile before updating it.
@@ -51,6 +55,9 @@ patchedDependencies:
   # must/proxy/s-maxage behavior; this is not an official patched release or an
   # alert-disposition receipt. Tests resolve the real cacheable-request consumer.
   "http-cache-semantics@4.3.0": "patches/http-cache-semantics@4.3.0.patch"
+  # Local downloader compatibility repair; preserves TLS trust/identity and
+  # bounds pending CONNECT with the configured timeout and request cancellation.
+  "global-agent@4.1.3": "patches/global-agent@4.1.3.patch"
 allowBuilds:
   electron: true # postinstall downloads the Electron dist
   esbuild: true # postinstall validates the platform binary
