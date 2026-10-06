@@ -50,6 +50,22 @@ const policy = [
     // The nested arity check is the upstream PR1152 fix at ceba34402e329f0365134f23fe19898756527d65.
     replacements: [["            obj.value.length !== 2) {", "            obj.value.length !== 2 ||\n            obj.value[0].value.length !==\n              (('parameters' in capture) ? 2 : 1)) {", 1]],
   },
+  {
+    package: "js-yaml", version: "3.15.2", file: "bin/js-yaml.js",
+    originalSha256: "3d0c9cbce9363a08e5d932e6c843013059758e4bd426cd77d2e09a2a229a443f",
+    patchedSha256: "a99724dc2ee2358a10a3c0b6a796ec96eef083e2638f3446c046cad3ac47e1f0",
+    replacements: [
+      ["var cli = new argparse.ArgumentParser({\n  prog:     'js-yaml',\n  version:  require('../package.json').version,\n  addHelp:  true\n});", "var cli = new argparse.ArgumentParser({\n  prog:     'js-yaml',\n  add_help: false\n});\n\ncli._positionals.title = 'Positional arguments';\ncli._optionals.title = 'Optional arguments';\ncli.add_argument('-h', '--help', {\n  action: 'help',\n  help:   'Show this help message and exit.'\n});\ncli.add_argument('-v', '--version', {\n  action: 'version',\n  version: require('../package.json').version,\n  help:    \"Show program's version number and exit.\"\n});", 1],
+      ["cli.addArgument([ '-c', '--compact' ], {", "cli.add_argument('-c', '--compact', {", 1],
+      ["cli.addArgument([ '-j', '--to-json' ], {", "cli.add_argument('-j', '--to-json', {", 1],
+      ["argparse.Const.SUPPRESS", "argparse.SUPPRESS", 1],
+      ["action: 'storeTrue'", "action: 'store_true'", 3],
+      ["cli.addArgument([ '-t', '--trace' ], {", "cli.add_argument('-t', '--trace', {", 1],
+      ["cli.addArgument([ 'file' ], {", "cli.add_argument('file', {", 1],
+      ["defaultValue: '-'", "default: '-'", 1],
+      ["cli.parseArgs()", "cli.parse_args()", 1],
+    ],
+  },
 ];
 export const DEPENDENCY_SECURITY_PATCHES = Object.freeze(policy.map((entry) => Object.freeze({ ...entry, replacements: Object.freeze(entry.replacements.map(Object.freeze)) })));
 
@@ -74,18 +90,30 @@ export function planDependencySecurityPatches(root) {
   root = resolve(root);
   const lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"));
   assert(lock.lockfileVersion >= 2 && lock.packages, "A committed package graph is required");
+  assert(!Object.keys(lock.packages).some((path) => path === "node_modules/sprintf-js" || path.endsWith("/node_modules/sprintf-js")), "The sprintf-js js-yaml CLI formatter dependency must be removed from the committed graph");
+  for (const [path, entry] of Object.entries(lock.packages)) {
+    assert(!entry.dependencies?.["sprintf-js"], `The vulnerable js-yaml CLI formatter dependency remains reachable from ${path}`);
+  }
   const files = [];
   const packages = [];
   const consumers = [];
-  for (const name of ["braces", "node-forge"]) {
+  for (const name of ["braces", "node-forge", "js-yaml"]) {
     const descriptors = DEPENDENCY_SECURITY_PATCHES.filter((entry) => entry.package === name);
-    const copies = Object.keys(lock.packages).filter((path) => path === `node_modules/${name}` || path.endsWith(`/node_modules/${name}`));
+    const copies = Object.keys(lock.packages).filter((path) => (path === `node_modules/${name}` || path.endsWith(`/node_modules/${name}`)) && lock.packages[path].version === descriptors[0].version);
     assert(copies.length > 0, `Missing reviewed ${name} dependency`);
     const packagePaths = new Set(copies.map((path) => resolve(root, path, "package.json")));
     for (const [path, entry] of Object.entries(lock.packages)) {
       if (!entry.dependencies?.[name]) continue;
       const consumer = resolve(root, path, "package.json");
       const actual = createRequire(consumer).resolve(`${name}/package.json`);
+      const actualMetadata = JSON.parse(readRegularFile(root, actual).bytes.toString("utf8"));
+      if (name === "js-yaml") {
+        const actualLockEntry = Object.entries(lock.packages).find(([lockPath]) => resolve(root, lockPath, "package.json") === actual);
+        assert(actualLockEntry, `The js-yaml resolution from ${path} must be present in the committed package graph`);
+        assert.equal(actualLockEntry[1].version, actualMetadata.version, `Lock/install version mismatch for js-yaml from ${path}`);
+        assert(["3.15.2", "4.3.2"].includes(actualMetadata.version), `Unsupported js-yaml version from ${path}`);
+        if (actualMetadata.version !== descriptors[0].version) continue;
+      }
       assert(packagePaths.has(actual), `Unreviewed ${name} resolution from ${path}`);
       consumers.push({ package: name, consumer: path, resolved: actual });
     }
@@ -94,7 +122,16 @@ export function planDependencySecurityPatches(root) {
       const metadata = JSON.parse(readRegularFile(root, packagePath).bytes);
       assert.equal(metadata.name, name, "Unexpected dependency package");
       assert.equal(metadata.version, descriptors[0].version, `Unsupported ${name} version; review its mitigation`);
-      assert.equal(lock.packages[path].version, metadata.version, `Lock/install version mismatch for ${name}`);
+      assert.equal(lock.packages[path].version, metadata.version, "Lock/install version mismatch for ${name}");
+      if (name === "js-yaml") {
+        const parserPath = createRequire(packagePath).resolve("argparse/package.json");
+        const parserMetadata = JSON.parse(readRegularFile(root, parserPath).bytes.toString("utf8"));
+        const parserLockEntry = Object.entries(lock.packages).find(([lockPath]) => resolve(root, lockPath, "package.json") === parserPath);
+        assert.equal(parserMetadata.name, "argparse", "Unexpected parser package resolved by js-yaml CLI");
+        assert.equal(parserMetadata.version, "2.0.1", "Unsupported argparse version for the reviewed js-yaml CLI adaptation");
+        assert(parserLockEntry, "The js-yaml CLI parser must be present in the committed package graph");
+        assert.equal(parserLockEntry[1].version, parserMetadata.version, "Lock/install version mismatch for argparse");
+      }
       for (const descriptor of descriptors) {
         const target = resolve(root, path, descriptor.file);
         const current = readRegularFile(root, target);

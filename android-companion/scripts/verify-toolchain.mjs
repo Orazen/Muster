@@ -2,6 +2,7 @@
 // Offline compatibility checks for the actual Expo 52 callers of overridden
 // dependencies. This does not build a native app or constitute a security scan.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { constants, createHash, generateKeyPairSync, privateEncrypt, sign as nodeSign } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -55,9 +56,9 @@ async function main() {
   const securityReceipt = verifyDependencySecurityPatches(fileURLToPath(new URL("..", import.meta.url)));
   await check("all installed vulnerable-package sources have reviewed mitigations before loading callers", () => {
     const receipt = securityReceipt;
-    assert.equal(receipt.files, 5);
-    assert.equal(receipt.packages.length, 2);
-    assert(receipt.consumers >= 4);
+    assert.equal(receipt.files, 7);
+    assert.equal(receipt.packages.length, 3);
+    assert(receipt.consumers >= 6);
   });
 
   const cliRoot = dirname(require.resolve("@expo/cli/package.json"));
@@ -84,6 +85,76 @@ async function main() {
 
   await check("actual caller resolution uses the intended dependency versions", () => {
     assert.deepEqual(versions, { tar: "7.5.22", npmTar: "7.5.22", xmldom: "0.8.15", postcss: "8.5.28", xcodeUuid: "11.1.1", bunyanUuid: "11.1.1" });
+  });
+
+  const jsYamlCliPaths = [
+    join(fileURLToPath(new URL("..", import.meta.url)), "node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml/bin/js-yaml.js"),
+    join(fileURLToPath(new URL("..", import.meta.url)), "node_modules/cosmiconfig/node_modules/js-yaml/bin/js-yaml.js"),
+  ];
+  await check("both js-yaml 3 CLIs preserve behavior with argparse 2 and no sprintf-js", () => {
+    for (const cliPath of jsYamlCliPaths) {
+      assert.equal(createRequire(cliPath)("argparse/package.json").version, "2.0.1");
+      const yamlApi = createRequire(cliPath)("../");
+      const roundTripValue = { name: "Muster", enabled: true, count: 2 };
+      assert.deepEqual(yamlApi.safeLoad(yamlApi.safeDump(roundTripValue)), roundTripValue);
+      const invoke = (args, input) => {
+        const result = spawnSync(process.execPath, [cliPath, ...args], { cwd: scratch, env: process.env, input, encoding: "utf8", timeout: 5000, maxBuffer: 256 * 1024 });
+        assert.equal(result.error, undefined, result.error?.message);
+        assert.equal(result.signal, null);
+        assert.equal(result.stderr.includes("DeprecationWarning"), false, result.stderr);
+        return result;
+      };
+      for (const flag of ["-v", "--version"]) {
+        const version = invoke([flag]);
+        assert.equal(version.status, 0);
+        assert.equal(version.stdout, "3.15.2\n");
+      }
+      const expectedHelp = [
+        "usage: js-yaml [-h] [-v] [-c] [-t] [file]",
+        "",
+        "Positional arguments:",
+        "  file           File to read, utf-8 encoded without BOM",
+        "",
+        "Optional arguments:",
+        "  -h, --help     Show this help message and exit.",
+        "  -v, --version  Show program's version number and exit.",
+        "  -c, --compact  Display errors in compact mode",
+        "  -t, --trace    Show stack trace on error",
+        "",
+      ].join("\n");
+      for (const flag of ["-h", "--help"]) {
+        const help = invoke([flag]);
+        assert.equal(help.status, 0);
+        assert.equal(help.stdout, expectedHelp);
+        assert.equal(help.stderr, "");
+      }
+      const yaml = invoke([], "name: Muster\ncount: 2\n");
+      assert.equal(yaml.status, 0);
+      assert.equal(yaml.stdout, "{\n  \"name\": \"Muster\",\n  \"count\": 2\n}\n");
+      const json = invoke([], "{\"name\":\"Muster\",\"count\":2}");
+      assert.equal(json.status, 0);
+      assert.equal(json.stdout, "name: Muster\ncount: 2\n\n");
+      for (const flag of ["-j", "--to-json"]) {
+        const legacyFlag = invoke([flag], "name: Muster\n");
+        assert.equal(legacyFlag.status, 0);
+        assert.equal(legacyFlag.stdout, "{\n  \"name\": \"Muster\"\n}\n");
+      }
+      for (const flag of ["-c", "--compact"]) {
+        const compact = invoke([flag], "name: [\n");
+        assert.equal(compact.status, 1);
+        assert.match(compact.stderr, /^YAMLException: unexpected end of the stream within a flow collection\n$/);
+      }
+      for (const flag of ["-t", "--trace"]) {
+        const trace = invoke([flag], "name: [\n");
+        assert.equal(trace.status, 1);
+        assert.match(trace.stderr, /^YAMLException: unexpected end of the stream within a flow collection/);
+        assert.match(trace.stderr, /at generateError/);
+      }
+      const missing = join(scratch, "missing.yml");
+      const notFound = invoke([missing]);
+      assert.equal(notFound.status, 2);
+      assert.equal(notFound.stderr, `File not found: ${missing}\n`);
+    }
   });
 
   // Behavioral regression checks for the reviewed braces and node-forge
@@ -186,16 +257,38 @@ async function main() {
     for (const [file, source] of originalSources) writeFileSync(fixturePath(root, file), source);
     const securityPackages = {};
     for (const patch of DEPENDENCY_SECURITY_PATCHES) {
-      const packageRoot = join(root, "node_modules", patch.package);
-      mkdirSync(join(packageRoot, "lib"), { recursive: true });
-      writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: patch.package, version: patch.version }));
-      securityPackages[`node_modules/${patch.package}`] = { version: patch.version };
-      let source = readFileSync(require.resolve(`${patch.package}/${patch.file}`), "utf8");
-      if (createHash("sha256").update(source).digest("hex") === patch.patchedSha256) {
-        for (const [before, after] of [...patch.replacements].reverse()) source = source.split(after).join(before);
+      const packagePaths = patch.package === "js-yaml"
+        ? [
+          "node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml",
+          "node_modules/cosmiconfig/node_modules/js-yaml",
+        ]
+        : [`node_modules/${patch.package}`];
+      for (const packagePath of packagePaths) {
+        const packageRoot = join(root, packagePath);
+        mkdirSync(join(packageRoot, dirname(patch.file)), { recursive: true });
+        writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: patch.package, version: patch.version }));
+        securityPackages[packagePath] = { version: patch.version };
+        const originalPath = patch.package === "js-yaml"
+          ? join(fileURLToPath(new URL("..", import.meta.url)), "node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml", patch.file)
+          : require.resolve(`${patch.package}/${patch.file}`);
+        let source = readFileSync(originalPath, "utf8");
+        if (createHash("sha256").update(source).digest("hex") === patch.patchedSha256) {
+          for (const [before, after] of [...patch.replacements].reverse()) source = source.split(after).join(before);
+        }
+        assert.equal(createHash("sha256").update(source).digest("hex"), patch.originalSha256);
+        writeFileSync(join(packageRoot, patch.file), source);
       }
-      assert.equal(createHash("sha256").update(source).digest("hex"), patch.originalSha256);
-      writeFileSync(join(packageRoot, patch.file), source);
+    }
+    mkdirSync(join(root, "node_modules/argparse"), { recursive: true });
+    writeFileSync(join(root, "node_modules/argparse/package.json"), JSON.stringify({ name: "argparse", version: "2.0.1" }));
+    securityPackages["node_modules/argparse"] = { version: "2.0.1" };
+    for (const [packagePath, name, version] of [
+      ["node_modules/@istanbuljs/load-nyc-config", "@istanbuljs/load-nyc-config", "1.1.0"],
+      ["node_modules/cosmiconfig", "cosmiconfig", "5.2.1"],
+    ]) {
+      mkdirSync(join(root, packagePath), { recursive: true });
+      writeFileSync(join(root, packagePath, "package.json"), JSON.stringify({ name, version, dependencies: { "js-yaml": "^3.15.2" } }));
+      securityPackages[packagePath] = { version, dependencies: { "js-yaml": "^3.15.2" } };
     }
     writeFileSync(join(root, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages: securityPackages }));
     return root;
@@ -204,7 +297,7 @@ async function main() {
   await check("trusted preparation changes both reviewed imports in an owned copy", () => {
     const result = prepareToolchain(preparationRoot);
     assert.equal(result.status, "prepared");
-    assert.equal(result.files.filter((file) => file.changed).length, 7);
+    assert.equal(result.files.filter((file) => file.changed).length, 9);
     for (const patch of EXPO_TAR_PATCHES) {
       assert.equal(createHash("sha256").update(readFileSync(fixturePath(preparationRoot, patch.name))).digest("hex"), patch.patchedSha256);
     }
