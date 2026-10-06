@@ -854,11 +854,11 @@ export interface EnrollmentDeps {
   exchange(binding: EnrollmentBinding, intent: EnrollmentIntent): Promise<UpstreamExchange>;
   /** Mints the stable installation id. Injected for determinism. */
   mintInstallationId(): string;
-  /** Test seam on the store: record the newest generation for a client key.
-   * Optional so a conforming adapter is not forced to implement bookkeeping
-   * the contract already does; the compare-and-commit inside `commit` is the
-   * real enforcement, and this only lets the fake be brought up to date. */
-  noteGeneration?(clientKey: string, generation: string): void;
+  /** Announce the newest generation to custody before begin succeeds. Native
+   * actor-backed custody must finish its durable announcement before the
+   * caller can continue. Optional for adapters that obtain the same generation
+   * through another channel; conditional `commit` remains required either way. */
+  noteGeneration?(clientKey: string, generation: string): void | Promise<void>;
   /** Reads the caller's CURRENT context, live.
    *
    * Not a value captured at call time: the post-exchange check exists to
@@ -1260,9 +1260,64 @@ export function createEnrollmentEngine(policy: EnrollmentPolicy, options?: Enrol
 
       const intent: EnrollmentIntent = { ...provisional, generation };
 
-      // Tell the custody store which generation is newest, so a stale
-      // in-flight completion cannot commit over this one.
-      deps.noteGeneration?.(req.clientKey, intent.generation);
+      // Refusing an allocated begin must retire THIS intent, not delete a
+      // credential or sweep the key: a newer intent/committed winner may have
+      // arrived while allocation or announcement was awaiting.
+      const refuseStarted = async (reason: EnrollmentFailure): Promise<EnrollmentResult<EnrollmentBeginValue>> => {
+        if (reason === "custody-unresolved") unresolved(fence, req.clientKey);
+        try {
+          await deps.attempts.invalidateIntent(intent.id, deps.now());
+          // A false invalidation can mean the row was already cancelled or
+          // superseded. Only readback, not that boolean, establishes retirement.
+          const observed = await deps.attempts.peekIntent(intent.id);
+          if (observed !== null && (observed.generation !== generation
+            || observed.request.clientKey !== req.clientKey || observed.invalidatedAt === null)) {
+            unresolved(fence, req.clientKey);
+            return fail("custody-unresolved");
+          }
+        } catch {
+          unresolved(fence, req.clientKey);
+          return fail("custody-unresolved");
+        }
+        // A fence landing during retirement still applies to this result.
+        return fail(fence.isFenced(req.clientKey) ? "custody-unresolved" : reason);
+      };
+
+      // Kept synchronous after the awaited read: the final checks and successful
+      // return share one turn, so there is no extra await after ownership was
+      // proven. Neither the caller's snapshot nor a completed announcement is
+      // proof that its intent remains current.
+      const beginFailure = (live: EnrollmentIntent | null): EnrollmentFailure | null => {
+        if (!live) return "unknown-intent";
+        if (live.generation !== generation || live.request.clientKey !== req.clientKey) return "superseded";
+        const newest = deps.attempts.generationFor(req.clientKey);
+        if (Number(generation) !== newest) return "superseded";
+        if (live.invalidatedAt !== null) return "cancelled";
+        if (live.claimedBy !== null) return "unknown-intent";
+        if (deps.now() >= live.expiresAt) return "expired";
+        if (fence.isFenced(req.clientKey)) return "custody-unresolved";
+        const current = deps.currentContext();
+        if (!secretsMatch(intent.context.ownerId, current.ownerId)) return "local-owner";
+        if (!secretsMatch(intent.context.sessionId, current.sessionId)) return "session-changed";
+        if (!secretsMatch(intent.context.endpoint, current.endpoint)) return "endpoint-changed";
+        if (!deps.cloudSessionValid()) return "subject";
+        return null;
+      };
+
+      try {
+        const beforeAnnouncement = beginFailure(await deps.attempts.peekIntent(intent.id));
+        if (beforeAnnouncement) return refuseStarted(beforeAnnouncement);
+
+        // A native announcement can suspend or write and then reject. Wait for
+        // its result; uncertainty fences the key rather than reporting success
+        // or guessing that the durable ledger did not change.
+        await deps.noteGeneration?.(req.clientKey, intent.generation);
+
+        const afterAnnouncement = beginFailure(await deps.attempts.peekIntent(intent.id));
+        if (afterAnnouncement) return refuseStarted(afterAnnouncement);
+      } catch {
+        return refuseStarted("custody-unresolved");
+      }
 
       return { ok: true, value: { intentId: intent.id, challenge: req.codeChallenge } };
     },
