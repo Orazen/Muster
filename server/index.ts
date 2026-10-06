@@ -303,6 +303,10 @@ import { handleCalendarRoute } from "./calendar-routes.ts";
 import { FOLLOW_UP_ROUTE_PREFIX, handleFollowUpRoute } from "./follow-up-routes.ts";
 import { handleWorkspaceBackupRoute } from "./workspace-backup-routes.ts";
 import { handleVisibleDriveRoute, VISIBLE_DRIVE_ROUTE_PREFIX } from "./drive-visible-routes.ts";
+import { readAccountSettings } from "./drive-visible-settings.ts";
+import { createLiveRestoreRuntime } from "./drive-visible-live-restore-runtime.ts";
+import { holdRestoreWriterAuthority, type RestoreWriterAuthority } from "./drive-visible-live-writer-authority.ts";
+import type { LiveRestoreRuntime } from "./drive-visible-live-restore.ts";
 import { InstallationRegistry, registryPathFor } from "./installation-authority.ts";
 import { handleInstallationRoute } from "./installation-routes.ts";
 import { handleMemoryRoute } from "./memory-routes.ts";
@@ -1120,6 +1124,57 @@ store.onChange((change) => {
       break;
   }
 });
+
+// ── account-scoped live restore registration ───────────────────────────
+// Account scope was approved (additive, account-owned); the runner-side
+// lifetime writer authority is now real (holdRestoreWriterAuthority), so the
+// route family's apply/receipt actions are registered behind it — ONLY here,
+// and ONLY behind the explicit, defaulted-off enablement below. Never:
+//   - boot-time: startup reads the journal only through
+//     assertLiveRestoreStartupReady / recoverPendingLiveRestores, which observe
+//     closed evidence and compensate pending private host intent; neither
+//     adopts or applies anything, whatever this flag says;
+//   - unattended: nothing here is reachable from timers, schedulers, engines
+//     or the boot path — the flag only unlocks the authenticated
+//     /api/workspace/drive-visible restore/apply and restore/receipt actions,
+//     and every apply re-derives the signed session, membership and verified
+//     Google identity while carrying an exclusive journal lock.
+// Exact conditions to enable: the operator sets OMB_LIVE_RESTORE_APPLY=1 in
+// the SERVER process environment before the server starts (per-process; a
+// config restart re-evaluates it). Nothing else turns apply on.
+let liveRestoreRuntime: LiveRestoreRuntime | undefined;
+let liveRestoreAuthority: RestoreWriterAuthority | undefined;
+const liveRestore = (): LiveRestoreRuntime | undefined => {
+  if (process.env.OMB_LIVE_RESTORE_APPLY !== "1") return undefined;
+  if (!taskPlans) return undefined;
+  if (!liveRestoreAuthority) liveRestoreAuthority = holdRestoreWriterAuthority(DATA_DIR);
+  if (!liveRestoreRuntime) {
+    liveRestoreRuntime = createLiveRestoreRuntime({
+      dataDir: DATA_DIR, store, plans: taskPlans, authority: liveRestoreAuthority,
+      instances: () => registry.instances(),
+      readAccountSettings: account => readAccountSettings(getDb(), account),
+      engineChoices: (account) => {
+        const owned = registry.instances().filter(instance => instance.enabled
+          && userInstanceOwner(instance.instanceId) === account.userId && instance.models.options.length > 0);
+        return owned.slice(0, 64).map((instance) => ({
+          label: (instance.displayName ?? instance.instanceId).slice(0, 200), selection: {
+            instanceId: instance.instanceId, model: instance.models.options[0]!.id },
+        }));
+      },
+      publishRecords: (account, ids) => {
+        for (const botId of ids.bots) {
+          const bot = store.bot(botId);
+          if (bot?.ownerId === account.userId) broadcast({ kind: "bot", bot: wireBot(bot) });
+        }
+        for (const groupId of ids.groups) {
+          const group = store.group(groupId);
+          if (group?.ownerId === account.userId) broadcast({ kind: "group", group });
+        }
+      },
+    });
+  }
+  return liveRestoreRuntime;
+};
 
 // ── message pages ──────────────────────────────────────────────────────
 // GET /api/bots hands back every bot with its entire transcript, which is
@@ -6290,11 +6345,13 @@ let requestUserEmail = "";
         operator: primaryUserId, appVersion: appVersion(),
         google: { clientId: process.env.GOOGLE_CLIENT_ID?.trim() ?? "", clientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "" },
         source: () => taskPlans ? { store, plans: taskPlans, dataDir: DATA_DIR } : null,
-        // liveRestore deliberately absent: account scope is approved, but an
-        // archive/journal or a boolean switch cannot prove lifetime writer and
-        // early boot ownership. The real-root adapter/receipt ports are wired
-        // in the route family; production remains unavailable until that
-        // separate capability is implemented, reviewed and tested.
+        liveRestore: liveRestore(),
+        // The registration above is the lifetime writer authority for the
+        // additive account live restore. It requires the real server runtime
+        // (mirrors this ctx.source()) and is registered ONLY behind
+        // OMB_LIVE_RESTORE_APPLY=1, defaulted off, never boot-time or
+        // unattended apply (see the registration block). Without the flag the
+        // family keeps its deliberate whole-install unavailable state.
         session: async () => {
           const current = await auth.api.getSession({ headers: visibleHeaders,
             query: { disableCookieCache: true, disableRefresh: true } }).catch(() => null);
