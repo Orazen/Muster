@@ -765,6 +765,113 @@ export const auth = betterAuth({
   ],
 });
 
+/** Better Auth's list-sessions endpoint includes the raw session token in
+ * parseSessionOutput's result. Keep that endpoint's account-scoped listing,
+ * but remove the credential at the handler boundary before any caller can
+ * serialize it. `current` is derived from the authenticated session id so
+ * consumers retain the useful current-session distinction without exposing
+ * the raw session token. Revoke endpoints remain Better Auth-owned and
+ * unchanged. */
+function isListSessionsRequest(request: Request): boolean {
+  return request.method === "GET" && new URL(request.url).pathname === "/api/auth/list-sessions";
+}
+
+const sessionListResponseSchema = z.array(z.record(z.string(), z.json()));
+const revokeSessionByIdRequestSchema = z.object({ sessionId: z.string().min(1) }).strict();
+const sessionLookupResponseSchema = z.array(z.object({ id: z.string(), token: z.string() }));
+
+function unsafeSessionListResponse(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.set("content-type", "application/json");
+  return new Response(
+    JSON.stringify({ message: "Unable to safely return active sessions", code: "INTERNAL_SERVER_ERROR" }),
+    { status: 500, statusText: "Internal Server Error", headers },
+  );
+}
+
+async function redactListSessionsResponse(request: Request, response: Response): Promise<Response> {
+  if (!response.ok) return response;
+  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
+    return unsafeSessionListResponse(response);
+  }
+
+  const parsedSessions = sessionListResponseSchema.safeParse(await response.clone().json().catch(() => null));
+  if (!parsedSessions.success) return unsafeSessionListResponse(response);
+
+  let currentSessionId: string | undefined;
+  try {
+    const current = await auth.api.getSession({ headers: request.headers });
+    currentSessionId = current?.session.id;
+  } catch {
+    return unsafeSessionListResponse(response);
+  }
+  if (!currentSessionId) return unsafeSessionListResponse(response);
+
+  const redacted = parsedSessions.data.map((session) => {
+    const { token: _token, ...publicSession } = session;
+    return { ...publicSession, current: publicSession.id === currentSessionId };
+  });
+
+  const headers = new Headers(response.headers);
+  // The body length changes when the token field is removed.
+  headers.delete("content-length");
+  return new Response(JSON.stringify(redacted), {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+const betterAuthHandler = auth.handler;
+const betterAuthFetch = auth.fetch;
+const handleAuthRequest = async (
+  request: Request,
+  handler: (request: Request) => Promise<Response>,
+): Promise<Response> => {
+  let requestForHandler = request;
+  if (request.method === "POST" && new URL(request.url).pathname === "/api/auth/revoke-session") {
+    const body = await request.clone().json().catch(() => null);
+    const parsedRevoke = revokeSessionByIdRequestSchema.safeParse(body);
+    if (parsedRevoke.success) {
+      // Resolve IDs through Better Auth's own account-scoped list endpoint,
+      // then let its revoke endpoint re-check ownership before deleting. An
+      // ID not present in the caller's list maps to an impossible empty token,
+      // preserving Better Auth's no-op result for unknown/foreign sessions.
+      const headers = new Headers(request.headers);
+      headers.delete("content-length");
+      headers.delete("content-type");
+      const listRequest = new Request(new URL("/api/auth/list-sessions", request.url), {
+        method: "GET",
+        headers,
+      });
+      const listResponse = await betterAuthHandler(listRequest);
+      if (!listResponse.ok) return listResponse;
+
+      const sessions = sessionLookupResponseSchema.safeParse(await listResponse.json().catch(() => null));
+      if (!sessions.success) {
+        return Response.json(
+          { message: "Internal Server Error", code: "INTERNAL_SERVER_ERROR" },
+          { status: 500 },
+        );
+      }
+      const token = sessions.data.find(({ id }) => id === parsedRevoke.data.sessionId)?.token ?? "";
+      const revokeHeaders = new Headers(request.headers);
+      revokeHeaders.delete("content-length");
+      requestForHandler = new Request(request.url, {
+        method: "POST",
+        headers: revokeHeaders,
+        body: JSON.stringify({ token }),
+      });
+    }
+  }
+
+  const response = await handler(requestForHandler);
+  return isListSessionsRequest(request) ? redactListSessionsResponse(request, response) : response;
+};
+auth.handler = (request) => handleAuthRequest(request, betterAuthHandler);
+auth.fetch = (request) => handleAuthRequest(request, betterAuthFetch);
+
 /** The request scheme behind a reverse proxy: the first entry of
  * X-Forwarded-Proto when the proxy sent one (Node's IncomingHttpHeaders
  * types it string | string[] | undefined), else http — the loopback
