@@ -135,10 +135,12 @@ approved entry (`:1218-1222`), and the issuer/policy machinery that validates
 origins is built on `isCanonicalIssuer`, which requires `https://`, a
 lowercase host, an empty path, no query/fragment/userinfo and no default port,
 or non-default origin
-(`:218-229`) — thus `approvedRedirects` effectively requires canonical HTTPS
-origins. A non-default custom-scheme callback can exist in Info.plist and at
-the same time CANNOT satisfy the approved-redirect check, so registering
-`muster://` for macOS would add the scheme without producing any begin-able
+(`:218-229`) applies canonicality to the TRUSTED ISSUER channel, while
+`approvedRedirects` values are plain exact-equality strings (1-2048) — so a
+custom-scheme callback such as `muster://` is NOT refused by the code, and an
+enabled engine could accept it today (iOS already follows that pattern with
+its own scheme callback). That makes the canonical-HTTPS-origin macOS callback
+an owner-quality requirement rather than a schema-enforced bound:
 enrollment. The iOS `muster://oauth/finish` convention is therefore source
 evidence of an existing callback style, NOT a valid macOS redirect answer, and
 no macOS scheme has been registered anywhere in this work.

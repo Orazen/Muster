@@ -104,7 +104,9 @@ export const ENROLLMENT_TRUST_REQUIREMENTS: readonly EnrollmentTrustRequirement[
   {
     question: "macosRedirect",
     ask: "Which HTTPS origin will the macOS client receive its enrollment callback on?",
-    bound: null,
+    // Redirect wires carry no canonicality, only length: min(1).max(2048). The
+    // HTTPS-origin recommendation is an owner-quality statement, not enforced.
+    bound: "min(1).max(2048); HTTPS origin recommended, not enforced",
     evidence: [
       "server/installation-enrollment-contract.ts:376-385 — per-platform policy, eight keys",
       "server/installation-enrollment-contract.ts:1220-1221 — exact match, refused otherwise",

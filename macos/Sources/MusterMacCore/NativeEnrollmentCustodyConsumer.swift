@@ -37,9 +37,11 @@
 //     which issuer is trusted. Google's identity issuer is NOT Muster's
 //     enrollment authority — see the trust request.
 //   * No bridge protocol, no network path, no `muster://` or HTTPS callback.
-//     A custom URL scheme cannot satisfy `approvedRedirects`, which require
-//     exact canonical origins (`installation-enrollment-contract.ts:320-322`,
-//     `:376-385`, `:1220-1221`).
+//     By schema, redirect values are exact-equality strings (1-2048) and the
+//     canonical-HTTPS-origin requirement lives on the TRUSTED ISSUER channel,
+//     not on `approvedRedirects` — so a scheme callback is not code-refused;
+//     an HTTPS origin for macOS is an owner-quality requirement
+//     (`installation-enrollment-contract.ts:322`, `:1218-1222`, `:1150-1153`).
 //   * No plaintext fallback, anywhere, for any reason (see
 //     `plaintextFallback()`).
 //   * No re-implementation of the attempt store. The custody GENERATION is
