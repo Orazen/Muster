@@ -1,3 +1,36 @@
+# Current remaining-work register — 6 October 2026, Astra round
+
+Current source main `46866f8a956fddda79de464759223893d8b72a57`. This table supersedes overlapping historical status below; it does not fabricate acceptance or release an ownership claim by silence. All accepted engineering source changes in this round are integrated. The validated root proxy-major transition removes root Roarr/sprintf while preserving actual consumer behavior with a local compatibility patch; Android legacy sprintf and other upstream remediation plus external gates/dependent unwired implementation remain explicit; this is not a whole-codebase security or MVP completion claim.
+
+| ID | Required outcome | Remaining gap | Owner | Acceptance / dependency |
+|---|---|---|---|---|
+| GATE-HOSTED | Exact final-main CI/autodeploy executes successfully | Billing/spending eligibility blocks hosted steps; local gates are not hosted passes | Repo billing administrator (Tharun) | Eligibility change; then required exact-current runs and served GET evidence |
+| GATE-TESTSPRITE | GitHub App discovers genuine project tests | Manual cloud5/5 and plan lint5/5 accepted; repository App mapping remains unconfirmed | TestSprite project administrator | Supported repository/project mapping; actual precheck/discovery outcome |
+| LIVE-SCOPE | Approve live existing-installation restore boundary | Account-scoped versus whole-installation and rollback/exclusions not decided | Tharun | Recorded product decision preserving existing data |
+| LIVE-HTTP | Wire approved authenticated restore apply consumer | apply remains unsupported; inspection does not imply apply | Astra/root and own subagents | LIVE-SCOPE + AUTH-BOOT; real interruption/stale authority/concurrent-session tests and independent review |
+| AUTH-BOOT | Define boot-time restore authority or exclude this path | Current authority validates running-server consumer; restore-first boot order must remain | Tharun decision; Astra implementation | Explicit scope/exclusion or tested pre-import authority |
+| ENROLLMENT-ENABLE | Enable only verified native/runtime enrollment | Custody/generation/identity/durable-store prerequisites tested; producer/wiring remains disabled | Tharun for trust configuration; Astra/root and own subagents for implementation | Canonical cloud authority/issuer/audience, registered native callback, current completion producer, protected key/one-owner lifecycle; integrated lifecycle/restart tests |
+| GOOGLE-REAL | Real consent/cancel/re-consent/revocation/reconnect/fresh-device recovery | All11 real-account matrix rows remain unexecuted | Tharun / authorized consented QA | Actual account/device outcomes; inspection distinct from apply |
+| ANDROID-PHYSICAL | Physical standalone install/upgrade/restart/pairing/durability/approvals | Accepted debug/emulator receipts do not cover physical/signing acceptance | Authorized platform QA/release operator | Ready isolated device and separate production-signing authorization |
+| MAC-INSTALL | Installed launch/upgrade/DeveloperID/notary/Gatekeeper | Swift161 source tests do not prove installed/trusted artifacts | Authorized platform QA/release operator | Isolated-ready install environment; separately authorized credentials/signing |
+| WIN-LINUX | Packaging/runtime/GUI/install/upgrade on actual hosts | Linux source221 plus byte test: headless build/native13/package14/durable51 passed; later proxy graph Linux-unexecuted; default lint allocator crash unresolved; Windows/GUI/install/upgrade unexecuted | Astra/root for bounded headless checks; authorized platform QA for installed/GUI | Linux lint tool/environment remediation and ready Windows/GUI/install/upgrade hosts with actual evidence |
+| SECURITY-UPSTREAM | Verified removal/replacement or upstream dependency remediation | Cache/Forge/braces local guards are mitigations; sprintf-js has no patched release; current73/74 alert access lacks requiredsecurity_events capability; bundled DevTools boundary separate; dismissal is not upstream remediation | Astra dependency owner; upstream maintainers; Tharun/repo admin for supported alert-read capability | Exact current advisory/removal proof, compatible dependency graph and required tests; no blanket security claim |
+| BETA-TESTERS | Five consenting testers on three dates =15 tester-days | Actual tester evidence not supplied | Tharun / consented QA | Dated consented session records |
+| BETA-PRODUCT | Provider/model/allowance/reset/global cap/funding | Decisions not recorded; no paid budget inferred | Tharun | Recorded policy decisions |
+
+## Completed this round
+
+- #87/#88: token-redacting session response and local legacy Drive disconnect, full509/8348/8 plus84 and actual browser58 assertions.
+- [#89](https://github.com/Orazen/Muster/pull/89) (`4798501a`), [#90](https://github.com/Orazen/Muster/pull/90) (`0dfa0493`), [#91](https://github.com/Orazen/Muster/pull/91) (`cbf111f4`), [#95](https://github.com/Orazen/Muster/pull/95) (`09eca1b8`), [#96](https://github.com/Orazen/Muster/pull/96) (`36faec5c`): native custody/runtime generation/identity/durable attempts, installed cache backport, five corrected browser plans, compatible upstream dependency fixes and reproducible policy control; full514/8599/8 plus84; Swift161; actual browser42; existing-project cloud5/5. Exact source bytes independently accepted.
+- PR92–94 are superseded by the coherent compatible dependency successor; their branches/history remain.
+- PR86 is superseded by the complete five-plan successor; its history is retained.
+
+Audit owner Astra/root; due2026-10-07 09:00 Europe/Rome; source revision `46866f8a956fddda79de464759223893d8b72a57`; inspect successor deltas and unresolved gates, reuse unchanged tests.
+
+---
+
+## Historical register before this round (preserved verbatim)
+
 # Remaining-work register — 6 October 2026
 
 Owner-maintained register of every unfinished item after the 6 October
