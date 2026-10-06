@@ -5,6 +5,8 @@
 // portable encryption. Hosted global workspace routes remain disabled.
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
+import { driveSyncGeneration, loadConfig } from "./config.ts";
+import { SyncPassInvalidatedError } from "./sync-pass.ts";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files";
@@ -19,6 +21,73 @@ export const BUNDLE_V2_NAME = "muster-workspace-v2.enc";
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID?.trim() ?? "";
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+
+export class DriveSyncInvalidatedError extends SyncPassInvalidatedError {
+  constructor(message = "Google Drive connection changed during the operation — check the connection and try again.") {
+    super(message);
+    this.name = "DriveSyncInvalidatedError";
+  }
+}
+
+interface DriveAccessLifecycle {
+  generation: number;
+  refreshToken: string;
+  signal: AbortSignal;
+  assertCurrent(): Promise<void>;
+}
+
+let observedDriveGeneration = driveSyncGeneration();
+let observedDriveController = new AbortController();
+const accessTokenLifecycles = new Map<string, DriveAccessLifecycle>();
+
+/** Keep all legacy installation Drive users on the same persisted epoch. */
+export function observeDriveSyncGeneration(generation: number): void {
+  if (generation === observedDriveGeneration) return;
+  observedDriveController.abort(new DriveSyncInvalidatedError());
+  observedDriveController = new AbortController();
+  observedDriveGeneration = generation;
+}
+
+function captureConfiguredDriveLifecycle(refreshToken: string): DriveAccessLifecycle | null {
+  if (loadConfig().driveSync?.refreshToken?.trim() !== refreshToken) return null;
+  const generation = driveSyncGeneration();
+  observeDriveSyncGeneration(generation);
+  const controller = observedDriveController;
+  const assertCurrent = async (): Promise<void> => {
+    if (controller.signal.aborted) {
+      const reason = controller.signal.reason;
+      throw reason instanceof Error ? reason : new DriveSyncInvalidatedError();
+    }
+    const currentGeneration = driveSyncGeneration();
+    observeDriveSyncGeneration(currentGeneration);
+    if (currentGeneration !== generation || controller !== observedDriveController) throw new DriveSyncInvalidatedError();
+    if (loadConfig().driveSync?.refreshToken?.trim() !== refreshToken) throw new DriveSyncInvalidatedError();
+  };
+  return { generation, refreshToken, signal: controller.signal, assertCurrent };
+}
+
+function mergedSignal(...signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
+  const present = signals.filter((signal): signal is AbortSignal => signal !== undefined);
+  if (present.length === 0) return undefined;
+  if (present.length === 1) return present[0];
+  return AbortSignal.any(present);
+}
+
+function driveRequestContext(
+  accessToken: string,
+  guard?: () => Promise<void>,
+  signal?: AbortSignal,
+) {
+  const lifecycle = guard === undefined ? accessTokenLifecycles.get(accessToken) : undefined;
+  return {
+    async guard() {
+      await lifecycle?.assertCurrent();
+      await guard?.();
+      signal?.throwIfAborted();
+    },
+    signal: mergedSignal(signal, lifecycle?.signal),
+  };
+}
 
 /** Uses the same captured client configuration as token exchange/refresh. */
 export function driveOAuthConfigured(): boolean {
@@ -53,21 +122,30 @@ const tokenResponseSchema = z.object({
 });
 
 /** Trade an authorization code for tokens. */
-export async function exchangeDriveCode(code: string, redirectUri: string): Promise<DriveTokens> {
+export async function exchangeDriveCode(code: string, redirectUri: string, signal?: AbortSignal): Promise<DriveTokens> {
   if (!CLIENT_ID || !CLIENT_SECRET) throw new Error("Google OAuth is not configured on this deployment");
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-      redirect_uri: redirectUri,
-      grant_type: "authorization_code",
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
+  signal?.throwIfAborted();
+  let res: Response;
+  try {
+    res = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+      }),
+      signal: boundedSignal(signal, 15_000),
+    });
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw error;
+  }
+  signal?.throwIfAborted();
   const data = tokenResponseSchema.safeParse(await res.json().catch(() => null));
+  signal?.throwIfAborted();
   if (!res.ok || !data.success) throw new Error("Google rejected the authorization code");
   return {
     accessToken: data.data.access_token,
@@ -77,42 +155,77 @@ export async function exchangeDriveCode(code: string, redirectUri: string): Prom
 }
 
 /** Refresh an expired access token. */
-export async function refreshDriveToken(refreshToken: string): Promise<DriveTokens> {
+export async function refreshDriveToken(
+  refreshToken: string,
+  signal?: AbortSignal,
+  guard?: () => Promise<void>,
+): Promise<DriveTokens> {
   if (!CLIENT_ID || !CLIENT_SECRET) throw new Error("Google OAuth is not configured on this deployment");
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      refresh_token: refreshToken,
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-      grant_type: "refresh_token",
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
+  const lifecycle = captureConfiguredDriveLifecycle(refreshToken);
+  const combinedSignal = mergedSignal(signal, lifecycle?.signal);
+  const assertCurrent = async () => {
+    await lifecycle?.assertCurrent();
+    await guard?.();
+    signal?.throwIfAborted();
+  };
+  await assertCurrent();
+  let res: Response;
+  try {
+    res = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        refresh_token: refreshToken,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        grant_type: "refresh_token",
+      }),
+      signal: boundedSignal(combinedSignal, 15_000),
+    });
+  } catch (error) {
+    await assertCurrent();
+    combinedSignal?.throwIfAborted();
+    throw error;
+  }
+  await assertCurrent();
   const data = tokenResponseSchema.safeParse(await res.json().catch(() => null));
+  await assertCurrent();
   if (!res.ok || !data.success) throw new Error("could not refresh the Drive token — reconnect Google Drive in Settings");
+  if (lifecycle) accessTokenLifecycles.set(data.data.access_token, lifecycle);
   return { accessToken: data.data.access_token, refreshToken, expiresAt: data.data.expires_in ? Date.now() + data.data.expires_in * 1000 : undefined };
 }
 
-async function driveFetch(accessToken: string, url: string, init?: RequestInit, guard: () => Promise<void> = async () => {}): Promise<Response> {
-  await guard();
+async function driveFetch(accessToken: string, url: string, init?: RequestInit, guard?: () => Promise<void>, signal?: AbortSignal): Promise<Response> {
+  const request = driveRequestContext(accessToken, guard, signal);
+  await request.guard();
+  request.signal?.throwIfAborted();
   const headers = new Headers(init?.headers);
   headers.set("authorization", `Bearer ${accessToken}`);
-  const res = await fetch(url, {
-    ...init,
-    headers,
-    redirect: "error",
-    signal: AbortSignal.timeout(60_000),
-  });
-  await guard();
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers,
+      redirect: "error",
+      signal: boundedSignal(request.signal, 60_000),
+    });
+  } catch (error) {
+    await request.guard();
+    request.signal?.throwIfAborted();
+    throw error;
+  }
+  await request.guard();
+  request.signal?.throwIfAborted();
   if (res.status === 401) throw new Error("Drive token expired — reconnect Google Drive in Settings");
   return res;
 }
 
 /** Upload (create or overwrite) the workspace bundle in the app folder. */
-export async function uploadBundle(accessToken: string, payload: string, fileName = BUNDLE_NAME, guard: () => Promise<void> = async () => {}): Promise<{ id: string }> {
-  const fileId = await findBundleFile(accessToken, fileName, guard);
+export async function uploadBundle(accessToken: string, payload: string, fileName = BUNDLE_NAME, guard?: () => Promise<void>, signal?: AbortSignal): Promise<{ id: string }> {
+  const request = driveRequestContext(accessToken, guard, signal);
+  guard = request.guard;
+  signal = request.signal;
+  const fileId = await findBundleFile(accessToken, fileName, guard, signal);
   // Updating content must not try to move the file's parent folder.
   const metadata = JSON.stringify(fileId ? { name: fileName } : { name: fileName, parents: [APPDATA_FOLDER] });
   const boundary = `muster-${randomBytes(8).toString("hex")}`;
@@ -136,9 +249,12 @@ export async function uploadBundle(accessToken: string, payload: string, fileNam
       body,
     },
     guard,
+    signal,
   );
   if (!res.ok) throw new Error(`Drive upload failed: HTTP ${res.status}`);
   const result = driveUploadSchema.safeParse(await res.json().catch(() => null));
+  await guard();
+  signal?.throwIfAborted();
   if (!result.success) throw new Error("Drive returned an unreadable upload response");
   if (fileId && result.data.id !== fileId) throw new Error("Drive returned a different backup file after updating it");
   return result.data;
@@ -155,16 +271,21 @@ const driveListSchema = z.object({
 }).strict();
 
 /** Find the existing bundle file id, if any. */
-export async function findBundleFile(accessToken: string, fileName = BUNDLE_NAME, guard: () => Promise<void> = async () => {}): Promise<string | null> {
+export async function findBundleFile(accessToken: string, fileName = BUNDLE_NAME, guard?: () => Promise<void>, signal?: AbortSignal): Promise<string | null> {
+  const request = driveRequestContext(accessToken, guard, signal);
+  guard = request.guard;
+  signal = request.signal;
   const query = new URLSearchParams({
     spaces: APPDATA_FOLDER, q: `name = '${fileName}' and trashed = false`,
     orderBy: "modifiedTime desc", pageSize: "100", fields: "files(id),nextPageToken,incompleteSearch",
   });
   const seenPages = new Set<string>();
   for (let page = 0; page < 10; page++) {
-    const res = await driveFetch(accessToken, `${LIST_URL}?${query}`, undefined, guard);
+    const res = await driveFetch(accessToken, `${LIST_URL}?${query}`, undefined, guard, signal);
     if (!res.ok) throw new Error(`Drive list failed: HTTP ${res.status}`);
     const parsed = driveListSchema.safeParse(await res.json().catch(() => null));
+    await guard();
+    signal?.throwIfAborted();
     if (!parsed.success) throw new Error("Drive returned an unreadable file list");
     if (parsed.data.incompleteSearch) throw new Error("Drive could not complete the backup search — try again");
     const fileId = parsed.data.files[0]?.id;
@@ -179,13 +300,24 @@ export async function findBundleFile(accessToken: string, fileName = BUNDLE_NAME
 }
 
 /** Download the bundle payload. Returns null when no bundle exists yet. */
-export async function downloadBundle(accessToken: string, fileName = BUNDLE_NAME, guard: () => Promise<void> = async () => {}): Promise<string | null> {
-  const fileId = await findBundleFile(accessToken, fileName, guard);
+export async function downloadBundle(accessToken: string, fileName = BUNDLE_NAME, guard?: () => Promise<void>, signal?: AbortSignal): Promise<string | null> {
+  const request = driveRequestContext(accessToken, guard, signal);
+  guard = request.guard;
+  signal = request.signal;
+  const fileId = await findBundleFile(accessToken, fileName, guard, signal);
   if (!fileId) return null;
-  const res = await driveFetch(accessToken, `${FILE_URL}/${encodeURIComponent(fileId)}?alt=media`, undefined, guard);
+  const res = await driveFetch(accessToken, `${FILE_URL}/${encodeURIComponent(fileId)}?alt=media`, undefined, guard, signal);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Drive download failed: HTTP ${res.status}`);
-  return await res.text();
+  const payload = await res.text();
+  await guard();
+  signal?.throwIfAborted();
+  return payload;
+}
+
+function boundedSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([timeout, signal]) : timeout;
 }
 
 /** A file's identity for optimistic concurrency. Drive v3 has no If-Match
@@ -208,8 +340,12 @@ const driveStatSchema = z.object({
 export async function statBundleFile(
   accessToken: string,
   fileName = BUNDLE_NAME,
-  guard: () => Promise<void> = async () => {},
+  guard?: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<BundleFileStat | null> {
+  const request = driveRequestContext(accessToken, guard, signal);
+  guard = request.guard;
+  signal = request.signal;
   const query = new URLSearchParams({
     spaces: APPDATA_FOLDER,
     q: `name = '${fileName}' and trashed = false`,
@@ -217,9 +353,11 @@ export async function statBundleFile(
     pageSize: "1",
     fields: "files(id,modifiedTime)",
   });
-  const res = await driveFetch(accessToken, `${LIST_URL}?${query}`, undefined, guard);
+  const res = await driveFetch(accessToken, `${LIST_URL}?${query}`, undefined, guard, signal);
   if (!res.ok) throw new Error(`Drive list failed: HTTP ${res.status}`);
   const parsed = driveStatSchema.safeParse(await res.json().catch(() => null));
+  await guard();
+  signal?.throwIfAborted();
   if (!parsed.success) throw new Error("Drive returned an unreadable file stat");
   const file = parsed.data.files[0];
   return file === undefined ? null : { id: file.id, modifiedTime: file.modifiedTime };
@@ -259,8 +397,11 @@ const driveSnapshotListSchema = z.object({
  * Paginates exactly like the bundle search and surfaces the same guard errors. */
 export async function listSnapshots(
   accessToken: string,
-  guard: () => Promise<void> = async () => {},
+  guard?: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<SnapshotInfo[]> {
+  const request = driveRequestContext(accessToken, guard, signal);
+  guard = request.guard;
   const query = new URLSearchParams({
     spaces: APPDATA_FOLDER,
     q: `name contains '${SNAPSHOT_PREFIX}' and trashed = false`,
@@ -271,9 +412,10 @@ export async function listSnapshots(
   const seenPages = new Set<string>();
   const snapshots: SnapshotInfo[] = [];
   for (let page = 0; page < 10; page++) {
-    const res = await driveFetch(accessToken, `${LIST_URL}?${query}`, undefined, guard);
+    const res = await driveFetch(accessToken, `${LIST_URL}?${query}`, undefined, guard, request.signal);
     if (!res.ok) throw new Error(`Drive list failed: HTTP ${res.status}`);
     const parsed = driveSnapshotListSchema.safeParse(await res.json().catch(() => null));
+    await guard();
     if (!parsed.success) throw new Error("Drive returned an unreadable snapshot list");
     if (parsed.data.incompleteSearch) throw new Error("Drive could not complete the backup search — try again");
     for (const f of parsed.data.files) snapshots.push(f);
@@ -293,8 +435,11 @@ export async function listSnapshots(
 export async function uploadSnapshot(
   accessToken: string,
   payload: string,
-  guard: () => Promise<void> = async () => {},
+  guard?: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<{ id: string; name: string }> {
+  const request = driveRequestContext(accessToken, guard, signal);
+  guard = request.guard;
   const name = `${SNAPSHOT_PREFIX}${Date.now()}-${randomBytes(4).toString("hex")}${SNAPSHOT_SUFFIX}`;
   const boundary = `muster-${randomBytes(8).toString("hex")}`;
   const body = [
@@ -317,9 +462,11 @@ export async function uploadSnapshot(
       body,
     },
     guard,
+    request.signal,
   );
   if (!res.ok) throw new Error(`Drive upload failed: HTTP ${res.status}`);
   const result = driveSnapshotUploadSchema.safeParse(await res.json().catch(() => null));
+  await guard();
   if (!result.success) throw new Error("Drive returned an unreadable upload response");
   return { id: result.data.id, name: result.data.name };
 }
@@ -328,12 +475,16 @@ export async function uploadSnapshot(
 export async function downloadSnapshot(
   accessToken: string,
   snapshotId: string,
-  guard: () => Promise<void> = async () => {},
+  guard?: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<string> {
-  const res = await driveFetch(accessToken, `${FILE_URL}/${encodeURIComponent(snapshotId)}?alt=media`, undefined, guard);
+  const request = driveRequestContext(accessToken, guard, signal);
+  const res = await driveFetch(accessToken, `${FILE_URL}/${encodeURIComponent(snapshotId)}?alt=media`, undefined, request.guard, request.signal);
   if (res.status === 404) throw new Error("Snapshot not found");
   if (!res.ok) throw new Error(`Drive download failed: HTTP ${res.status}`);
-  return await res.text();
+  const payload = await res.text();
+  await request.guard();
+  return payload;
 }
 
 /** Retention's delete primitive (DESIGN §11's ladder needs one). A 404
@@ -342,9 +493,11 @@ export async function downloadSnapshot(
 export async function deleteSnapshot(
   accessToken: string,
   snapshotId: string,
-  guard: () => Promise<void> = async () => {},
+  guard?: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const res = await driveFetch(accessToken, `${FILE_URL}/${encodeURIComponent(snapshotId)}?fields=id`, { method: "DELETE" }, guard);
+  const request = driveRequestContext(accessToken, guard, signal);
+  const res = await driveFetch(accessToken, `${FILE_URL}/${encodeURIComponent(snapshotId)}?fields=id`, { method: "DELETE" }, request.guard, request.signal);
   if (res.status === 404) return;
   if (!res.ok) throw new Error(`Drive delete failed: HTTP ${res.status}`);
 }
@@ -354,10 +507,12 @@ export async function deleteSnapshot(
  * should use listSnapshots + downloadSnapshot by chosen id instead. */
 export async function downloadLatestSnapshot(
   accessToken: string,
-  guard: () => Promise<void> = async () => {},
+  guard?: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<string | null> {
-  const snapshots = await listSnapshots(accessToken, guard);
+  const request = driveRequestContext(accessToken, guard, signal);
+  const snapshots = await listSnapshots(accessToken, request.guard, request.signal);
   const latest = snapshots[0];
   if (!latest) return null;
-  return downloadSnapshot(accessToken, latest.id, guard);
+  return downloadSnapshot(accessToken, latest.id, request.guard, request.signal);
 }

@@ -55,8 +55,10 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import {
-  drainSyncChanges,
+  claimSyncChanges,
   enqueueSyncChange,
+  markSyncChangeDrained,
+  markSyncChangeFailed,
   syncChangeRows,
   type DrainResult,
   type SyncJournalRow,
@@ -136,6 +138,59 @@ export interface SyncPassResult {
 
 const emptyDoc = (now: number): SyncManifestDoc => ({ schema: 1, updatedAt: now, entries: [] });
 
+/** Cancellation and lifecycle invalidation are not transport failures. They
+ * must unwind a claimed journal row without charging an attempt or allowing a
+ * retry/dead-letter transition. */
+export class SyncPassInvalidatedError extends Error {
+  constructor(message = "sync pass was cancelled or its Drive lifecycle changed") {
+    super(message);
+    this.name = "SyncPassInvalidatedError";
+  }
+}
+
+// Keep aligned with sync-journal's bounded drain defaults. S2 owns the
+// transport-aware drain here because it must distinguish terminal lifecycle
+// invalidation from an ordinary failed upload before updating journal state.
+const SYNC_PASS_DRAIN_LIMIT = 32;
+const SYNC_PASS_STALE_CLAIM_MS = 60_000;
+
+function releaseUnfinishedClaims(db: DatabaseSync, claims: readonly SyncJournalRow[]): void {
+  const release = db.prepare(`UPDATE sync_journal SET state = 'pending', claimedAt = NULL
+    WHERE objectId = ? AND rev = ? AND state = 'inflight' AND claimedAt = ?`);
+  for (const row of claims) {
+    if (row.claimedAt === null) continue;
+    release.run(row.objectId, row.rev, row.claimedAt);
+  }
+}
+
+async function drainSyncChangesForPass(
+  db: DatabaseSync,
+  options: { transport(row: SyncJournalRow): Promise<void> | void; now: number },
+): Promise<DrainResult> {
+  const claims = claimSyncChanges(db, {
+    limit: SYNC_PASS_DRAIN_LIMIT,
+    now: options.now,
+    staleMs: SYNC_PASS_STALE_CLAIM_MS,
+  });
+  const result: DrainResult = { claimed: claims.length, drained: 0, failed: 0, dead: 0 };
+  for (const row of claims) {
+    try {
+      await options.transport(row);
+      markSyncChangeDrained(db, row.objectId, row.rev);
+      result.drained += 1;
+    } catch (error) {
+      if (error instanceof SyncPassInvalidatedError) {
+        releaseUnfinishedClaims(db, claims);
+        throw error;
+      }
+      const outcome = markSyncChangeFailed(db, row.objectId, row.rev, options.now);
+      if (outcome === "dead") result.dead += 1;
+      else result.failed += 1;
+    }
+  }
+  return result;
+}
+
 /** Re-exported from sync-objects, where it now lives beside the manifest
  * schema and reconcileSyncObjects. The S2c producers import it from here and
  * are untouched; there is still exactly one merge implementation. */
@@ -193,6 +248,7 @@ export async function runSyncPass(deps: SyncPassDeps): Promise<SyncPassResult> {
     try {
       bytes = await deps.transport.download(entry.fileName);
     } catch (error) {
+      if (error instanceof SyncPassInvalidatedError) throw error;
       return { ok: false, problem: `download failed (${error instanceof Error ? error.message : String(error)})` };
     }
     if (bytes === null) return { ok: false, problem: "the file named by the manifest was not found" };
@@ -220,7 +276,7 @@ export async function runSyncPass(deps: SyncPassDeps): Promise<SyncPassResult> {
   // DELETEs the row on success, and if the manifest publish then fails the
   // object is on the wire with no queue row behind it — see below.
   const pushedRows: Array<{ row: SyncJournalRow; entry: SyncManifestEntry }> = [];
-  result.journal = await drainSyncChanges(deps.db, {
+  result.journal = await drainSyncChangesForPass(deps.db, {
     now: now(),
     transport: async (row) => {
       const object = await deps.readObject(row);
@@ -282,6 +338,7 @@ export async function runSyncPass(deps: SyncPassDeps): Promise<SyncPassResult> {
         guardCurrent = false;
         result.manifestPublished = true;
       } catch (error) {
+        if (error instanceof SyncPassInvalidatedError) throw error;
         // The objects are on the wire but the remote index does not name them,
         // and the drain has already DELETEd their journal rows — so nothing
         // would ever re-push them and the local manifest's claim would sit
@@ -363,7 +420,8 @@ export async function runSyncPass(deps: SyncPassDeps): Promise<SyncPassResult> {
         await deps.transport.saveRemoteManifest(packSyncManifest(merged, envelope), guard);
         remoteDoc = merged;
         guardCurrent = false;
-      } catch {
+      } catch (error) {
+        if (error instanceof SyncPassInvalidatedError) throw error;
         // Someone else published between our load and now. Not a loss: the
         // journal fallback below owns these now, and the next pass merges
         // onto whatever the index says by then.
@@ -435,6 +493,7 @@ export async function runSyncPass(deps: SyncPassDeps): Promise<SyncPassResult> {
     try {
       await deps.applyObject(object);
     } catch (error) {
+      if (error instanceof SyncPassInvalidatedError) throw error;
       result.pullProblems.push(`${entry.objectId}: applier rejected it (${error instanceof Error ? error.message : String(error)})`);
       continue;
     }

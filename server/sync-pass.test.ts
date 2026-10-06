@@ -39,8 +39,9 @@ import {
   type SyncManifestEntry,
   type SyncObject,
 } from "./sync-objects.ts";
-import { runSyncPass, type SyncPassDeps, type SyncTransportDeps } from "./sync-pass.ts";
+import { runSyncPass, SyncPassInvalidatedError, type SyncPassDeps, type SyncTransportDeps } from "./sync-pass.ts";
 import { driveSyncTransport, type DriveTransportFns } from "./sync-wiring.ts";
+import { DriveSyncInvalidatedError } from "./drive-sync.ts";
 
 const T0 = 1_760_000_000_000;
 const PASSPHRASE = "correct horse battery staple";
@@ -194,6 +195,26 @@ describe("push half — journal → pack → upload → manifest publish", () =>
     expect(row.attempts).toBe(1);
     expect(result.pushed).toHaveLength(0);
     expect(result.manifestPublished).toBe(false);
+  });
+
+  it.each([
+    { kind: "sync pass", InvalidatedError: SyncPassInvalidatedError },
+    { kind: "Drive refresh", InvalidatedError: DriveSyncInvalidatedError },
+  ])("releases a claimed row without retry mutation when $kind invalidates the pass", async ({ InvalidatedError }) => {
+    const db = freshDb();
+    const invalidated: SyncTransportDeps = {
+      ...fakeDrive().transport,
+      upload: async () => { throw new InvalidatedError("Drive connection was disconnected"); },
+    };
+    enqueueSyncChange(db, { objectId: "memory:bot_alpha", objectType: "memory", rev: 1, checksum: sha256("memory content v1") }, T0);
+    db.prepare("UPDATE sync_journal SET attempts = 11, nextAttemptAt = ? WHERE objectId = ?").run(T0 - 1, "memory:bot_alpha");
+    const before = syncChangeRows(db);
+
+    await expect(runSyncPass(deps({ db, transport: invalidated }))).rejects.toBeInstanceOf(SyncPassInvalidatedError);
+
+    expect(syncChangeRows(db)).toEqual(before);
+    expect(syncChangeRows(db)[0]?.state).toBe("pending");
+    expect(syncChangeRows(db)[0]?.attempts).toBe(11);
   });
 
   it("saves the local manifest after every successful push, so a crash mid-pass loses nothing", async () => {

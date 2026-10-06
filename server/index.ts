@@ -120,6 +120,14 @@ import {
   parseConfigPatch,
   providerReloadRequired,
   saveConfig,
+  saveConfigIfDriveSyncGeneration,
+  driveSyncGeneration,
+  beginDriveSyncConnection,
+  beginDriveSyncConfigWrite,
+  finishDriveSyncConfigWrite,
+  finishDriveSyncConnection,
+  saveDriveSyncCredentials,
+  disconnectDriveSync,
   withInstanceCli,
   EVENTS_DIR,
   NATIVE_DIR,
@@ -312,7 +320,7 @@ import { setChatChangeListener, setMemoryWriteListener } from "./sync-hooks.ts";
 import { createChatProducer } from "./sync-chats.ts";
 import { createObjectApply, createObjectRead } from "./sync-dispatch.ts";
 import { createMemoryProducer } from "./sync-memory.ts";
-import { runSyncPass, type SyncPassDeps } from "./sync-pass.ts";
+import { runSyncPass, SyncPassInvalidatedError, type SyncPassDeps } from "./sync-pass.ts";
 import { snapshotPassphraseStore } from "./snapshot-runner.ts";
 import { driveSyncTransport, localSyncManifestStore, startSyncEngine } from "./sync-wiring.ts";
 import { readCuaConnection } from "./local-computer.ts";
@@ -423,6 +431,113 @@ const MIME = new Map(Object.entries({
 
 ensureDirs();
 const cfg = loadConfig();
+class DriveLifecycleChangedError extends SyncPassInvalidatedError {
+  constructor() {
+    super("Google Drive connection changed during the operation — check the connection and try again.");
+    this.name = "DriveLifecycleChangedError";
+  }
+}
+
+class DriveRequestCancelledError extends SyncPassInvalidatedError {
+  constructor() {
+    super("Google Drive request was cancelled.");
+    this.name = "DriveRequestCancelledError";
+  }
+}
+
+let activeDriveGeneration = driveSyncGeneration();
+let activeDriveGenerationController = new AbortController();
+
+function alignDriveGeneration(generation = driveSyncGeneration()): number {
+  driveSync.observeDriveSyncGeneration(generation);
+  if (generation !== activeDriveGeneration) {
+    activeDriveGenerationController.abort(new DriveLifecycleChangedError());
+    activeDriveGenerationController = new AbortController();
+    activeDriveGeneration = generation;
+  }
+  return generation;
+}
+
+interface DriveLifecycleOperation {
+  generation: number;
+  refreshToken: string | null;
+  signal: AbortSignal;
+  assertCurrent(): Promise<void>;
+  dispose(): void;
+}
+
+function beginDriveLifecycleOperation(
+  req?: IncomingMessage,
+  res?: ServerResponse,
+  expectedGeneration = alignDriveGeneration(),
+  needsCredentials = true,
+): DriveLifecycleOperation | null {
+  alignDriveGeneration();
+  const refreshToken = cfg.driveSync?.refreshToken?.trim() || null;
+  if (needsCredentials && !refreshToken) return null;
+  const generationController = activeDriveGenerationController;
+  const requestController = req && res ? new AbortController() : null;
+  const cancelRequest = () => requestController?.abort(new DriveRequestCancelledError());
+  const onResponseClose = () => {
+    if (res && !res.writableEnded) cancelRequest();
+  };
+  req?.once("aborted", cancelRequest);
+  res?.once("close", onResponseClose);
+  const signal = requestController
+    ? AbortSignal.any([generationController.signal, requestController.signal])
+    : generationController.signal;
+  const assertCurrent = async () => {
+    if (signal.aborted) {
+      const reason = signal.reason;
+      throw reason instanceof Error ? reason : new DriveRequestCancelledError();
+    }
+    const durableGeneration = driveSyncGeneration();
+    alignDriveGeneration(durableGeneration);
+    if (durableGeneration !== expectedGeneration || generationController !== activeDriveGenerationController) {
+      throw new DriveLifecycleChangedError();
+    }
+    if (refreshToken !== null && cfg.driveSync?.refreshToken?.trim() !== refreshToken) {
+      throw new DriveLifecycleChangedError();
+    }
+  };
+  return {
+    generation: expectedGeneration,
+    refreshToken,
+    signal,
+    assertCurrent,
+    dispose() {
+      req?.off("aborted", cancelRequest);
+      res?.off("close", onResponseClose);
+    },
+  };
+}
+
+function driveTransportFor(operation: DriveLifecycleOperation) {
+  return driveSyncTransport({
+    guard: operation.assertCurrent,
+    signal: operation.signal,
+    async getAccessToken() {
+      await operation.assertCurrent();
+      if (!operation.refreshToken) throw new Error("Google Drive is not connected yet");
+      const refreshed = await driveSync.refreshDriveToken(operation.refreshToken, operation.signal);
+      await operation.assertCurrent();
+      return refreshed.accessToken;
+    },
+  });
+}
+
+function driveOperationError(res: ServerResponse, error: Error, fallbackStatus: number): void {
+  if (res.destroyed) return;
+  if (error instanceof DriveRequestCancelledError) {
+    res.destroy();
+    return;
+  }
+  if (error instanceof DriveLifecycleChangedError || error instanceof driveSync.DriveSyncInvalidatedError) {
+    json(res, 409, { error: error.message });
+    return;
+  }
+  json(res, fallbackStatus, { error: error instanceof Error ? error.message : String(error) });
+}
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 await registry.load(instanceConfigs(cfg));
 
@@ -489,17 +604,10 @@ eventLogSweep.unref();
 // result instead of guessing, while the manual route below still runs a
 // pass with the operator's own passphrase.
 const syncLocalManifest = localSyncManifestStore(join(DATA_DIR, "muster-sync-manifest.json"));
-const syncTransport = driveSyncTransport({
-  async getAccessToken(): Promise<string> {
-    const refreshToken = cfg.driveSync?.refreshToken;
-    if (!refreshToken) throw new Error("Google Drive is not connected yet");
-    const refreshed = await driveSync.refreshDriveToken(refreshToken);
-    return refreshed.accessToken;
-  },
-});
-const syncPassDeps = (passphrase: string): SyncPassDeps => ({
+const syncTransport = driveSyncTransport({ getAccessToken: async () => { throw new Error("Drive sync transport must be bound to a lifecycle"); } });
+const syncPassDeps = (passphrase: string, operation: DriveLifecycleOperation): SyncPassDeps => ({
   db: getDb(),
-  transport: syncTransport,
+  transport: driveTransportFor(operation),
   local: syncLocalManifest,
   // P4: one seam, two producers — the router picks memory vs chat by
   // objectType so the pass itself never learned about conversations.
@@ -511,6 +619,11 @@ const syncPassDeps = (passphrase: string): SyncPassDeps => ({
 const syncEngine = startSyncEngine({
   db: getDb(),
   transport: syncTransport,
+  transportForRun: () => {
+    const operation = beginDriveLifecycleOperation(undefined, undefined, alignDriveGeneration(), false);
+    if (!operation) throw new Error("Drive sync lifecycle is unavailable");
+    return driveTransportFor(operation);
+  },
   local: syncLocalManifest,
   readObject: createObjectRead(),
   applyObject: createObjectApply(),
@@ -10215,54 +10328,101 @@ let requestUserEmail = "";
       const code = isText(body?.code) ? body.code.trim() : "";
       const redirectUri = isText(body?.redirectUri) ? body.redirectUri : "";
       if (!code || !redirectUri) return json(res, 400, { error: "code and redirectUri are required" });
+      const generation = beginDriveSyncConnection();
+      alignDriveGeneration(generation);
+      const operation = beginDriveLifecycleOperation(req, res, generation, false);
+      if (!operation) return json(res, 500, { error: "Google Drive lifecycle could not be started" });
       try {
-        const tokens = await driveSync.exchangeDriveCode(code, redirectUri);
-        saveConfig({ driveSync: { refreshToken: tokens.refreshToken ?? "", accessToken: tokens.accessToken, expiresAt: tokens.expiresAt ?? 0 } });
+        const tokens = await driveSync.exchangeDriveCode(code, redirectUri, operation.signal);
+        await operation.assertCurrent();
+        const saved = saveDriveSyncCredentials(generation, { refreshToken: tokens.refreshToken ?? "", accessToken: tokens.accessToken, expiresAt: tokens.expiresAt ?? 0 });
+        if (!saved) throw new DriveLifecycleChangedError();
         Object.assign(cfg, loadConfig());
         return json(res, 200, { connected: true });
       } catch (e) {
-        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+        driveOperationError(res, e instanceof Error ? e : new Error(String(e)), 400);
+        return;
+      } finally {
+        finishDriveSyncConnection(generation);
+        operation.dispose();
       }
+    }
+    if (path === "/api/workspace/drive/disconnect" && method === "POST") {
+      const disconnected = disconnectDriveSync();
+      // `Object.assign` cannot remove optional sections omitted by loadConfig;
+      // clear the in-memory credential copy explicitly with the disk tombstone.
+      delete cfg.driveSync;
+      alignDriveGeneration(disconnected.generation);
+      return json(res, 200, {
+        connected: false,
+        localTokensRemoved: true,
+        googleAuthorizationRevoked: false,
+        backupFilesDeleted: false,
+        message: "Local Drive tokens were removed. Google's remote authorization was not revoked, and backup files were not deleted.",
+      });
     }
     if (path === "/api/workspace/drive/push" && method === "POST") {
       const body = await readBody(req);
       const passphrase = isText(body?.passphrase) ? body.passphrase : "";
       if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
-      const refreshToken = cfg.driveSync?.refreshToken;
-      if (!refreshToken) return json(res, 400, { error: "Google Drive is not connected yet" });
+      const operation = beginDriveLifecycleOperation(req, res);
+      if (!operation) return json(res, 400, { error: "Google Drive is not connected yet" });
       try {
-        const token = await driveSync.refreshDriveToken(refreshToken);
+        await operation.assertCurrent();
+        const token = await driveSync.refreshDriveToken(operation.refreshToken!, operation.signal);
+        await operation.assertCurrent();
         const bundle = workspaceBundle.buildBundle(store, DATA_DIR);
         const { payload, counts } = workspaceBundle.encryptBundle(bundle, passphrase, deploymentSigningSecret());
-        const uploaded = await driveSync.uploadBundle(token.accessToken, payload);
+        const uploaded = await driveSync.uploadBundle(token.accessToken, payload, undefined, operation.assertCurrent, operation.signal);
+        await operation.assertCurrent();
         syncState.stampSync("local", "push", "google-drive");
         return json(res, 200, { uploaded: uploaded.id, counts });
       } catch (e) {
-        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+        driveOperationError(res, e instanceof Error ? e : new Error(String(e)), 502);
+        return;
+      } finally {
+        operation.dispose();
       }
     }
     if (path === "/api/workspace/drive/pull" && method === "POST") {
       const body = await readBody(req);
       const passphrase = isText(body?.passphrase) ? body.passphrase : "";
       if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
-      const refreshToken = cfg.driveSync?.refreshToken;
-      if (!refreshToken) return json(res, 400, { error: "Google Drive is not connected yet" });
+      const operation = beginDriveLifecycleOperation(req, res);
+      if (!operation) return json(res, 400, { error: "Google Drive is not connected yet" });
+      let result: ReturnType<typeof workspaceBundle.restoreBundle>;
       try {
-        const token = await driveSync.refreshDriveToken(refreshToken);
-        const payload = await driveSync.downloadBundle(token.accessToken);
-        if (cfg.driveSync?.refreshToken !== refreshToken) {
-          return json(res, 409, { error: "Google Drive connection changed during download — check the connection and try again." });
-        }
+        await operation.assertCurrent();
+        const token = await driveSync.refreshDriveToken(operation.refreshToken!, operation.signal);
+        await operation.assertCurrent();
+        const payload = await driveSync.downloadBundle(token.accessToken, undefined, operation.assertCurrent, operation.signal);
+        await operation.assertCurrent();
         if (!payload) return json(res, 404, { error: "no workspace bundle exists in Drive yet — push from the other device first" });
         const { workspace } = workspaceBundle.decryptBundle(payload, passphrase, deploymentSigningSecret());
-        const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
+        // Restore commit boundary: the assertion immediately before this
+        // synchronous call is the last lifecycle check. Once it returns, the
+        // local copy is committed; a later disconnect cannot turn this pull
+        // into a failure after changing the workspace.
+        await operation.assertCurrent();
+        result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
+      } catch (e) {
+        driveOperationError(res, e instanceof Error ? e : new Error(String(e)), 400);
+        return;
+      } finally {
+        operation.dispose();
+      }
+      // Only pre-commit errors reach driveOperationError. Provider reload and
+      // notification failures cannot undo the restored workspace.
+      let reloadError: string | undefined;
+      try {
         await reloadProviders();
         broadcast({ kind: "hello" });
         syncState.stampSync("local", "pull", "google-drive");
-        return json(res, 200, { restored: result });
       } catch (e) {
-        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+        reloadError = (e instanceof Error ? e.message : String(e)) || "Provider reload or restore bookkeeping did not finish.";
       }
+      if (reloadError !== undefined) return json(res, 200, { restored: result, reloadError });
+      return json(res, 200, { restored: result });
     }
 
     // S2c: the same pass the boot engine runs, on demand, with the
@@ -10274,10 +10434,12 @@ let requestUserEmail = "";
       const body = await readBody(req);
       const passphrase = isText(body?.passphrase) ? body.passphrase : "";
       if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
-      const refreshToken = cfg.driveSync?.refreshToken;
-      if (!refreshToken) return json(res, 400, { error: "Google Drive is not connected yet" });
+      const operation = beginDriveLifecycleOperation(req, res);
+      if (!operation) return json(res, 400, { error: "Google Drive is not connected yet" });
       try {
-        const result = await runSyncPass(syncPassDeps(passphrase));
+        await operation.assertCurrent();
+        const result = await runSyncPass(syncPassDeps(passphrase, operation));
+        await operation.assertCurrent();
         if (result.pushed.length > 0) syncState.stampSync("local", "push", "google-drive");
         if (result.pullApplied.length > 0) syncState.stampSync("local", "pull", "google-drive");
         return json(res, 200, {
@@ -10288,7 +10450,10 @@ let requestUserEmail = "";
           errors: result.errors,
         });
       } catch (e) {
-        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+        driveOperationError(res, e instanceof Error ? e : new Error(String(e)), 502);
+        return;
+      } finally {
+        operation.dispose();
       }
     }
 
@@ -10588,7 +10753,12 @@ let requestUserEmail = "";
       }
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
       providerConfigBusy = true;
+      let driveGenerationAtStart: number | null = null;
       try {
+      // Record pending Drive writes before provider validation can await. A
+      // disconnect must also invalidate this patch when no old Drive token is
+      // currently saved, or the delayed write could reconnect the install.
+      if (patch.driveSync !== undefined) driveGenerationAtStart = beginDriveSyncConfigWrite();
       // A project key is useful only if it can create/reuse the Session that
       // powers both the connections UI and the agent MCP. Validate it before
       // persisting, and save the non-secret ids needed to reuse that Session.
@@ -10668,8 +10838,15 @@ let requestUserEmail = "";
         cfg.composio = { ...cfg.composio, ...composioPatch };
         if (composioPatch.apiKey !== undefined) process.env.COMPOSIO_API_KEY = composioPatch.apiKey;
       } else {
-        saveConfig(patch);
+        if (driveGenerationAtStart !== null) {
+          if (!saveConfigIfDriveSyncGeneration(patch, driveGenerationAtStart)) {
+            return json(res, 409, { error: "Google Drive connection changed while configuration was being saved — retry the change." });
+          }
+        } else {
+          saveConfig(patch);
+        }
         Object.assign(cfg, loadConfig());
+        alignDriveGeneration();
       }
       // Only a section the engine registry actually bakes in may tear the
       // fleet down. reloadProviders() disposes every engine on purpose and
@@ -10720,6 +10897,7 @@ let requestUserEmail = "";
       broadcast({ kind: "config", ...status });
       return json(res, 200, status);
       } finally {
+        if (driveGenerationAtStart !== null) finishDriveSyncConfigWrite(driveGenerationAtStart);
         providerConfigBusy = false;
       }
     }

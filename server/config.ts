@@ -19,6 +19,8 @@ import { EFFORT_LEVELS, type InstanceConfigMap } from "./contracts.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 
 const optionalText = z.string().optional();
+const driveSyncConfigSchema = z.object({ refreshToken: optionalText, accessToken: optionalText, expiresAt: z.number().optional() });
+const storedDriveSyncGenerationSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 export type LocalVmIsolationMode = "shared" | "perBot";
 // The cap bounds keep a per-bot fleet from silently eating the host: 16
 // desktops x 4 GB is already the RAM of a well-appointed machine.
@@ -55,7 +57,7 @@ const appConfigSchema = z.object({
   /** Google Drive workspace sync (server/drive-sync.ts): write-only tokens
    * for the drive.appdata transport. The bundle pushed there is encrypted
    * client-side; Drive never sees plaintext. */
-  driveSync: z.object({ refreshToken: optionalText, accessToken: optionalText, expiresAt: z.number().optional() }).optional(),
+  driveSync: driveSyncConfigSchema.optional(),
   /** Telegram workspace sync (server/telegram-sync.ts): the @BotFather bot
    * token and the chat the owner started with it. The chat only ever holds
    * the encrypted bundle; the token alone cannot read a workspace. */
@@ -386,6 +388,108 @@ export function loadConfig(): AppConfig {
 /** Merge a partial config into ~/.muster/config.json (secrets never
  * echoed back — callers report configured-or-not booleans only). */
 export function saveConfig(patch: Partial<AppConfig>): void {
+  saveConfigInternal(patch);
+}
+
+/** Save a config patch only if the legacy installation Drive lifecycle has
+ * not changed since the caller began validating it. This keeps a slow generic
+ * /api/config request from restoring credentials after a disconnect. */
+export function saveConfigIfDriveSyncGeneration(
+  patch: Partial<AppConfig>,
+  expectedGeneration: number,
+): boolean {
+  return saveConfigInternal(patch, expectedGeneration);
+}
+
+/** The durable legacy-installation Drive lifecycle marker. Older config files
+ * have no marker and are generation zero; the marker is deliberately outside
+ * driveSync so config consumers continue to see the historical credential
+ * shape. */
+export function driveSyncGeneration(): number {
+  const disk = readConfigDocument();
+  return storedDriveSyncGeneration(disk);
+}
+
+/** Begin a fresh OAuth connection attempt. Existing credentials remain in
+ * place if the exchange fails or is cancelled; only its generation changes. */
+export function beginDriveSyncConnection(): number {
+  const disk = readConfigDocument();
+  const generation = storedDriveSyncGeneration(disk) + 1;
+  disk.driveSyncGeneration = generation;
+  disk.driveSyncPendingGeneration = generation;
+  persistConfigDocument(disk);
+  return generation;
+}
+
+/** Mark a generic /api/config Drive update before it awaits provider
+ * validation. The config route is single-flight, so one generation marker is
+ * sufficient; disconnect clears it and advances the tombstone. */
+export function beginDriveSyncConfigWrite(): number {
+  const disk = readConfigDocument();
+  const generation = storedDriveSyncGeneration(disk);
+  disk.driveSyncPendingConfigGeneration = generation;
+  persistConfigDocument(disk);
+  return generation;
+}
+
+/** Clear a pending generic config write when validation fails or the request
+ * finishes. A successful write or disconnect already removes the marker. */
+export function finishDriveSyncConfigWrite(expectedGeneration: number): void {
+  const disk = readConfigDocument();
+  if (storedDriveSyncGeneration(disk) !== expectedGeneration || disk.driveSyncPendingConfigGeneration !== expectedGeneration) return;
+  delete disk.driveSyncPendingConfigGeneration;
+  persistConfigDocument(disk);
+}
+
+/** End a failed or cancelled OAuth attempt without disconnecting the
+ * previously saved credentials or advancing the lifecycle. */
+export function finishDriveSyncConnection(expectedGeneration: number): void {
+  const disk = readConfigDocument();
+  if (storedDriveSyncGeneration(disk) !== expectedGeneration || disk.driveSyncPendingGeneration !== expectedGeneration) return;
+  delete disk.driveSyncPendingGeneration;
+  persistConfigDocument(disk);
+}
+
+/** Commit exchanged credentials only if their OAuth attempt still owns the
+ * generation. No stale exchange can repopulate credentials after disconnect. */
+export function saveDriveSyncCredentials(
+  expectedGeneration: number,
+  credentials: NonNullable<AppConfig["driveSync"]>,
+): boolean {
+  const disk = readConfigDocument();
+  if (storedDriveSyncGeneration(disk) !== expectedGeneration) return false;
+  const checked = driveSyncConfigSchema.parse(credentials);
+  const persistedCredentials = Object.fromEntries(Object.entries(checked).filter(([, value]) => value !== undefined));
+  disk.driveSync = jsonObjectSchema.parse(persistedCredentials);
+  disk.driveSyncGeneration = expectedGeneration;
+  delete disk.driveSyncPendingGeneration;
+  persistConfigDocument(disk);
+  return true;
+}
+
+/** Remove just the legacy Drive credentials. A persisted generation remains
+ * as a tombstone, while account grants, sessions, other config and backups
+ * are untouched. Repeating an already-completed disconnect is a no-op. */
+export interface DriveSyncDisconnectResult {
+  generation: number;
+  changed: boolean;
+}
+
+export function disconnectDriveSync(): DriveSyncDisconnectResult {
+  const disk = readConfigDocument();
+  const current = storedDriveSyncGeneration(disk);
+  const pending = disk.driveSyncPendingGeneration === current || disk.driveSyncPendingConfigGeneration === current;
+  if (!Object.hasOwn(disk, "driveSync") && !pending) return { generation: current, changed: false };
+  delete disk.driveSync;
+  delete disk.driveSyncPendingGeneration;
+  delete disk.driveSyncPendingConfigGeneration;
+  const generation = current + 1;
+  disk.driveSyncGeneration = generation;
+  persistConfigDocument(disk);
+  return { generation, changed: true };
+}
+
+function readConfigDocument(): JsonObject {
   const p = join(DATA_DIR, "config.json");
   let disk: JsonObject = {};
   try {
@@ -394,6 +498,24 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   } catch {
     /* first write */
   }
+  return disk;
+}
+
+function storedDriveSyncGeneration(disk: JsonObject): number {
+  const generation = storedDriveSyncGenerationSchema.safeParse(disk.driveSyncGeneration);
+  return generation.success ? generation.data : 0;
+}
+
+function persistConfigDocument(disk: JsonObject): void {
+  mkdirSync(DATA_DIR, { recursive: true });
+  writeFileAtomic(join(DATA_DIR, "config.json"), JSON.stringify(disk, null, 2), { mode: 0o600 });
+}
+
+function saveConfigInternal(patch: Partial<AppConfig>, expectedDriveGeneration?: number): boolean {
+  const disk = readConfigDocument();
+  const currentDriveGeneration = storedDriveSyncGeneration(disk);
+  const touchesDriveSync = Object.hasOwn(patch, "driveSync") && patch.driveSync !== undefined;
+  if (expectedDriveGeneration !== undefined && currentDriveGeneration !== expectedDriveGeneration) return false;
   const checkedPatch = appConfigSchema.partial().parse(patch);
   for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "branding", "musterCloud", "localVm", "channels", "vps", "hiNew", "driveSync", "telegramSync", "eventLogRetention", "parallelThreads", "bots", "usage"] as const) {
     const section = checkedPatch[key];
@@ -438,8 +560,13 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   if (checkedPatch.mcpServers) {
     disk.mcpServers = checkedPatch.mcpServers;
   }
-  mkdirSync(DATA_DIR, { recursive: true });
-  writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
+  if (touchesDriveSync) {
+    disk.driveSyncGeneration = currentDriveGeneration + 1;
+    delete disk.driveSyncPendingGeneration;
+    delete disk.driveSyncPendingConfigGeneration;
+  }
+  persistConfigDocument(disk);
+  return true;
 }
 
 /** Set one instance's `config.cli` ("" clears the override back to the
