@@ -18,7 +18,7 @@
 //   muster approve [allow|deny]      answer the oldest pending card
 //   muster status                    fleet summary
 //   muster receipts [n]              last N job receipts
-//   muster sessions                  active sign-ins; --revoke <prefix|other|all>
+//   muster sessions                  active sign-ins; --revoke <session-id|other|all>
 //   muster status --json             machine-readable (agent callers)
 
 import { homedir, networkInterfaces } from "node:os";
@@ -265,14 +265,18 @@ async function approve() {
   console.log("No pending approvals.");
 }
 
-// The session cookie is `token.signature`; the DB and the list/revoke
-// endpoints speak raw tokens, so peel the token back out for "current" marking.
-const currentToken = (cfg) => {
-  const value = decodeURIComponent((cfg.cookie || "").split("=").slice(1).join("="));
-  return value.split(".")[0] || "";
-};
-
 const shortDate = (iso) => (iso ? String(iso).slice(0, 16).replace("T", " ") : "?");
+
+function requireSafeSessionList(list) {
+  const valid = Array.isArray(list) && list.every((session) =>
+    session !== null && session !== undefined && !Array.isArray(session) && Object.hasOwn(session, "id") &&
+    Object.prototype.toString.call(session.id) === "[object String]" &&
+    (session.current === true || session.current === false));
+  if (!valid) {
+    console.error("This server does not support token-free session IDs. Update Muster and retry.");
+    process.exit(1);
+  }
+}
 
 async function sessions() {
   const cfg = apiConfig();
@@ -286,38 +290,36 @@ async function sessions() {
   }
   if (revoke !== undefined) {
     const list = await asJson(await api(cfg, "/api/auth/list-sessions"));
-    const current = currentToken(cfg);
+    requireSafeSessionList(list);
     const targets =
       revoke === "other"
-        ? list.filter((s) => s.token !== current)
-        : list.filter((s) => s.token.startsWith(revoke) || s.id === revoke);
+        ? list.filter((s) => !s.current)
+        : list.filter((s) => s.id === revoke);
     if (!targets.length) {
-      console.error(`No matching session. Run \`muster sessions\` to see active tokens.`);
+      console.error("No matching session ID. Run `muster sessions` to see active session IDs.");
       process.exit(1);
     }
     for (const s of targets) {
       await asJson(
         await api(cfg, "/api/auth/revoke-session", {
           method: "POST",
-          body: JSON.stringify({ token: s.token }),
+          body: JSON.stringify({ sessionId: s.id }),
         }),
       );
     }
-    const revoked = targets.map((s) => ({ id: s.id, token: s.token.slice(0, 6) + "…" }));
+    const revoked = targets.map((s) => ({ id: s.id }));
     if (json) return console.log(JSON.stringify({ revoked }, null, 2));
-    for (const r of revoked) console.log(`Revoked ${r.token}`);
+    for (const r of revoked) console.log(`Revoked session ${r.id}`);
     return;
   }
   const list = await asJson(await api(cfg, "/api/auth/list-sessions"));
-  const current = currentToken(cfg);
+  requireSafeSessionList(list);
   if (json) {
-    // The raw token is credential material (it drives --revoke prefix
-    // matching server-side); even truncated it must not land in shell
-    // history or CI logs, so JSON mode carries a display prefix only.
+    // The stable session ID is used for explicit revocation; credentials
+    // never enter machine-readable CLI output.
     const safe = list.map((s) => ({
       id: s.id,
-      token: `${String(s.token ?? "").slice(0, 6)}…`,
-      current: s.token === current,
+      current: s.current,
       createdAt: s.createdAt, expiresAt: s.expiresAt,
       ipAddress: s.ipAddress, userAgent: s.userAgent,
     }));
@@ -327,10 +329,10 @@ async function sessions() {
     `${list.length} active session${list.length === 1 ? "" : "s"} (current marked *):`,
   );
   for (const s of list) {
-    const mark = s.token === current ? "*" : " ";
+    const mark = s.current ? "*" : " ";
     const ua = String(s.userAgent ?? "?").slice(0, 48);
     console.log(
-      `${mark} ${String(s.token ?? s.id).slice(0, 6)}…  ${shortDate(s.createdAt)} → ${shortDate(s.expiresAt)}  ` +
+      `${mark} ${s.id}  ${shortDate(s.createdAt)} → ${shortDate(s.expiresAt)}  ` +
         `${s.ipAddress ?? "?"}  ${ua}`,
     );
   }
@@ -526,10 +528,10 @@ async function mintAndPrint(port, { detached }) {
 // data directory. Launchers refuse; they never recover — the server's boot
 // guard owns recovery (see docs/plans/restore-reconciliation-runbook.md).
 function evaluateDataDirClaimMirror(dataDir) {
-  if (!dataDir || typeof dataDir !== "string" || dataDir.trim() === ""
-    // SAFETY: constructor identity is the repo's structural probe for
-    // JSON/CLI values; primitives carry String as their constructor.
-    || dataDir.constructor !== String) {
+  if (!dataDir || Object(dataDir) === dataDir
+    // SAFETY: reject boxed/object values above; primitive strings alone
+    // carry String as their constructor and support this path's trim.
+    || dataDir.constructor !== String || dataDir.trim() === "") {
     return { clear: false, message: "Restore-exclusivity claim check ran without a data directory; refusing is the only safe action." };
   }
   const root = resolve(dataDir);
@@ -960,7 +962,7 @@ const HELP = `muster — the CLI for your AI workforce
   muster approve [allow|deny]
   muster status [--json]
   muster receipts [n] [--json]
-  muster sessions [--json]        active sign-in sessions; --revoke <prefix|other|all>
+  muster sessions [--json]        active sign-in sessions; --revoke <session-id|other|all>
   muster mcp [--serve]            print MCP client config for Muster (--serve runs the stdio server)
   muster eval capture.json scorecard.json  grade captured fleet probes locally; no fleet actions
   muster eval-trend [--json] a.json [b.json …]  trend across stored fleet or role scorecards, in file order; one kind per trend; read-only
