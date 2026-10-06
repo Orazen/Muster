@@ -2,13 +2,31 @@
   "$schema": "https://raw.githubusercontent.com/TestSprite/testsprite-cli/v0.10.0/schemas/plan.schema.json",
   "projectId": "b06262d3-b9d1-4b82-af62-6f9fbfd69278",
   "type": "frontend",
-  "name": "Cloud sign-in offers Google and email, pairing belongs to desktop",
+  "name": "Sign-in methods follow capabilities and password controls remain usable",
   "planSteps": [
-    { "type": "action", "description": "Open https://muster.orazen.online/app and wait for redirect to the sign-in screen" },
-    { "type": "assertion", "description": "A 'Continue with Google' button is visible" },
-    { "type": "assertion", "description": "An email textbox and a password textbox are visible with a 'Sign in with email' button" },
-    { "type": "assertion", "description": "A 'New here? Create an account' button is present" },
-    { "type": "action", "description": "Submit the sign-in form with a wrong email like nobody-nobody@example.com and a wrong 16-character password" },
-    { "type": "assertion", "description": "An error message is shown and the user is not signed in" }
+    {
+      "type": "action",
+      "description": "Open https://muster.orazen.online/sign-in in a fresh unauthenticated browser context. Do not send a code, submit credentials, pair a device or start Google login."
+    },
+    {
+      "type": "assertion",
+      "description": "The heading is Your day, with Muster. and the Create an account link points to /sign-up with the preserved destination query."
+    },
+    {
+      "type": "assertion",
+      "description": "After /api/auth-capabilities settles, Continue with Google is visible only when Google is configured or desktopOAuth is offered; otherwise it is absent. If capability loading fails, the page shows the sign-in methods notice and Check again button."
+    },
+    {
+      "type": "assertion",
+      "description": "When emailOtp is true, Email address for a sign-in code and Email me a code are visible, and the password form is initially collapsed behind Use a password instead. When emailOtp is false, the password form is already expanded."
+    },
+    {
+      "type": "action",
+      "description": "If Use a password instead is present, expand it. Fill the password email field with not-an-email and the password field with a synthetic 16-character string, then click Sign in with email."
+    },
+    {
+      "type": "assertion",
+      "description": "Browser email validation rejects the malformed address, focus remains on the invalid email field, no sign-in request is sent, and the page remains unauthenticated. Do not submit a well-formed address or real password."
+    }
   ]
 }
