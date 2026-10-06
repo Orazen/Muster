@@ -1,0 +1,179 @@
+diff --git a/dist/classes/Agent.js b/dist/classes/Agent.js
+--- a/dist/classes/Agent.js
++++ b/dist/classes/Agent.js
+@@ -73,6 +73,10 @@
+     }
+     addRequest(request, configuration) {
+         var _a, _b, _c, _d, _e, _f, _g, _h;
++        if (request.destroyed) {
++            request.onSocket(null);
++            return;
++        }
+         let requestUrl;
+         // It is possible that addRequest was constructed for a proxied request already, e.g.
+         // "request" package does this when it detects that a proxy should be used
+@@ -153,7 +157,7 @@
+         // > are also accepted:
+         // >   ca, cert, ciphers, clientCertEngine, crl, dhparam, ecdhCurve, honorCipherOrder,
+         // >   key, passphrase, pfx, rejectUnauthorized, secureOptions, secureProtocol, servername, sessionIdContext.
+-        if (configuration.secureEndpoint) {
++        if (configuration.secureEndpoint || this.protocol === 'https:') {
+             // Determine servername - Node.js doesn't allow IP addresses as servername
+             const host = (_f = configuration.servername) !== null && _f !== void 0 ? _f : connectionConfiguration.host;
+             const servername = net_1.default.isIP(host) ? undefined : host;
+@@ -180,6 +184,13 @@
+             log.trace({
+                 target: connectionConfiguration,
+             }, 'connecting');
++            if (request.destroyed) {
++                if (socket) {
++                    socket.destroy();
++                }
++                request.onSocket(null);
++                return;
++            }
+             // @see https://github.com/nodejs/node/issues/5757#issuecomment-305969057
+             if (socket) {
+                 socket.setTimeout(this.socketConnectionTimeout, () => {
+@@ -199,7 +210,7 @@
+                 });
+             }
+             if (error) {
+-                request.emit('error', error);
++                request.onSocket(null, error);
+             }
+             else if (socket) {
+                 log.debug('created socket');
+@@ -210,7 +221,7 @@
+                 });
+                 request.onSocket(socket);
+             }
+-        });
++        }, request);
+     }
+ }
+ exports.default = Agent;
+diff --git a/dist/classes/HttpsProxyAgent.js b/dist/classes/HttpsProxyAgent.js
+--- a/dist/classes/HttpsProxyAgent.js
++++ b/dist/classes/HttpsProxyAgent.js
+@@ -12,29 +12,94 @@
+         this.protocol = 'https:';
+         this.defaultPort = 443;
+     }
+-    createConnection(configuration, callback) {
++    createConnection(configuration, callback, request) {
+         const socket = net_1.default.connect(configuration.proxy.port, configuration.proxy.hostname);
+-        socket.on('error', (error) => {
+-            callback(error);
+-        });
+-        socket.once('data', (data) => {
++        let completed = false;
++        let connectionTimer;
++        const originalDestroy = request && request.destroy;
++        const originalDestroyDescriptor = request && Object.getOwnPropertyDescriptor(request, 'destroy');
++        const finish = (error, secureSocket) => {
++            if (completed) {
++                return;
++            }
++            completed = true;
++            clearTimeout(connectionTimer);
++            socket.removeListener('error', onError);
++            socket.removeListener('close', onClose);
++            socket.removeListener('data', onData);
++            if (request && request.destroy === destroyPendingRequest) {
++                if (originalDestroyDescriptor) {
++                    Object.defineProperty(request, 'destroy', originalDestroyDescriptor);
++                }
++                else {
++                    delete request.destroy;
++                }
++            }
++            if (error || !secureSocket) {
++                socket.destroy();
++            }
++            callback(error, secureSocket);
++        };
++        const onError = (error) => finish(error);
++        const onClose = () => finish(Object.assign(new Error('Proxy connection closed before CONNECT response'), { code: 'ECONNRESET' }));
++        // Node retains destroy(error) until a socket is assigned. Forward that
++        // cancellation during CONNECT, then restore the request's own method.
++        const destroyPendingRequest = function (error) {
++            const result = Reflect.apply(originalDestroy, this, arguments);
++            finish(error || Object.assign(new Error('Proxy connection cancelled'), { code: 'ECONNRESET' }));
++            return result;
++        };
++        const onData = (data) => {
+             var _a;
++            if (request && request.destroyed) {
++                finish(null);
++                return;
++            }
+             // Proxies with HTTPS as protocal are not allowed by parseProxyUrl(), so it should be safe to assume that the response is plain text
+             const statusLine = data.toString().split('\r\n')[0];
+             const statusLineExp = /^HTTP\/(\d)\.(\d) (\d{3}) ?(.*)$/;
+             const statusCode = (_a = statusLineExp.exec(statusLine)) === null || _a === void 0 ? void 0 : _a[3];
+             if (typeof statusCode === 'string' && Number(statusCode) >= 400) {
+-                const error = new Error(`Proxy server refused connecting to '${configuration.host}:${configuration.port}' (${statusLine})`);
+-                socket.destroy();
+-                callback(error);
++                finish(new Error(`Proxy server refused connecting to '${configuration.host}:${configuration.port}' (${statusLine})`));
+                 return;
+             }
+-            const secureSocket = tls_1.default.connect({
+-                ...configuration.tls,
+-                socket,
+-            });
+-            callback(null, secureSocket);
+-        });
++            let secureSocket;
++            try {
++                secureSocket = tls_1.default.connect({
++                    ...configuration.tls,
++                    host: configuration.host,
++                    socket,
++                });
++            }
++            catch (error) {
++                finish(error);
++                return;
++            }
++            finish(null, secureSocket);
++        };
++        socket.once('error', onError);
++        socket.once('close', onClose);
++        socket.once('data', onData);
++        if (request) {
++            try {
++                Object.defineProperty(request, 'destroy', {
++                    configurable: originalDestroyDescriptor ? originalDestroyDescriptor.configurable : true,
++                    enumerable: originalDestroyDescriptor ? originalDestroyDescriptor.enumerable : false,
++                    writable: true,
++                    value: destroyPendingRequest,
++                });
++            }
++            catch (error) {
++                finish(error);
++                return;
++            }
++        }
++        // Use the existing configured connection timeout for the entire
++        // TCP/CONNECT response wait; receiving TCP connect does not reset it.
++        if (this.socketConnectionTimeout > 0) {
++            connectionTimer = setTimeout(() => finish(Object.assign(new Error('Proxy connection timed out'), { code: 'ETIMEDOUT' })), this.socketConnectionTimeout);
++            connectionTimer.unref();
++        }
+         let connectMessage = '';
+         connectMessage += 'CONNECT ' + configuration.host + ':' + configuration.port + ' HTTP/1.1\r\n';
+         connectMessage += 'Host: ' + configuration.host + ':' + configuration.port + '\r\n';
+diff --git a/dist/factories/createGlobalProxyAgent.js b/dist/factories/createGlobalProxyAgent.js
+--- a/dist/factories/createGlobalProxyAgent.js
++++ b/dist/factories/createGlobalProxyAgent.js
+@@ -37,7 +37,7 @@
+         ...Object.fromEntries(Object.entries(configurationInput).filter(([, v]) => v !== undefined)),
+     };
+ };
+-exports.default = (configurationInput = defaultConfigurationInput) => {
++exports.default = (configurationInput = {}) => {
+     var _a, _b, _c;
+     const configuration = createConfiguration(configurationInput);
+     if (configurationInput.logger) {

@@ -459,7 +459,8 @@ describe("FileEnrollmentAttemptStore", () => {
     expect(() => fresh.generationFor(CLIENT)).toThrow(EnrollmentAttemptPersistenceError);
     await expect(fresh.peekIntent("intent-synthetic-a")).rejects.toThrow(EnrollmentAttemptPersistenceError);
     expect(await fresh.putIntentWithGeneration(intent("replacement"))).toBeNull();
-    if (before) expect(readFileSync(path())).toEqual(before);
+    // Compare every persisted byte without recursively enumerating a 3 MiB Buffer.
+    if (before) expect(readFileSync(path()).equals(before)).toBe(true);
   });
 
   it.each([
