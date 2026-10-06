@@ -1,3 +1,85 @@
+### Status of record — 6 October 2026 (implementation round: restore authority, native custody, credential at-rest, alerts closed as mitigated)
+
+This section supersedes the 5 October section below only where they overlap.
+All work merged normally into main `1d8a254` (PRs #81→#82→#83); no force-push,
+admin override, check bypass or branch deletion. Hosted checks remain billing
+no-start (zero executed steps) — see the hosted paragraph in the 5 October
+section, which still holds. Local receipts below were executed this round.
+
+**Restore authority + launcher coverage (#81, head `e125e75`).** The #79
+residuals are implemented. `server/restore-authority.ts` validates a live
+signed session/account/workspace binding through the real session store,
+membership resolution and `drive_visible_grants` binding probe, re-validates
+at every commit boundary with distinct refusal codes (replaced vs revoked
+decided from store evidence), and consults the persisted enrollment fence at
+adoption and inside every re-assertion. Scope is the running-server HTTP
+consumer; the boot path cannot initialize auth machinery inside the
+pre-import boundary and that gap is stated, not papered over. Launcher
+prechecks (`scripts/data-dir-claim-check.mjs`, marker path byte-identical to
+`exclusiveClaimPath`) now run BEFORE the parent writes in the Docker
+entrypoint (`.better-auth-secret`), Electron main (config.json migration) and
+CLI (`auth.secret`): exit 0 only on provable absence; any marker refuses.
+Launchers never recover — the server boot guard owns recovery.
+`docs/plans/restore-reconciliation-runbook.md` documents every ambiguous
+state with evidence-preservation and never-delete rules; no destructive
+shortcuts. Gates: 31 new + 202 adjacent tests, tsc 0, oxlint 0/0. Review:
+round 1 CHANGES REQUIRED (lint blocker + P3s) → successor re-attack → ACCEPT.
+
+**Native W2 custody (#82, head `d4f7f38`).** `ProtectedEnrollmentCustodyStore`
+maps the reviewed seam table to Swift: generation-conditional commit with a
+per-key durable generation ledger written BEFORE the record (crash can only
+over-estimate newest generation), three-way read, invalidate that never
+deletes a newer committed winner, binding-quadruple provenance, Keychain
+persisted restart fence measured per consultation. `swift test` 153/153
+(133 baseline + 20 new), build clean. Nothing outside `macos/` changed;
+enrollment wiring untouched; `conformsToProtectedCustody` stays false.
+Review: ACCEPT round 1. Registered integration preconditions: one shared
+store instance per process; degraded-fence and post-delete tombstone
+behavioral coverage to be added in the integration slice.
+
+**Credential at-rest audit + fixes (#83, head `7874a7c`).** The full
+lifecycle audit verified the integrated protections (Drive token HKDF/AAD
+encryption, generation-conditional CAS refresh, desktop single-use attempts,
+the #63 referral-stash fix present, hashed companion tokens, export/archive
+exclusions, three separate consent lifecycles, revoke-deletes semantics).
+Real gaps fixed: five ACP driver BYOK upserts (droid, grok, kimi, opencode-go,
+hermes) wrote provider API keys at umask default — now a shared 0600-at-
+creation + tightening-chmod discipline with 0700 data roots; `auth.secret`
+legacy files left broad by older builds are repaired in place at the
+early-return path; mode pins added for pairing-codes.json, claim-codes.json
+and auth.secret plus six real-driver tests. 100/100 focused + 176/176
+adjacent, tsc 0, lint exit 0. Review: two rounds of CHANGES REQUIRED (the
+five-driver P1 was found by the reviewer) → third round ACCEPT. Unfixed with
+owners: better-auth `list-sessions` returns raw (HMAC-protected,
+non-replayable) session tokens — upstream or a redacting proxy; legacy
+appData sync has no local disconnect route — routes owner; provider keys in
+0600 config.json on desktop — accepted design, safeStorage is the upgrade
+path.
+
+**Dependabot #73/#74 — DISMISSED AS MITIGATED, not fixed.** npm recheck on
+6 October confirmed no patched upstream release (node-forge 1.4.0 and braces
+3.0.3 remain latest; the upstream forge fix PR 1152 is unmerged). By owner
+directive both alerts were dismissed with resolution `fix_started` and a
+truthful comment: the sha256-pinned source mitigations are applied and
+behaviorally gated (#77), both packages are build-tool-only with zero
+app-code reach, and the dismissal is explicitly NOT an upstream fix. If a
+vulnerable version reappears in any lockfile, Dependabot re-raises it.
+
+**Live existing-installation restore remains unexposed** (`apply:
+"unsupported"`). Its prerequisite layer (exclusivity, authority, launcher
+checks, native custody) is now implemented; what still separates it from an
+authorized enablement: the approved live-restore scope decision, HTTP
+consumer wiring behind that decision, boot-path authority (or its documented
+exclusion), and the two native integration preconditions above. Imported
+history stays inert: no engines, approvals or task execution.
+
+**Composed local gate on integrated main `1d8a254`:** recorded in the PR #38
+receipt for this round; the historical 503/8,288/8 baseline is from
+`6453553` and is superseded by this round's numbers in the receipt.
+
+Historical records follow unchanged.
+
+
 ### Status of record — 5 October 2026 (owner-directed consolidation)
 
 This checkpoint supersedes the dated historical statuses below. Source integration,

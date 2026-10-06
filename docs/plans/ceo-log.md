@@ -9659,3 +9659,48 @@ Canonical https://github.com/Orazen/Muster/pull/38#issuecomment-5969823410.
 Original31 branch audit23 integrated/8 superseded-rejected/0 valid missing patches,
 including squash/content checks. Preserve #57/#58/#66 and old branches. An empty
 PR queue does not establish complete MVP acceptance.
+
+### Lead integration round 2 — 6 October 2026 (restore authority, native custody, credential at-rest)
+
+Owner directive: complete the #79 residuals, the W2 native seam, and the
+token-security audit; close the Dependabot alerts honestly. All merged
+normally into main `1d8a254` (#81→#82→#83); hosted checks remain billing
+no-start (zero executed steps), which stays "unavailable evidence".
+
+- #81 `e125e75` — restore authority inside the exclusive window (real
+  session/membership/binding/fence validation, `assertCurrent()` at every
+  commit boundary, running-server scope with the boot-path gap stated),
+  launcher claim checks before every parent write (Docker entrypoint,
+  Electron main, CLI), and `docs/plans/restore-reconciliation-runbook.md`.
+  31 new + 202 adjacent tests, tsc 0, oxlint 0/0. Review: CHANGES REQUIRED
+  (lint blocker + P3s) → fixed → successor re-attack → ACCEPT.
+- #82 `d4f7f38` — `ProtectedEnrollmentCustodyStore` (Swift): the reviewed W2
+  contract mapped natively — generation-conditional commit with a durable
+  per-key ledger written before the record, three-way read, invalidate that
+  never deletes a newer committed winner, Keychain-persisted restart fence.
+  Swift 153/153 (133 baseline + 20 new). Review: ACCEPT round 1, with two
+  registered integration preconditions (single store instance per process;
+  degraded-fence/tombstone coverage in the integration slice). Enrollment
+  stays disabled; nothing outside macos/ changed.
+- #83 `7874a7c` — credential at-rest audit (integrated protections verified:
+  Drive token HKDF/AAD, CAS refresh on generation + prior ciphertext,
+  single-use desktop attempts, the #63 referral-stash fix present, hashed
+  companion tokens, export/archive exclusions) + fixes: five ACP driver BYOK
+  writes moved to 0600-at-creation with tightening chmod (a P1 found BY the
+  reviewer), auth.secret legacy repair on the early-return path, mode pins
+  + nine driver/file tests. 100/100 focused + 176/176 adjacent, lint exit 0.
+  Review: two rounds CHANGES REQUIRED → round 3 ACCEPT. Unfixed with owners:
+  better-auth list-sessions raw tokens (upstream/proxy), legacy appData
+  disconnect route (routes owner), plaintext-in-0600-config accepted design.
+- Dependabot #73/#74: npm recheck confirmed no patched upstream release
+  (node-forge 1.4.0 / braces 3.0.3 latest; forge PR 1152 unmerged). By owner
+  directive both dismissed as `fix_started` with truthful comments — the
+  sha256-pinned mitigations are applied and gated (#77); dismissal is not an
+  upstream fix and a vulnerable lockfile version re-raises the alert.
+- Docs: `docs/plans/current-state.md` header (this round) and
+  `docs/plans/remaining-work-register-2026-10-06.md` (open rows with
+  behavior/gap/owner/dependency/evidence: hosted, TestSprite, live-restore
+  scope decision, boot-path authority, native integration preconditions,
+  real Google/platform gates, token G4/G5, beta decisions).
+- Composed gate on integrated main: recorded in the PR #38 receipt for this
+  round; live apply remains unexposed and imported history stays inert.
