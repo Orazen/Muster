@@ -1302,40 +1302,87 @@ function broadcast<P extends FrameIdentity>(payload: P) {
  * filter expensive for every connected client. */
 const FRAME_SCAN_MAX_DEPTH = 6;
 const FRAME_SCAN_MAX_PROBES = 64;
+
+/** What the frame walk found, in two parts rather than one.
+ *
+ * Owners alone could not decide an ownerless frame. A record with no owner
+ * contributes no owner, so a frame naming ONLY such a record was
+ * indistinguishable from a frame naming no record at all — engine status,
+ * usage, config events — and both fell through to the deployment-wide answer.
+ * `named` separates those two facts: a record WAS resolved, it simply is not
+ * anybody's. The stricter reading is the safe one to add here — a flag that can
+ * only ever narrow the audience, never widen it. */
+interface FrameScan {
+  /** Every account id that owns a record named somewhere in the frame. */
+  owners: Set<string>;
+  /** A bot/group id in the frame resolved to a stored record, ownerless ones
+   * included. Deliberately NOT derived from `owners`: "no owner found" and
+   * "no record found" are different facts and must never share one flag. */
+  named: boolean;
+}
+
 function frameOwnerIds(
   value: JsonValue,
-  found = new Set<string>(),
+  scan: FrameScan = { owners: new Set(), named: false },
   depth = 0,
   budget = { left: FRAME_SCAN_MAX_PROBES },
-): Set<string> {
-  if (depth > FRAME_SCAN_MAX_DEPTH || budget.left <= 0) return found;
+): FrameScan {
+  if (depth > FRAME_SCAN_MAX_DEPTH || budget.left <= 0) return scan;
   if (isText(value)) {
     budget.left -= 1;
     const bot = store.bot(value);
-    if (bot?.ownerId) found.add(bot.ownerId);
+    if (bot) {
+      scan.named = true;
+      if (bot.ownerId) scan.owners.add(bot.ownerId);
+    }
     const group = store.groups.find((g) => g.id === value);
-    if (group?.ownerId) found.add(group.ownerId);
-    return found;
+    if (group) {
+      scan.named = true;
+      if (group.ownerId) scan.owners.add(group.ownerId);
+    }
+    return scan;
   }
   if (Array.isArray(value)) {
-    for (const item of value) frameOwnerIds(item, found, depth + 1, budget);
-    return found;
+    for (const item of value) frameOwnerIds(item, scan, depth + 1, budget);
+    return scan;
   }
   // SAFETY: every remaining JsonValue member is a number, boolean, null or a
   // JsonObject. A number or boolean yields [] from Object.values, so the walk
   // is a no-op for them, and null is excluded because Object.values(null)
   // throws. Only a JsonObject can name a record, which is the whole point.
   if (value !== null) {
-    for (const item of Object.values(value as JsonObject)) frameOwnerIds(item, found, depth + 1, budget);
+    for (const item of Object.values(value as JsonObject)) frameOwnerIds(item, scan, depth + 1, budget);
   }
-  return found;
+  return scan;
 }
+
+/** Who may see a record with this owner — the ONE answer both ownership guards
+ * now give.
+ *
+ * `ownsRecord` at the route choke point has always read an ownerless record as
+ * the operator's, and `webhookOwnerVisible` on this same stream already read
+ * it that way too. The record-based branches of `visibleToClient` below read
+ * it as shared, so a second signed-in account was refused by
+ * GET /api/threads/<ownerless>/messages with 404 and still received that
+ * thread's live frames — one record, one deployment, two different answers.
+ *
+ * Expressed once so the pair cannot drift apart again: the disagreement is not
+ * a judgement call, it is only ever a bug in whichever copy is wrong.
+ *
+ * "No owner" is the same three ways in both guards — absent, null, or empty.
+ * Callers pass an already-resolved viewer id, never a client-supplied one. */
+const ownerVisible = (ownerId: string | undefined, viewerUserId: string): boolean =>
+  ownerId ? ownerId === viewerUserId : viewerUserId === (primaryUserId() ?? "");
 
 /** Multi-tenant frame filter (SELF_HOSTED): a stream belonging to one user
  * never receives frames about another user's bots/threads/groups. Frames
  * without a resolvable record — engine status, usage, config events — are
  * deployment-wide and go to everyone. Desktop installs have no userId on
- * the client, so everything flows as before. */
+ * the client, so everything flows as before.
+ *
+ * "No resolvable record" is not "no record": a frame about a record nobody
+ * owns resolves to that record, and belongs to the operator exactly as
+ * `ownsRecord` says at the API choke point. See `ownerVisible`. */
 function visibleToClient(client: SseClient, payload: FrameIdentity): boolean {
   if (!client.userId) return true;
   // Webhook frames are owner-stamped by the webhook manager itself (the
@@ -1375,24 +1422,30 @@ function visibleToClient(client: SseClient, payload: FrameIdentity): boolean {
   // JsonValue by the time they reach the filter. Asserted once here rather than
   // retyping FrameIdentity, which every call site in this file would then have
   // to satisfy.
-  const owners = frameOwnerIds(payload as JsonValue);
-  if (owners.size > 0) return [...owners].every((id) => id === client.userId);
+  const scan = frameOwnerIds(payload as JsonValue);
+  if (scan.owners.size > 0) return [...scan.owners].every((id) => id === client.userId);
+  // A record WAS named and none of them is owned: the operator's record, under
+  // the same rule the API guard applies. Answering "everyone" here is what let a
+  // second account watch a thread its own API calls were already refusing to
+  // serve — and it is the only branch that can reach a frame whose ids all sit
+  // under `bot:`, where none of the explicit checks below find anything.
+  if (scan.named) return client.userId === (primaryUserId() ?? "");
   const botId = isText(payload.botId) ? payload.botId : null;
   if (botId) {
     const b = store.bot(botId);
-    return !b || b.ownerId === undefined || b.ownerId === null || b.ownerId === client.userId;
+    return !b || ownerVisible(b.ownerId, client.userId);
   }
   const groupId = isText(payload.groupId) ? payload.groupId : null;
   if (groupId) {
     const g = store.groups.find((x) => x.id === groupId);
-    return !g || g.ownerId === undefined || g.ownerId === null || g.ownerId === client.userId;
+    return !g || ownerVisible(g.ownerId, client.userId);
   }
   const threadId = isText(payload.threadId) ? payload.threadId : null;
   if (threadId) {
     const b = store.botByThread(threadId);
-    if (b) return b.ownerId === undefined || b.ownerId === null || b.ownerId === client.userId;
+    if (b) return ownerVisible(b.ownerId, client.userId);
     const g = store.groupByThread(threadId);
-    if (g) return g.ownerId === undefined || g.ownerId === null || g.ownerId === client.userId;
+    if (g) return ownerVisible(g.ownerId, client.userId);
   }
   return true;
 }
@@ -6375,13 +6428,14 @@ let requestUserEmail = "";
     //
     // Isolation: unowned records belong to the operator (primary user).
     // Non-operators never see them — this is what prevented Rocky balboa
-    // from seeing tharunramagiri's bots.
+    // from seeing tharunramagiri's bots. Stated as the shared `ownerVisible`
+    // predicate rather than as its own reading of the same question: the
+    // stream filter answers this identically, and a second copy of the rule
+    // is a second rule that can disagree.
     const isPrimary = !requestUserId || requestUserId === primaryUserId();
     const ownsRecord = (r: { ownerId?: string }) => {
       if (!requestUserId) return true; // desktop: no auth, one user
-      if (r.ownerId === requestUserId) return true;
-      // Unowned records are operator-only
-      return !r.ownerId && isPrimary;
+      return ownerVisible(r.ownerId, requestUserId);
     };
     if (requestUserId) {
       let m2 = path.match(/^\/api\/bots\/([\w-]+)(?:\/|$)/);
