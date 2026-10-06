@@ -170,3 +170,14 @@ describe("boot order", () => {
     }
   });
 });
+
+
+it("keeps the production live-account hook read-only and ahead of config/auth/storage imports",()=>{
+  const source=readFileSync(join(process.cwd(),"server/index.ts"),"utf8");
+  const live=source.indexOf('import "./drive-visible-startup-refusal.ts"'),whole=source.indexOf('import "./data-dir-exclusivity-boot.ts"');
+  expect(live).toBeGreaterThanOrEqual(0);expect(whole).toBeGreaterThan(live);
+  const early=readFileSync(join(process.cwd(),"server/drive-visible-startup-refusal.ts"),"utf8");
+  expect(early).toContain("assertLiveRestoreStartupReady(DATA_DIR)");expect(early).not.toContain("recoverPendingLiveRestores(");
+  const journal=readFileSync(join(process.cwd(),"server/drive-visible-live-journal.ts"),"utf8");
+  expect(journal).not.toMatch(/from ["']\.\/(config|auth|store|task-engine|message-db)\.ts/);
+});

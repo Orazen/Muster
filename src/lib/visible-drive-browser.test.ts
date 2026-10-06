@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createVisibleBrowserClient, visibleAuthorizationUrl, visibleBrowserErrorText, visibleConsentSchema, visibleFailureText,
-  visiblePopupResult, visibleStatusSchema, VISIBLE_DRIVE_PREFIX } from "./visible-drive-browser";
+  visiblePopupResult, visibleStatusSchema, visibleRestoreSchema, VISIBLE_DRIVE_PREFIX } from "./visible-drive-browser";
 
 const binding = { userId: "alice", sessionId: "alice-session", sessionToken: "synthetic-alice-token", origin: "http://127.0.0.1:43901" };
 const session = (extra = {}) => ({ user: { id: "alice" }, session: { id: "alice-session", userId: "alice", token: "synthetic-alice-token",
@@ -141,4 +141,21 @@ describe("optional visible Drive browser boundary", () => {
     expect(visibleFailureText({ error: "secret-value" })).not.toContain("secret-value");
     expect(visibleBrowserErrorText(new Error("private-cookie-do-not-render"))).not.toContain("private-cookie");
   });
+  it("accepts durable additive receipts only with exact account/grant proof and target-copy evidence",async()=>{
+    const operationId="11111111-1111-4111-8111-111111111111",ready={...status,restoreApply:"additive",connected:true,engineChoices:[{label:"Owned model",selection:{instanceId:"fakeApi:alice",model:"fake-1"}}]};
+    const receipt={viewRevision:status.viewRevision,grantRevision:status.grantRevision,status:"committed",operationId,scope:"account-owned",mode:"additive",sourceDigest:"a".repeat(64),mapping:{bot:{},group:{},thread:{},plan:{}},execution:"not-started",rollback:"pending-only",history:"archive-only",durability:"process-restart-only",targetCopy:{sha256:"b".repeat(64),sourceDigest:"c".repeat(64),keyMode:"provided-secret-as-passphrase"}};
+    const fetcher=vi.fn<typeof fetch>().mockImplementation(async(path,init)=>{
+      if(String(path).startsWith("/api/auth"))return Response.json(session());
+      if(String(path).endsWith("restore/receipt")){expect(init?.body).toBe(JSON.stringify({operationId}));return Response.json(receipt);}return Response.json(ready);
+    });
+    const client=createVisibleBrowserClient(binding,()=>true,fetcher);expect(await client.request("restore/receipt",visibleRestoreSchema,{operationId})).toEqual(receipt);client.dispose();
+    for(const patch of [{execution:"started"},{rollback:"committed-undo"},{targetCopy:undefined},{mapping:{bot:{old:"not-fresh"},group:{},thread:{},plan:{}}}])expect(visibleRestoreSchema.safeParse({...receipt,...patch}).success).toBe(false);
+  });
+  it("keeps an unconfirmed apply distinct from rollback and exposes receipt reconciliation",async()=>{
+    const fetcher=vi.fn<typeof fetch>().mockImplementation(async path=>Response.json(String(path).startsWith("/api/auth")?session():String(path).endsWith("restore/apply")?{unsupported:"ambiguous committed response"}:status));
+    const client=createVisibleBrowserClient(binding,()=>true,fetcher);
+    await expect(client.request("restore/apply",visibleRestoreSchema,{format:"account-recovery-v1",fileId:"owned-copy",passphrase:"owned-key",operationId:"11111111-1111-4111-8111-111111111111",expectedSourceDigest:"a".repeat(64),selection:{instanceId:"fakeApi:alice",model:"fake-1"}})).rejects.toThrow("check the restore receipt");client.dispose();
+    expect(visibleFailureText({error:"rolled-back"})).toContain("rolled back");expect(visibleFailureText({error:"rollback-failed"})).toContain("reconciliation");
+  });
+
 });

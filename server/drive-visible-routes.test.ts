@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -18,6 +18,8 @@ import { TaskPlanEngine } from "./task-engine.ts";
 import { DATA_DIR } from "./config.ts";
 import { closeMessageDb } from "./message-db.ts";
 import { inspectAccountRecoveryArchive } from "./drive-visible-account-archive.ts";
+import { readAccountSettings } from "./drive-visible-settings.ts";
+import { createVisibleBrowserClient, visibleRestoreSchema } from "../src/lib/visible-drive-browser.ts";
 import * as visibleParser from "./drive-visible.ts";
 
 const NOW = Date.parse("2026-10-05T12:00:00Z");
@@ -45,6 +47,7 @@ describe("optional visible Drive routes over owned real HTTP", () => {
   let verifyHook: (() => Promise<string>) | undefined;
   let jwks: JSONWebKeySet;
   let clock: number;
+  let liveStop: (()=>void) | undefined;
   const start = async (user = "alice") => {
     const response = await post("consent", {}, user);
     expect(response.status).toBe(200);
@@ -106,7 +109,7 @@ describe("optional visible Drive routes over owned real HTTP", () => {
     return Response.json({ ...found.ref, size: String(found.bytes.byteLength), capabilities: { canDownload: true } });
   };
   beforeEach(async () => {
-    clock = NOW; calls = []; files = new Map(); tokenHook = undefined; readHook = undefined; sessionHook = undefined; verifyHook = undefined; jwks = { keys: [] };
+    liveStop = undefined; clock = NOW; calls = []; files = new Map(); tokenHook = undefined; readHook = undefined; sessionHook = undefined; verifyHook = undefined; jwks = { keys: [] };
     directory = mkdtempSync(join(tmpdir(), "muster-visible-route-"));
     db = new DatabaseSync(":memory:");
     db.exec(`PRAGMA foreign_keys=ON;
@@ -126,6 +129,10 @@ describe("optional visible Drive routes over owned real HTTP", () => {
         plans: { listPlans: () => [], transitionsFor: () => [] } }) };
     server = createServer((req, res) => {
       const user = z.string().catch("").parse(req.headers["x-owned-account"]);
+      if(new URL(req.url!,"http://127.0.0.1").pathname==="/api/auth/get-session") {
+        const row=db.prepare("SELECT * FROM session WHERE userId=?").get(user);
+        res.writeHead(row?200:401,{"content-type":"application/json"});res.end(JSON.stringify(row?{user:{id:user},session:row}:{error:"signed-out"}));return;
+      }
       void handleVisibleDriveRoute(req, res, req.method ?? "GET", new URL(req.url!, "http://127.0.0.1").pathname,
         { ...ctx, session: () => sessionHook ? sessionHook(user) : Promise.resolve(["alice", "bob"].includes(user) ? session(user) : null) })
         .then(handled => { if (!handled) { res.writeHead(404); res.end(); } });
@@ -136,7 +143,101 @@ describe("optional visible Drive routes over owned real HTTP", () => {
   });
   afterEach(async () => {
     await new Promise<void>(resolve => server.close(() => resolve()));
-    db.close(); rmSync(directory, { recursive: true, force: true });
+    vi.restoreAllMocks(); liveStop?.(); db.close(); rmSync(directory, { recursive: true, force: true });
+  });
+
+  const liveFixture = async () => {
+    // The existing suite already uses its per-worker owned DATA_DIR for actual
+    // Store coverage. This helper recreates only that identified test root.
+    closeMessageDb();rmSync(DATA_DIR,{recursive:true,force:true});clock=Date.now();
+    db.prepare("UPDATE session SET expiresAt=?").run(new Date(clock+600_000).toISOString());
+    const selection={instanceId:"fakeApi:alice",model:"fake-1"};
+    const store=new Store(()=>selection),plans=new TaskPlanEngine({file:join(DATA_DIR,"task-plans.json")});
+    const alice=store.createBot({ownerId:"alice",name:"Target original",modelSelection:selection},{seedMessages:false});
+    const bob=store.createBot({ownerId:"bob",name:"Unrelated Bob",modelSelection:{instanceId:"fakeApi:bob",model:"fake-1"}},{seedMessages:false});
+    store.appendMessage(alice.threadId,{role:"user",kind:"text",text:"Original Alice durable message"});
+    store.appendMessage(bob.threadId,{role:"user",kind:"text",text:"Unrelated Bob durable message"});
+    plans.create({botId:alice.id,ownerId:"alice",threadId:alice.threadId,steps:["Alice preserved"],start:false});
+    plans.create({botId:bob.id,ownerId:"bob",threadId:bob.threadId,steps:["Bob preserved"],start:false});
+    const {makeFakeDriver}=await import("./testing/fake-driver.ts"),fake=makeFakeDriver();
+    const instance=await fake.driver.create({instanceId:selection.instanceId,displayName:"Current Alice engine",environment:{},enabled:true,config:{}});
+    const send=vi.fn<typeof instance.adapter.sendTurn>(()=>{throw Error("No restored dispatch");});instance.adapter.sendTurn=send;
+    const publish=vi.fn();
+    ctx.source=()=>({dataDir:DATA_DIR,store,plans});ctx.liveRestore={dataDir:realpathSync(DATA_DIR),store,plans,
+      assertReady:()=>{},readSettings:account=>readAccountSettings(db,account),resolveEngine:()=>({ownerId:"alice",selection,instance}),
+      engineChoices:account=>account.userId==="alice"?[{label:"Current Alice engine",selection}]:[],publish};
+    liveStop=()=>{plans.stop();closeMessageDb();rmSync(DATA_DIR,{recursive:true,force:true});};
+    connect();expect((await post("settings",{values:{theme:"dark"}})).status).toBe(200);
+    const copy=checkedJson.parse(await(await post("backup",{format:"account-recovery-v1",passphrase:"owned-live-passphrase"})).json());
+    const inspection=checkedJson.parse(await(await post("restore/inspect",{format:"account-recovery-v1",fileId:copy.fileId,passphrase:"owned-live-passphrase"})).json());
+    const body={format:"account-recovery-v1",fileId:copy.fileId,passphrase:"owned-live-passphrase",operationId:randomUUID(),expectedSourceDigest:inspection.sourceDigest,selection};
+    return {store,plans,alice,bob,body,instance,send,publish};
+  };
+
+  it.each(["restore/apply","restore/receipt"])("keeps production %s unregistered when no writer/boot capability exists",async action=>{
+    const body=action==="restore/receipt"?{operationId:randomUUID()}:{format:"account-recovery-v1",fileId:"owned-copy",passphrase:"owned-passphrase",operationId:randomUUID(),expectedSourceDigest:"a".repeat(64),selection:{instanceId:"fakeApi:alice",model:"fake-1"}};
+    const response=await post(action,body);
+    expect(response.status).toBe(404);expect(await response.json()).toEqual({error:"visible-route-unavailable"});expect(calls).toEqual([]);
+  });
+  it.each(["restore/apply","restore/receipt"])("unregistered %s refuses malformed unsigned input before identity, storage or source reads",async action=>{
+    const signed=vi.fn<NonNullable<typeof sessionHook>>(()=>{throw Error("Unregistered identity port must not execute");});sessionHook=signed;
+    const database=vi.fn<typeof ctx.db>(()=>{throw Error("Unregistered database port must not execute");});ctx.db=database;
+    const source=vi.fn<typeof ctx.source>(()=>{throw Error("Unregistered source port must not execute");});ctx.source=source;
+    for(const method of ["POST","GET","HEAD"]){
+      const response=await get(action,"unsigned",{method,headers:{origin,"content-type":"application/json"},body:method==="POST"?"not-valid-json":undefined});
+      expect(response.status).toBe(404);await response.arrayBuffer();
+    }
+    expect(signed).not.toHaveBeenCalled();expect(database).not.toHaveBeenCalled();expect(source).not.toHaveBeenCalled();expect(calls).toEqual([]);
+  });
+  it.each(["restore/apply","restore/receipt"])("provided but unready capability keeps %s registered and refuses before cloud access",async action=>{
+    const f=await liveFixture();ctx.liveRestore!.assertReady=()=>{throw Error("Owned readiness unavailable");};calls=[];
+    const before=readFileSync(join(DATA_DIR,"bots.json"));
+    const response=await post(action,action==="restore/receipt"?{operationId:f.body.operationId}:f.body);
+    expect(response.status).toBe(409);expect(await response.json()).toEqual({error:"live-restore-unavailable"});expect(calls).toEqual([]);
+    expect(readFileSync(join(DATA_DIR,"bots.json")).equals(before)).toBe(true);expect(f.send).not.toHaveBeenCalled();expect(f.publish).not.toHaveBeenCalled();
+  });
+  it("real signed-route apply appends current-owned inert records and publishes only Alice after commit",async()=>{
+    const f=await liveFixture(),grantBefore=db.prepare("SELECT * FROM drive_visible_grants ORDER BY userId").all();
+    const response=await post("restore/apply",f.body);expect(response.status).toBe(200);
+    const answer=visibleRestoreSchema.parse(await response.json());expect(f.store.bots).toHaveLength(3);expect(f.plans.listPlans()).toHaveLength(3);
+    expect(f.store.bot(answer.mapping.bot[f.alice.id]!)).toMatchObject({ownerId:"alice",modelSelection:f.body.selection,busy:false});
+    expect(f.store.snapshotThread(f.bob.threadId)).toMatchObject({messages:[{text:"Unrelated Bob durable message"}]});
+    expect(db.prepare("SELECT * FROM drive_visible_grants ORDER BY userId").all()).toEqual(grantBefore);expect(f.send).not.toHaveBeenCalled();
+    expect(f.publish).toHaveBeenCalledOnce();expect(f.publish.mock.calls[0]![0]).toEqual({userId:"alice",workspaceId:"alice-org"});
+    expect(files.size).toBeGreaterThan(0);expect(calls.some(call=>["DELETE","PATCH"].includes(call.method))).toBe(false);
+  });
+  it("reconciles the current owner receipt after unrelated durable saves without cloud or engine access",async()=>{
+    const f=await liveFixture(),answer=visibleRestoreSchema.parse(await(await post("restore/apply",f.body)).json());
+    f.store.patchBot(f.bob.id,{name:"Later Bob save"});f.plans.create({botId:f.bob.id,ownerId:"bob",threadId:f.bob.threadId,steps:["Later work"],start:false});
+    f.store.appendMessage(f.bob.threadId,{role:"user",kind:"text",text:"Later Bob durable message"});
+    const prior=readFileSync(join(DATA_DIR,"bots.json"));calls=[];ctx.google=null;ctx.liveRestore!.resolveEngine=()=>{throw Error("No provider for receipt");};
+    expect(visibleRestoreSchema.parse(await(await post("restore/receipt",{operationId:f.body.operationId})).json())).toEqual(answer);
+    expect(readFileSync(join(DATA_DIR,"bots.json")).equals(prior)).toBe(true);expect(calls).toEqual([]);
+    expect((await post("restore/receipt",{operationId:f.body.operationId},"bob")).status).toBe(409);
+  });
+  it.each(["session","workspace","grant"])("refuses %s change after actual download before any live mutation",async changed=>{
+    const f=await liveFixture(),before=readFileSync(join(DATA_DIR,"bots.json"));
+    readHook=url=>{if(!url.includes("alt=media"))return;
+      if(changed==="session")db.exec("UPDATE session SET token='rotated' WHERE userId='alice'");
+      if(changed==="workspace")db.exec("DELETE FROM member WHERE userId='alice'");
+      if(changed==="grant")revokeVisibleGrant(db,"alice");};
+    expect((await post("restore/apply",f.body)).status).toBe(409);expect(readFileSync(join(DATA_DIR,"bots.json")).equals(before)).toBe(true);expect(f.publish).not.toHaveBeenCalled();
+  });
+  it("actual browser client receives durable apply and receipt across an intentionally lost response",async()=>{
+    const f=await liveFixture();let lose=true;
+    const fetcher:typeof fetch=async(path,init)=>{
+      const response=await fetch(new URL(String(path),origin),{...init,headers:{...Object.fromEntries(new Headers(init?.headers)),"x-owned-account":"alice",origin}});
+      if(String(path).endsWith("restore/apply")&&lose){lose=false;await response.arrayBuffer();throw Error("Owned response loss after commit");}return response;
+    };
+    const binding={userId:"alice",sessionId:"alice-session",sessionToken:"alice-token",origin};
+    const client=createVisibleBrowserClient(binding,()=>true,fetcher);
+    // SAFETY: the owned helper created this actual archive/file ID and UUID; the current HTTP route revalidates its digest and strict body.
+    await expect(client.request("restore/apply",visibleRestoreSchema,{...f.body,format:"account-recovery-v1"} as Parameters<typeof client.request>[2])).rejects.toThrow("could not be confirmed");
+    expect(f.store.bots).toHaveLength(3);expect(f.publish).toHaveBeenCalledOnce();
+    const receipt=await client.request("restore/receipt",visibleRestoreSchema,{operationId:f.body.operationId});expect(receipt.operationId).toBe(f.body.operationId);
+    db.exec("UPDATE session SET token='rotated' WHERE userId='alice'");
+    await expect(client.request("restore/receipt",visibleRestoreSchema,{operationId:f.body.operationId})).rejects.toThrow("account or connection changed");
+    expect(f.store.bots).toHaveLength(3);client.dispose();
   });
 
   it("requires actual sessions on loopback and advertises without creating grant/settings tables", async () => {

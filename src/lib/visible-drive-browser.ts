@@ -4,18 +4,26 @@ export const VISIBLE_DRIVE_PREFIX = "/api/workspace/drive-visible";
 export const visibleReceiptSchema = z.object({ viewRevision: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   grantRevision: z.string().regex(/^[A-Za-z0-9_-]{43}$/) });
 export const visibleStatusSchema = visibleReceiptSchema.extend({ available: z.boolean(), connected: z.boolean(),
-  scope: z.literal("account-owned"), restoreApply: z.literal("unsupported"), settingsCaptured: z.boolean() });
+  scope: z.literal("account-owned"), restoreApply: z.enum(["unsupported", "additive"]), settingsCaptured: z.boolean(),
+  engineChoices: z.array(z.object({ label: z.string().min(1).max(200), selection: z.object({ instanceId: z.string().min(1).max(200),
+    model: z.string().min(1).max(200), effort: z.enum(["none", "low", "medium", "high", "xhigh", "max"]).optional() }).strict() }).strict()).max(64).optional() });
 export type VisibleStatus = z.infer<typeof visibleStatusSchema>;
 const fileId = z.string().regex(/^[A-Za-z0-9_-]{1,200}$/);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 export const visibleCopySchema = visibleReceiptSchema.extend({ status: z.literal("verified"), scope: z.literal("account-owned"),
-  apply: z.literal("unsupported"), format: z.literal("account-recovery-v1"), fileId,
+  apply: z.enum(["unsupported", "additive"]), format: z.literal("account-recovery-v1"), fileId,
   sha256: digest, bytes: z.number().int().positive(), created: z.boolean() });
 export const visibleInspectionSchema = visibleReceiptSchema.extend({ status: z.literal("ready"), format: z.literal("account-recovery-v1"),
-  scope: z.literal("account-owned"), apply: z.literal("unsupported"), sourceDigest: digest,
+  scope: z.literal("account-owned"), apply: z.enum(["unsupported", "additive"]), sourceDigest: digest,
   counts: z.object({ bots: z.number().int().nonnegative(), groups: z.number().int().nonnegative(),
     threads: z.number().int().nonnegative(), messages: z.number().int().nonnegative(),
     plans: z.number().int().nonnegative(), transitions: z.number().int().nonnegative() }) });
+const idMap = z.record(z.string().min(1).max(200), z.string().uuid()).refine(value => Object.keys(value).length <= 32_768);
+export const visibleRestoreSchema = visibleReceiptSchema.extend({ status: z.literal("committed"), operationId: z.string().uuid(),
+  scope: z.literal("account-owned"), mode: z.literal("additive"), sourceDigest: digest,
+  mapping: z.object({ bot: idMap, group: idMap, thread: idMap, plan: idMap }).strict(), execution: z.literal("not-started"),
+  rollback: z.literal("pending-only"), targetCopy: z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), sourceDigest: z.string().regex(/^[a-f0-9]{64}$/), keyMode: z.literal("provided-secret-as-passphrase") }).strict(),
+  history: z.literal("archive-only"), durability: z.literal("process-restart-only") });
 export const visibleCaptureSchema = visibleReceiptSchema.extend({ captured: z.literal(true), values: z.record(z.string(),
   z.union([z.string(), z.number().finite(), z.boolean(), z.null()])), droppedSettings: z.array(z.string()) });
 export const visibleConsentSchema = visibleReceiptSchema.extend({ authorizationUrl: z.string().max(8192),
@@ -65,7 +73,10 @@ export function visiblePopupResult(href: string, text: string, state: string, or
 
 export type VisibleFailureBody = z.infer<typeof errorSchema>;
 export type VisibleRouteBody = Record<string, never> | { state: string } | { values: Record<string, string | number | boolean | null> }
-  | { format: "account-recovery-v1"; passphrase: string; fileId?: string };
+  | { format: "account-recovery-v1"; passphrase: string; fileId?: string }
+  | { operationId: string }
+  | { format: "account-recovery-v1"; passphrase: string; fileId: string; operationId: string; expectedSourceDigest: string;
+    selection: { instanceId: string; model: string; effort?: "none" | "low" | "medium" | "high" | "xhigh" | "max" } };
 export function visibleFailureText(error: VisibleFailureBody | null): string {
   if (!error) return "Drive operation could not be confirmed. Refresh the status before retrying.";
   if (error.copyPreserved && error.createdFileId) return `The copy was preserved (${error.createdFileId}), but verification failed. No restore was applied.`;
@@ -76,6 +87,10 @@ export function visibleFailureText(error: VisibleFailureBody | null): string {
   if (error.error === "consent-declined") return "Drive consent was declined. Existing backups were preserved.";
   if (error.error === "settings-unavailable" || error.error === "source-unavailable") return "Capture your preferences before creating a copy.";
   if (error.error === "restore-inspection-unavailable") return "The copy could not be inspected. Check its ID and passphrase; no restore was applied.";
+  if (error.error === "live-restore-unavailable") return "Restoring into this live workspace is unavailable.";
+  if (error.error === "rolled-back") return "The pending restore was rolled back. Existing records were preserved.";
+  if (error.error === "rollback-failed") return "The restore needs reconciliation. Newer data was preserved; do not start another restore.";
+  if (error.error === "operation-unavailable" || error.error === "operation-blocked") return "This restore receipt could not be confirmed. Keep its operation ID and check again in the original account.";
   return "Drive operation could not be confirmed. Refresh the status before retrying.";
 }
 
@@ -125,7 +140,7 @@ export function createVisibleBrowserClient(binding: VisibleBinding, stillBound: 
   };
   const statusProof = async (signal: AbortSignal) => {
     const parsed = visibleStatusSchema.safeParse(await read("status", signal));
-    if (!parsed.success) throw new VisibleBrowserFailure("Drive operation returned an unsupported response. No restore was applied.");
+    if (!parsed.success) throw new VisibleBrowserFailure("Drive operation returned an unsupported response. Its outcome could not be confirmed; check the restore receipt before retrying.");
     if (viewRevision !== undefined && parsed.data.viewRevision !== viewRevision) throw changed();
     viewRevision = parsed.data.viewRevision;
     return parsed.data;
@@ -157,7 +172,7 @@ export function createVisibleBrowserClient(binding: VisibleBinding, stillBound: 
       if (ownedConsentState && /^[A-Za-z0-9_-]{43}$/.test(ownedConsentState) && viewRevision)
         void retireConsent(ownedConsentState, viewRevision);
     },
-    async request<T>(action: "status" | "consent" | "cancel" | "disconnect" | "settings" | "backup" | "restore/inspect",
+    async request<T>(action: "status" | "consent" | "cancel" | "disconnect" | "settings" | "backup" | "restore/inspect" | "restore/apply" | "restore/receipt",
       schema: z.ZodType<T>, body?: VisibleRouteBody): Promise<T> {
       const controller = new AbortController(); controllers.add(controller);
       const timeout = setTimeout(() => controller.abort(), 120_000);
@@ -170,7 +185,7 @@ export function createVisibleBrowserClient(binding: VisibleBinding, stillBound: 
         const value = action === "status" ? before : await read(action, controller.signal, body, before.grantRevision); live();
         const parsed = schema.safeParse(value);
         const receipt = visibleReceiptSchema.safeParse(value);
-        if (!parsed.success || !receipt.success) throw new VisibleBrowserFailure("Drive operation returned an unsupported response. No restore was applied.");
+        if (!parsed.success || !receipt.success) throw new VisibleBrowserFailure("Drive operation returned an unsupported response. Its outcome could not be confirmed; check the restore receipt before retrying.");
         await proof(controller.signal); live();
         const after = await statusProof(controller.signal); live();
         await proof(controller.signal); live();

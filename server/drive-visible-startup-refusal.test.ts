@@ -1,9 +1,13 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { closeSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync,
   realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { assertLiveRestoreStartupReady, liveHash, openLiveJournal, recoverPendingLiveRestores } from "./drive-visible-live-journal.ts";
+import { exclusiveClaimPath } from "./data-dir-exclusivity.ts";
 import { assertAccountRecoveryStartupReady } from "./drive-visible-startup-refusal.ts";
 
 const roots: string[] = [];
@@ -95,5 +99,58 @@ describe("read-only pre-initialization account recovery refusal", () => {
   it("rejects excess directory inventory without reading files", () => {
     const f = fixture(); for (let index = 0; index < 1024; index++) writeFileSync(join(f.journal, `extra${index}`), "");
     expect(() => assertAccountRecoveryStartupReady(f.root)).toThrow(/startup refused/);
+  });
+});
+
+
+function liveFixture(status: "pending" | "committed" | "rolled-back" = "pending") {
+  const configuredRoot = mkdtempSync(join(tmpdir(), "muster-live-startup-"));
+  const root = realpathSync(configuredRoot); roots.push(root);
+  writeFileSync(join(root,"preserved.bin"),"UNCHANGED");
+  const held = openLiveJournal(root), operationId = randomUUID(), target = Buffer.from("owned encrypted-copy envelope fixture");
+  const receipt = held.begin({version:1,kind:"account-live-additive",operationId,userId:"alice",workspaceId:"org",googleSub:"alice-sub",
+    archiveHash:liveHash("source"),sourceDigest:liveHash("state"),mapping:{bot:{},group:{},thread:{},plan:{}},changes:[],threads:[],inertHistory:"{}",createdDirs:[],
+    targetCopy:{sha256:liveHash(target),sourceDigest:liveHash("target state"),keyMode:"provided-secret-as-passphrase"}},target);
+  if(status!=="pending")held.mark(receipt,status,status==="committed"?"committed":"compensated");held.release();
+  return {root,configuredRoot,operation:join(root,"account-live-restore-journal",operationId)};
+}
+describe("live account startup boundary without a production writer capability",()=>{
+  it("observes pending evidence without boot-time mutation or lease creation",()=>{
+    const f=liveFixture(),before=files(f.root);expect(()=>assertLiveRestoreStartupReady(f.root)).toThrow();expect(files(f.root)).toEqual(before);
+  });
+  it.each(["committed","rolled-back"] as const)("admits closed %s evidence with no writes",status=>{
+    const f=liveFixture(status),before=files(f.root);expect(()=>assertLiveRestoreStartupReady(f.root)).not.toThrow();expect(files(f.root)).toEqual(before);
+  });
+  it.each(["intent.json","receipt.json","target-before.bin"])("refuses tampered %s and preserves evidence",name=>{
+    const f=liveFixture("committed");writeFileSync(join(f.operation,name),"TAMPERED");const before=files(f.root);
+    expect(()=>assertLiveRestoreStartupReady(f.root)).toThrow();expect(files(f.root)).toEqual(before);
+  });
+  it("refuses whole-installation exclusivity evidence BEFORE pending compensation touches any file",()=>{
+    const f=liveFixture(),claim=exclusiveClaimPath(f.root);writeFileSync(claim,"CORRUPT-WHOLE-INSTALLATION-EVIDENCE");
+    const before=files(f.root);try{expect(()=>recoverPendingLiveRestores(f.root)).toThrow(/Installation restore evidence/);expect(files(f.root)).toEqual(before);expect(readFileSync(claim,"utf8")).toBe("CORRUPT-WHOLE-INSTALLATION-EVIDENCE");}finally{rmSync(claim);}
+  });
+  it("allows a fresh configured temp-prefix root through the actual pre-import Node hook without creating data",()=>{
+    const configuredRoot=mkdtempSync(join(tmpdir(),"muster-live-fresh-hook-"));roots.push(realpathSync(configuredRoot));
+    const dataDir=join(configuredRoot,"data");
+    const child=spawnSync(process.execPath,["--input-type=module","-e","await import(process.argv[1]);",pathToFileURL(join(process.cwd(),"server/drive-visible-startup-refusal.ts")).href],
+      {env:{PATH:process.env.PATH,HOME:configuredRoot,USERPROFILE:configuredRoot,OMB_DATA_DIR:dataDir,SystemRoot:process.env.SystemRoot},encoding:"utf8",timeout:10_000,maxBuffer:1024*1024});
+    expect(child.status,child.stderr).toBe(0);expect(existsSync(dataDir)).toBe(false);
+  });
+  it.each(["committed","rolled-back"] as const)("binds closed %s evidence to the same real root through a configured temp prefix",status=>{
+    const f=liveFixture(status),before=files(f.root);expect(()=>assertLiveRestoreStartupReady(f.configuredRoot)).not.toThrow();
+    expect(()=>recoverPendingLiveRestores(f.configuredRoot)).not.toThrow();expect(files(f.root)).toEqual(before);
+  });
+  it("refuses a dangling journal symlink without treating it as absent or changing evidence",()=>{
+    const root=realpathSync(mkdtempSync(join(tmpdir(),"muster-live-dangling-")));roots.push(root);
+    const journal=join(root,"account-live-restore-journal");symlinkSync(join(root,"absent-target"),journal,"dir");writeFileSync(join(root,"preserved.bin"),"UNCHANGED");
+    const before=files(root);expect(()=>assertLiveRestoreStartupReady(root)).toThrow();expect(()=>recoverPendingLiveRestores(root)).toThrow();expect(files(root)).toEqual(before);
+  });
+  it.each(["dangling-parent","file-parent"])("refuses %s lookup ambiguity before boot or compensation writes",kind=>{
+    const root=realpathSync(mkdtempSync(join(tmpdir(),"muster-live-parent-")));roots.push(root);const parent=join(root,"parent");
+    if(kind==="dangling-parent")symlinkSync(join(root,"absent-target"),parent,"dir");else writeFileSync(parent,"UNCHANGED");
+    const before=files(root);expect(()=>assertLiveRestoreStartupReady(parent)).toThrow();expect(()=>recoverPendingLiveRestores(parent)).toThrow();expect(files(root)).toEqual(before);
+  });
+  it("an owned pre-import harness compensates pending evidence then passes the read-only production guard",()=>{
+    const f=liveFixture();recoverPendingLiveRestores(f.root);expect(()=>assertLiveRestoreStartupReady(f.root)).not.toThrow();expect(readFileSync(join(f.root,"preserved.bin"),"utf8")).toBe("UNCHANGED");
   });
 });

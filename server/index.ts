@@ -6290,6 +6290,11 @@ let requestUserEmail = "";
         operator: primaryUserId, appVersion: appVersion(),
         google: { clientId: process.env.GOOGLE_CLIENT_ID?.trim() ?? "", clientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "" },
         source: () => taskPlans ? { store, plans: taskPlans, dataDir: DATA_DIR } : null,
+        // liveRestore deliberately absent: account scope is approved, but an
+        // archive/journal or a boolean switch cannot prove lifetime writer and
+        // early boot ownership. The real-root adapter/receipt ports are wired
+        // in the route family; production remains unavailable until that
+        // separate capability is implemented, reviewed and tested.
         session: async () => {
           const current = await auth.api.getSession({ headers: visibleHeaders,
             query: { disableCookieCache: true, disableRefresh: true } }).catch(() => null);

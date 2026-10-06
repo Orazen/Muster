@@ -4,12 +4,17 @@ import { useAuth } from "@/lib/auth";
 import { readTheme } from "@/lib/skins";
 import { loadDensity } from "@/lib/sidebar-preferences";
 import { createVisibleBrowserClient, visibleAuthorizationUrl, visibleBrowserErrorText, visibleCaptureSchema, visibleConsentSchema,
-  visibleCopySchema, visibleInspectionSchema, visiblePopupResult, visibleReceiptSchema, visibleStatusSchema, type VisibleStatus } from "@/lib/visible-drive-browser";
+  visibleCopySchema, visibleInspectionSchema, visibleRestoreSchema, visiblePopupResult, visibleReceiptSchema, visibleStatusSchema, type VisibleStatus } from "@/lib/visible-drive-browser";
 
 export function visibleDriveStatusText(status: VisibleStatus | null): string {
   if (!status) return "Checking optional Drive copies…";
   if (!status.available) return "Optional Drive copies are unavailable on this workspace.";
   return status.connected ? "Optional Drive connection ready." : "Connect Drive separately to save optional copies. Google sign-in alone does not connect it.";
+}
+export function visibleDriveRestoreText(status: VisibleStatus | null): string {
+  return status?.restoreApply === "additive"
+    ? "Restore first creates and verifies an encrypted recovery copy of the current account. It then adds new teammates and conversations. Existing records, preferences, attachments and connections stay in place. Tasks stay paused; historical approvals remain archive-only. Pending failures roll back; committed restores cannot be undone here."
+    : "Inspection only. Restoring a copy into a live workspace is unavailable.";
 }
 class VisibleCardFailure extends Error {}
 function closeOwnedPopup(popup: Window | null, origin: string): boolean {
@@ -42,6 +47,10 @@ export function VisibleDriveCard() {
   const [error, setError] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [fileId, setFileId] = useState("");
+  const [inspection, setInspection] = useState<{ fileId: string; sourceDigest: string; bots: number; threads: number } | null>(null);
+  const [engineIndex, setEngineIndex] = useState("");
+  const [operationId, setOperationId] = useState("");
+  const receiptKey = `muster-visible-restore:${binding.userId}:${binding.sessionId}`;
   const [consenting, setConsenting] = useState(false);
   const [retiring, setRetiring] = useState(false);
   const consent = useRef<{ state: string; expiresAt: number; viewRevision: string; popup: Window } | null>(null);
@@ -61,6 +70,9 @@ export function VisibleDriveCard() {
   };
   useLayoutEffect(() => {
     setStatus(null); setNotice(""); setError(""); setPassphrase(""); setFileId(""); setBusy(false); setRetiring(false); busyRef.current = false;
+    setInspection(null); setEngineIndex("");
+    try { const saved = window.sessionStorage.getItem(receiptKey); setOperationId(saved && z.string().uuid().safeParse(saved).success ? saved : ""); }
+    catch { setOperationId(""); }
     setConsenting(false); completing.current = false;
     return () => { client.dispose(consent.current?.state); closeOwnedPopup(ownedPopup.current, binding.origin); ownedPopup.current = null; retiredPopup.current = null; consent.current = null; };
   }, [client]);
@@ -148,14 +160,34 @@ export function VisibleDriveCard() {
   const inspect = () => void run(async () => {
     if (!status?.available || !status.connected || !/^[A-Za-z0-9_-]{1,200}$/.test(fileId) || passphrase.length < 8) throw new VisibleCardFailure("Enter the copy ID and its passphrase to inspect it.");
     const result = await client.request("restore/inspect", visibleInspectionSchema, { format: "account-recovery-v1", fileId, passphrase });
-    if (client.current()) setNotice(`Inspection ready: ${result.counts.bots} teammates, ${result.counts.threads} conversations, ${result.counts.messages} messages. No restore was applied.`);
+    if (client.current()) {
+      setInspection({ fileId, sourceDigest: result.sourceDigest, bots: result.counts.bots, threads: result.counts.threads });
+      setNotice(`Inspection ready: ${result.counts.bots} teammates, ${result.counts.threads} conversations, ${result.counts.messages} messages. No restore was applied.`);
+    }
+  });
+  const restore = () => void run(async () => {
+    const choice = status?.engineChoices?.[Number(engineIndex)];
+    if (status?.restoreApply !== "additive" || !inspection || inspection.fileId !== fileId || !choice || engineIndex === "" || passphrase.length < 8)
+      throw new VisibleCardFailure("Inspect this copy, choose a current model and re-enter its passphrase before restoring.");
+    if (operationId) throw new VisibleCardFailure("Check the previous restore receipt before starting another restore.");
+    const id = window.crypto.randomUUID(); setOperationId(id);
+    // Only a non-credential operation ID is persisted, scoped to this account
+    // and session. No passphrase, copy body, engine key or session token.
+    try { window.sessionStorage.setItem(receiptKey, id); } catch { /* The displayed ID still permits reconciliation. */ }
+    const result = await client.request("restore/apply", visibleRestoreSchema, { format: "account-recovery-v1", fileId, passphrase,
+      operationId: id, expectedSourceDigest: inspection.sourceDigest, selection: choice.selection });
+    if (client.current()) setNotice(`Restore committed: ${Object.keys(result.mapping.bot).length} new teammates. An encrypted target recovery copy was verified. Existing records were preserved; no work was started. Receipt: ${result.operationId}.`);
+  });
+  const checkReceipt = () => void run(async () => {
+    const result = await client.request("restore/receipt", visibleRestoreSchema, { operationId });
+    if (client.current()) setNotice(`Restore committed. Receipt: ${result.operationId}. This confirms the original import; later edits remain in place.`);
   });
 
   return <section aria-label="Optional Drive copies" className="rounded-xl bg-card p-4">
     <h3 className="text-[15px] font-medium text-ink">Optional Drive copies</h3>
     <p className="mt-1 text-[13px] text-ink-secondary">Save an encrypted copy for your account in a visible Muster folder. Existing backups stay in place. This does not enable automatic sync.</p>
     <p className="mt-2 text-[13px] text-ink-secondary" role="status">{visibleDriveStatusText(status)}</p>
-    <p className="mt-1 text-[12px] text-ink-secondary">Inspection only. Restoring a copy into a live workspace is unavailable.</p>
+    <p className="mt-1 text-[12px] text-ink-secondary">{visibleDriveRestoreText(status)}</p>
     <div className="mt-3 flex flex-wrap gap-2">
       <button className={button} disabled={busy || consenting} onClick={() => void run(async () => { await refresh(); })}>Refresh Drive status</button>
       <button className={button} disabled={busy || consenting || retiring || !status?.available} onClick={connect}>{status?.connected ? "Reconnect optional Drive" : "Connect optional Drive"}</button>
@@ -173,8 +205,23 @@ export function VisibleDriveCard() {
       value={passphrase} onChange={event => setPassphrase(event.target.value)} disabled={busy || consenting} className={`${input} mt-1`} /></label>
     <button className={`${button} mt-2`} disabled={busy || consenting || !status?.available || !status.connected || !status.settingsCaptured || passphrase.length < 8} onClick={copy}>Create encrypted Drive copy</button>
     <label className="mt-3 block text-[13px] text-ink-secondary">Copy ID<input aria-label="Drive copy ID" value={fileId} maxLength={200}
-      onChange={event => setFileId(event.target.value)} disabled={busy || consenting} className={`${input} mt-1`} /></label>
+      onChange={event => { setFileId(event.target.value); setInspection(null); }} disabled={busy || consenting} className={`${input} mt-1`} /></label>
     <button className={`${button} mt-2`} disabled={busy || consenting || !status?.available || !status.connected || !fileId || passphrase.length < 8} onClick={inspect}>Inspect Drive copy</button>
+    {status?.restoreApply === "additive" && <>
+      <label className="mt-3 block text-[13px] text-ink-secondary">Model for restored teammates<select aria-label="Restore model" value={engineIndex}
+        onChange={event => setEngineIndex(event.target.value)} disabled={busy || consenting} className={`${input} mt-1`}>
+        <option value="">Choose a current model</option>{status.engineChoices?.map((choice, index) => <option key={index} value={index}>{choice.label}</option>)}
+      </select></label>
+      <button className={`${button} mt-2`} disabled={busy || consenting || !status.connected || !inspection || inspection.fileId !== fileId || engineIndex === "" || passphrase.length < 8 || !!operationId}
+        onClick={restore}>Restore as new teammates</button>
+    </>}
+    {operationId && <div className="mt-3 text-[13px] text-ink-secondary">
+      <p>Restore operation ID: <span className="select-all">{operationId}</span>. Keep this ID if the result is interrupted.</p>
+      <button className={`${button} mt-2`} disabled={busy || consenting || status?.restoreApply !== "additive"} onClick={checkReceipt}>Check restore receipt</button>
+      <button className={`${button} ml-2 mt-2`} disabled={busy || consenting} onClick={() => {
+        setOperationId(""); try { window.sessionStorage.removeItem(receiptKey); } catch {} setNotice("Receipt cleared from this browser. The server operation and its records were preserved.");
+      }}>Clear displayed receipt</button>
+    </div>}
     {notice && <p role="status" className="mt-2 text-[13px] text-ink-secondary">{notice}</p>}
     {error && <p role="alert" className="mt-2 text-[13px] text-danger">{error}</p>}
   </section>;
