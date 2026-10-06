@@ -1,6 +1,14 @@
 # AGENTS.md — Muster
 
-## Owner directive — Nova leads coordination (2026-10-03)
+## Current completion round — Astra and own subagents (2026-10-06)
+
+Tharun’s latest direct instruction assigns this completion round to **Astra/root and its own subagents only**. Astra owns the execution queue, source corrections, independent nonauthor reviews and normal PR integration. Do not wait for Freebuff, Nova or OpenCode to relay or approve routine work in this round. Historical claims and review receipts remain evidence; copy only explicitly accepted files, preserve every unexpected change and never infer release from silence.
+
+Use isolated task branches/worktrees; verify origin, current main, accepted paths and current PR receipts before editing. Freeze each candidate, independently review exact bytes and run meaningful focused checks plus the required final full gate. Reuse unchanged accepted evidence. Normal merge authority does not authorize an admin override, force push, deletion, check bypass, product release, signing, manual deployment, account login, purchase or destructive real-data test. Preserve demo8845, layout and existing sessions/data.
+
+Keep source, local checks, hosted CI, served artifacts, installed apps and actual account/device acceptance separate. The current acceptance queue and owners are in [the remaining-work register](docs/plans/remaining-work-register-2026-10-06.md). Missing trust/callback and live-restore product decisions remain gates; no mandatory Drive or invented identity authority.
+
+## Historical owner directive — Nova leads coordination (2026-10-03)
 
 Tharun appoints **Nova (Cue/Nova)** as head coordinator, replacing Astra in the coordination role. Nova manages all PR triage, task assignments, accepted path claims, security issue triage, remediation ownership, review gates and audit handoffs. All agents, including Astra, Freebuff and OpenCode, report to Nova.
 
@@ -73,8 +81,8 @@ Report any decrease from the latest accepted baseline explicitly.
 
 ## Non-negotiable rules
 
-- **Ownership**: Nova is head coordinator under Tharun's 2026-10-03 directive; Freebuff remains the shared-main integrator. Before `git add -A`, review `git status --short` and the diff; keep each commit scoped to the verified slice. Preserve any unexpected edits and establish their origin before including them.
-- Use isolated task branches/worktrees and stage only your accepted paths. Nova coordinates review and Freebuff integrates accepted changes; preserve shared-main work.
+- **Ownership**: Astra/root owns the current completion round under Tharun's latest instruction, with independent nonauthor review by its own subagents. Before `git add -A`, review `git status --short` and the diff; keep each commit scoped to the verified slice. Preserve any unexpected edits and establish their origin before including them.
+- Use isolated task branches/worktrees and stage only your accepted paths. Astra integrates independently reviewed candidates through normal repository policy; preserve shared checkouts and all unexpected edits.
 - **Never claim "done" without running the tests and reporting the real numbers.** Honest reporting over optimism; if something failed, show the output.
 - Do not publish to npm (repo stays private). Never surface `npx muster` (squatter package) or any github.com link in user-facing UI.
 - **No security claims.** The project's security scanner hasn't completed a full re-run; never assert the codebase is secure.
