@@ -4,17 +4,19 @@
 // and GET /api/auth-capabilities advertises `emailOtp` from it, so those two
 // variables decide whether a deployed server can send a sign-in code at all.
 // Docker Compose forwards ONLY what a service declares — in its `environment:`
-// block or an `env_file:` — so a value placed in the shell or a `.env` file
-// never reaches the container unless the name is declared. That makes the
+// block or through an `env_file:` — so a value placed in the shell or a `.env`
+// file never reaches the container unless the name is declared. That makes the
 // compose declaration the actual enablement switch, and an omission is silent:
-// the deployment keeps serving a sign-in screen that simply hides email codes,
-// which reads exactly like "email sign-in is broken".
+// the deployment keeps serving a sign-in screen that hides email codes, which
+// reads exactly like "email sign-in is broken".
 //
-// This test is the guard. It fails when the server reads a variable no compose
-// service declares, when a compose file drifts behind the others, when a
-// documented name stops matching a read name (the shape a `RESEND_APILKEY`-
-// style typo takes), or when a secret literal is committed — including one
-// hidden inside a substitution default.
+// SCOPE, stated precisely so the guarantee is not read as larger than it is.
+// This guard covers the MAILER, and only the mailer: it reads the variables
+// `server/email.ts` reads and requires each server-running service in these
+// compose files to declare them. It does not audit every documented variable —
+// several are declared by no compose file on purpose — and it does not decide
+// whether a service runs the server; it asks the compose document, treating a
+// service with a `build:` or named `muster` as the server.
 //
 // It parses the compose files with the real YAML parser rather than matching
 // text, so both the mapping syntax (`NAME: "value"`) and the list syntax
@@ -29,7 +31,7 @@ import { z } from "zod";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relative: string): string => readFileSync(join(root, relative), "utf8");
 
-/** Every compose file that can run the server. */
+/** Every compose file in this repo that can run the server. */
 const COMPOSE_FILES = [
   "docker-compose.yml",
   "docker-compose.prod.yml",
@@ -41,20 +43,31 @@ const composeDoc = z.object({
   services: z.record(
     z.string(),
     z.object({
+      build: z.unknown().optional(),
+      env_file: z.unknown().optional(),
       environment: z.union([z.array(z.string()), z.record(z.string(), scalar)]).optional(),
     }),
   ),
 });
 
-type Environment = Map<string, string>;
+type Service = { service: string; env: Map<string, string>; runsServer: boolean; viaEnvFile: boolean };
 
-/** One service's declared environment, normalizing both compose syntaxes. */
-const declaredEnvironment = (value: z.infer<typeof composeDoc>["services"][string]["environment"]): Environment => {
+/**
+ * One service's declared environment, normalizing both compose syntaxes.
+ * `- NAME=value` and `- NAME` are both list forms; the bare form forwards the
+ * variable straight from the host, so the name counts as declared.
+ */
+const declaredEnvironment = (value: z.infer<typeof composeDoc>["services"][string]["environment"]): Map<string, string> => {
   const entries = new Map<string, string>();
   if (Array.isArray(value)) {
     for (const item of value) {
-      const entry = /^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(item);
-      if (entry) entries.set(entry[1]!, entry[2]!.trim());
+      const pair = /^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(item);
+      if (pair) {
+        entries.set(pair[1]!, pair[2]!.trim());
+        continue;
+      }
+      const bare = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(item);
+      if (bare) entries.set(bare[1]!, "");
     }
     return entries;
   }
@@ -62,12 +75,21 @@ const declaredEnvironment = (value: z.infer<typeof composeDoc>["services"][strin
   return entries;
 };
 
-const servicesOf = (file: string): Array<{ service: string; env: Environment }> => {
+/** A service runs the server when the compose document says it builds one. */
+const runsServer = (service: string, definition: z.infer<typeof composeDoc>["services"][string]): boolean =>
+  definition.build !== undefined || service === "muster";
+
+const servicesOf = (file: string): Service[] => {
   const parsed = composeDoc.safeParse(parse(read(file)));
   if (!parsed.success) throw new Error(`${file} is not a compose document this test understands`);
   return Object.entries(parsed.data.services).map(([service, definition]) => ({
     service,
     env: declaredEnvironment(definition.environment),
+    runsServer: runsServer(service, definition),
+    // An `env_file:` service states where its variables come from. We cannot
+    // read the referenced file's contents here, so treat the declaration as
+    // satisfying rather than demanding a redundant inline copy.
+    viaEnvFile: definition.env_file !== undefined,
   }));
 };
 
@@ -92,39 +114,57 @@ const documentedVars = (markdown: string): string[] => {
   return [...names].sort();
 };
 
-// Names that could carry a credential: their value must arrive as a shell
-// substitution, and its default must be blank. A non-blank default would be a
-// hardcoded credential wearing a substitution's syntax.
-const SECRETISH = /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|PRIVATE/;
+// Credential-bearing names, matched on a SUFFIX rather than a substring: a
+// tuning knob like SESSION_TOKEN_TTL_SECONDS legitimately carries a numeric
+// default, while RESEND_API_KEY and BETTER_AUTH_SECRET must not.
+const CREDENTIAL_NAME = /(?:^|_)(?:API_KEY|SECRET|TOKEN|PASSWORD|PRIVATE_KEY|CREDENTIALS?)$/;
 const SUBSTITUTION_WITH_BLANK_DEFAULT = /^\$\{[A-Za-z_][A-Za-z0-9_]*(?::-\s*)?\}$/;
 
 const mailerVars = envReads(read("server/email.ts"));
 const documented = documentedVars(read("docs/self-host.md"));
+const serverServices = COMPOSE_FILES.flatMap((file) =>
+  servicesOf(file).filter((entry) => entry.runsServer).map((entry) => ({ file, ...entry })),
+);
 
 describe("deployment environment passthrough", () => {
-  it.each(COMPOSE_FILES)("%s declares every variable the mailer reads", (file) => {
-    for (const { service, env } of servicesOf(file)) {
+  it("still reads the mailer's variables out of the source", () => {
+    // Non-vacuity anchor. Without it, deleting every process.env read from the
+    // mailer would satisfy every assertion below by comparing nothing to
+    // nothing, and the guard would report success while watching an empty set.
+    expect(mailerVars.length).toBeGreaterThan(0);
+  });
+
+  it("finds the server services the assertion is about", () => {
+    expect(serverServices.length).toBe(COMPOSE_FILES.length);
+  });
+
+  it.each(COMPOSE_FILES)("%s declares every mailer variable in each server service", (file) => {
+    for (const entry of serverServices.filter((service) => service.file === file)) {
+      if (entry.viaEnvFile) continue;
       expect(
-        mailerVars.filter((name) => !env.has(name)),
-        `${file}: service "${service}" does not declare ${mailerVars.join(", ")}`,
+        mailerVars.filter((name) => !entry.env.has(name)),
+        `${file}: service "${entry.service}" does not declare ${mailerVars.join(", ")}`,
       ).toEqual([]);
     }
   });
 
-  it("declares the sign-in mailer switch itself, in every service of every file", () => {
-    for (const file of COMPOSE_FILES) {
-      for (const { service, env } of servicesOf(file)) {
-        expect(env.has("RESEND_API_KEY"), `${file}: service "${service}" must declare RESEND_API_KEY`).toBe(true);
-        expect(env.has("EMAIL_FROM"), `${file}: service "${service}" must declare EMAIL_FROM`).toBe(true);
-      }
+  it("declares the sign-in mailer switch in each server service", () => {
+    for (const { file, service, env, viaEnvFile } of serverServices) {
+      if (viaEnvFile) continue;
+      expect(env.has("RESEND_API_KEY"), `${file}: service "${service}" must declare RESEND_API_KEY`).toBe(true);
+      expect(env.has("EMAIL_FROM"), `${file}: service "${service}" must declare EMAIL_FROM`).toBe(true);
     }
   });
 
-  it("never commits a secret literal, including one hidden in a default", () => {
+  it("never commits a credential literal, including one hidden in a default", () => {
     for (const file of COMPOSE_FILES) {
       for (const { service, env } of servicesOf(file)) {
         for (const [name, value] of env) {
-          if (!SECRETISH.test(name)) continue;
+          if (!CREDENTIAL_NAME.test(name)) continue;
+          // An empty value is the bare list form (`- NAME`) or `- NAME=`:
+          // compose forwards the variable from the host environment and the
+          // file commits no credential at all.
+          if (value === "") continue;
           expect(
             value,
             `${file}: service "${service}" declares ${name} as a literal instead of a blank-default substitution`,

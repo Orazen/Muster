@@ -26,8 +26,9 @@ services:
       # sign-in screen that hides email codes instead of mailing them. Compose
       # only passes what is listed here, so a value set in the hosting panel's
       # env UI does NOT reach the container unless it is named below. The
-      # default keeps an unset deployment byte-identical to the previous
-      # behaviour: no mailer, no email codes, nothing silently half-enabled.
+      # default keeps an unset deployment behaviourally identical to the
+      # previous one — the two keys now exist but are empty, and an empty
+      # RESEND_API_KEY is falsy exactly like an absent one.
       - RESEND_API_KEY=${RESEND_API_KEY}
       - EMAIL_FROM=${EMAIL_FROM:-Muster <noreply@localhost>}
     volumes:
