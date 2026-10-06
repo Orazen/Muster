@@ -53,9 +53,9 @@ const policy = [
   {
     package: "js-yaml", version: "3.15.2", file: "bin/js-yaml.js",
     originalSha256: "3d0c9cbce9363a08e5d932e6c843013059758e4bd426cd77d2e09a2a229a443f",
-    patchedSha256: "a99724dc2ee2358a10a3c0b6a796ec96eef083e2638f3446c046cad3ac47e1f0",
+    patchedSha256: "8f1cf241bee4835a41bf61f118d2eda2b514157c3b0d8ad0ef3e6b141ca72bff",
     replacements: [
-      ["var cli = new argparse.ArgumentParser({\n  prog:     'js-yaml',\n  version:  require('../package.json').version,\n  addHelp:  true\n});", "var cli = new argparse.ArgumentParser({\n  prog:     'js-yaml',\n  add_help: false\n});\n\ncli._positionals.title = 'Positional arguments';\ncli._optionals.title = 'Optional arguments';\ncli.add_argument('-h', '--help', {\n  action: 'help',\n  help:   'Show this help message and exit.'\n});\ncli.add_argument('-v', '--version', {\n  action: 'version',\n  version: require('../package.json').version,\n  help:    \"Show program's version number and exit.\"\n});", 1],
+      ["var cli = new argparse.ArgumentParser({\n  prog:     'js-yaml',\n  version:  require('../package.json').version,\n  addHelp:  true\n});", "var cli = new argparse.ArgumentParser({ prog: 'js-yaml', add_help: false });\ncli._positionals.title = 'Positional arguments'; cli._optionals.title = 'Optional arguments';\ncli.add_argument('-h', '--help', { action: 'help', help: 'Show this help message and exit.' });\ncli.add_argument('-v', '--version', { action: 'version', version: require('../package.json').version, help: \"Show program's version number and exit.\" });\ncli.error = function (message) { if (message.startsWith('unrecognized arguments: ')) message = message.replace(/^unrecognized arguments: (.*)$/, 'Unrecognized arguments: $1.'); this.print_usage(process.stdout); this.exit(2, 'js-yaml: error: ' + message + '\\n'); };", 1],
       ["cli.addArgument([ '-c', '--compact' ], {", "cli.add_argument('-c', '--compact', {", 1],
       ["cli.addArgument([ '-j', '--to-json' ], {", "cli.add_argument('-j', '--to-json', {", 1],
       ["argparse.Const.SUPPRESS", "argparse.SUPPRESS", 1],
@@ -92,18 +92,26 @@ export function planDependencySecurityPatches(root) {
   assert(lock.lockfileVersion >= 2 && lock.packages, "A committed package graph is required");
   assert(!Object.keys(lock.packages).some((path) => path === "node_modules/sprintf-js" || path.endsWith("/node_modules/sprintf-js")), "The sprintf-js js-yaml CLI formatter dependency must be removed from the committed graph");
   for (const [path, entry] of Object.entries(lock.packages)) {
-    assert(!entry.dependencies?.["sprintf-js"], `The vulnerable js-yaml CLI formatter dependency remains reachable from ${path}`);
+    for (const section of dependencySections) {
+      assert(!entry[section]?.["sprintf-js"], `The sprintf-js formatter dependency remains reachable from ${path} (${section})`);
+    }
   }
   const files = [];
   const packages = [];
   const consumers = [];
   for (const name of ["braces", "node-forge", "js-yaml"]) {
     const descriptors = DEPENDENCY_SECURITY_PATCHES.filter((entry) => entry.package === name);
-    const copies = Object.keys(lock.packages).filter((path) => (path === `node_modules/${name}` || path.endsWith(`/node_modules/${name}`)) && lock.packages[path].version === descriptors[0].version);
+    const allCopies = Object.keys(lock.packages).filter((path) => path === `node_modules/${name}` || path.endsWith(`/node_modules/${name}`));
+    const copies = allCopies.filter((path) => lock.packages[path].version === descriptors[0].version);
     assert(copies.length > 0, `Missing reviewed ${name} dependency`);
+    for (const path of allCopies) {
+      const version = lock.packages[path].version;
+      if (name === "js-yaml") assert(["3.15.2", "4.3.2"].includes(version), `Unsupported js-yaml version in package graph: ${path}`);
+      else assert.equal(version, descriptors[0].version, `Unsupported ${name} version in package graph: ${path}`);
+    }
     const packagePaths = new Set(copies.map((path) => resolve(root, path, "package.json")));
     for (const [path, entry] of Object.entries(lock.packages)) {
-      if (!entry.dependencies?.[name]) continue;
+      if (!dependencySections.some((section) => entry[section]?.[name])) continue;
       const consumer = resolve(root, path, "package.json");
       const actual = createRequire(consumer).resolve(`${name}/package.json`);
       const actualMetadata = JSON.parse(readRegularFile(root, actual).bytes.toString("utf8"));
@@ -160,3 +168,4 @@ export function verifyDependencySecurityPatches(root) {
   assert(plan.files.every((file) => !file.changed), "Dependency mitigations are missing; run prepare:toolchain before loading Expo/Metro");
   return { packages: plan.packages, consumers: plan.consumers.length, files: plan.files.length };
 }
+const dependencySections = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];

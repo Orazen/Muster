@@ -206,6 +206,28 @@ test("formatter dependency and unknown js-yaml CLI source are refused before pre
   writeFileSync(dependencyLockPath, JSON.stringify(dependencyLock));
   assert.throws(() => planDependencySecurityPatches(dependencyRoot), /sprintf-js/);
 
+  const optionalFormatterRoot = fixture("reject-js-yaml-optional-formatter");
+  const optionalFormatterLockPath = join(optionalFormatterRoot, "package-lock.json");
+  const optionalFormatterLock = JSON.parse(readFileSync(optionalFormatterLockPath, "utf8"));
+  optionalFormatterLock.packages["node_modules/optional-consumer"] = { version: "1.0.0", optionalDependencies: { "sprintf-js": "^1.0.3" } };
+  writeFileSync(optionalFormatterLockPath, JSON.stringify(optionalFormatterLock));
+  assert.throws(() => planDependencySecurityPatches(optionalFormatterRoot), /sprintf-js.*optionalDependencies/);
+
+  const devFormatterRoot = fixture("reject-js-yaml-dev-formatter");
+  const devFormatterLockPath = join(devFormatterRoot, "package-lock.json");
+  const devFormatterLock = JSON.parse(readFileSync(devFormatterLockPath, "utf8"));
+  devFormatterLock.packages[""] = { version: "1.0.0", devDependencies: { "sprintf-js": "^1.0.3" } };
+  writeFileSync(devFormatterLockPath, JSON.stringify(devFormatterLock));
+  assert.throws(() => planDependencySecurityPatches(devFormatterRoot), /sprintf-js.*devDependencies/);
+
+  const optionalYamlRoot = fixture("reject-js-yaml-optional-version");
+  const optionalYamlLockPath = join(optionalYamlRoot, "package-lock.json");
+  const optionalYamlLock = JSON.parse(readFileSync(optionalYamlLockPath, "utf8"));
+  optionalYamlLock.packages["node_modules/optional-consumer"] = { version: "1.0.0", optionalDependencies: { "js-yaml": "3.15.3" } };
+  optionalYamlLock.packages["node_modules/optional-consumer/node_modules/js-yaml"] = { version: "3.15.3" };
+  writeFileSync(optionalYamlLockPath, JSON.stringify(optionalYamlLock));
+  assert.throws(() => planDependencySecurityPatches(optionalYamlRoot), /Unsupported js-yaml version in package graph/);
+
   const sourceRoot = fixture("reject-js-yaml-source");
   const cli = join(sourceRoot, yamlPackagePaths[1], "bin/js-yaml.js");
   writeFileSync(cli, readFileSync(cli, "utf8") + "\n// unexpected local edit\n");
@@ -221,7 +243,7 @@ test("formatter dependency and unknown js-yaml CLI source are refused before pre
   lockVersion.packages[yamlPackagePaths[1]].version = "3.15.3";
   writeFileSync(lockVersionPath, JSON.stringify(lockVersion));
   const bracesBefore = readFileSync(join(lockVersionRoot, "node_modules/braces/lib/parse.js"), "utf8");
-  assert.throws(() => prepareToolchain(lockVersionRoot), /Lock\/install version mismatch for js-yaml/);
+  assert.throws(() => prepareToolchain(lockVersionRoot), /Unsupported js-yaml version in package graph/);
   assert.equal(readFileSync(join(lockVersionRoot, "node_modules/braces/lib/parse.js"), "utf8"), bracesBefore);
   assert.equal(sha256(readFileSync(join(lockVersionRoot, yamlPackagePaths[0], "bin/js-yaml.js"))), DEPENDENCY_SECURITY_PATCHES.find((patch) => patch.package === "js-yaml").originalSha256);
 });

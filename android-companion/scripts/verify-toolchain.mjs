@@ -128,6 +128,15 @@ async function main() {
         assert.equal(help.stdout, expectedHelp);
         assert.equal(help.stderr, "");
       }
+      const usage = "usage: js-yaml [-h] [-v] [-c] [-t] [file]\n";
+      const invalidOption = invoke(["--not-a-flag"]);
+      assert.equal(invalidOption.status, 2);
+      assert.equal(invalidOption.stdout, usage);
+      assert.equal(invalidOption.stderr, "js-yaml: error: Unrecognized arguments: --not-a-flag.\n");
+      const extraPositional = invoke(["one", "two"]);
+      assert.equal(extraPositional.status, 2);
+      assert.equal(extraPositional.stdout, usage);
+      assert.equal(extraPositional.stderr, "js-yaml: error: Unrecognized arguments: two.\n");
       const yaml = invoke([], "name: Muster\ncount: 2\n");
       assert.equal(yaml.status, 0);
       assert.equal(yaml.stdout, "{\n  \"name\": \"Muster\",\n  \"count\": 2\n}\n");
@@ -149,6 +158,7 @@ async function main() {
         assert.equal(trace.status, 1);
         assert.match(trace.stderr, /^YAMLException: unexpected end of the stream within a flow collection/);
         assert.match(trace.stderr, /at generateError/);
+        assert(trace.stderr.split("\n").some((line) => line.endsWith(`${cliPath}:108:14`)), "Trace should retain the original CLI call-site line");
       }
       const missing = join(scratch, "missing.yml");
       const notFound = invoke([missing]);
