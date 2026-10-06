@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { constants, createHash, generateKeyPairSync, privateEncrypt } from "node:crypto";
-import { cpSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -114,10 +114,28 @@ test("mitigated RSA rejects nested garbage with and without NULL and preserves n
   assert.equal(typeof certificates.signBufferRSASHA256AndVerify(f.privateKey, certificate, Buffer.from("owned manifest")), "string");
 });
 
-test("original braces walker reproduces stack exhaustion before mitigation", () => {
+test("original braces walker reproduces stack exhaustion in a bounded child", () => {
   const root = fixture("braces-original");
-  const braces = createRequire(join(root, "package.json"))("braces");
-  assert.throws(() => braces.compile(deepPattern("{", "}", 4500)), /Maximum call stack size exceeded/);
+  try {
+    // fixture() reconstructs and verifies the exact reviewed original bytes.
+    // Bound this negative control instead of relying on the parent V8 stack size.
+    const child = spawnSync(process.execPath, [
+      "--stack-size=512", "--max-old-space-size=64", "--input-type=commonjs", "-e",
+      `const assert = require("node:assert/strict");
+       const braces = require(process.argv[1]);
+       assert.throws(() => braces.compile("{".repeat(4500) + "a,b" + "}".repeat(4500)),
+         error => error instanceof RangeError && /Maximum call stack size exceeded/.test(error.message));
+       process.stdout.write("MUSTER_OWNED_ORIGINAL_BRACES_RANGE_ERROR\\n");`,
+      join(root, "node_modules", "braces"),
+    ], { cwd: root, env: {}, encoding: "utf8", timeout: 5000, maxBuffer: 65536, killSignal: "SIGKILL" });
+    assert.equal(child.error, undefined);
+    assert.equal(child.signal, null);
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(child.stdout, "MUSTER_OWNED_ORIGINAL_BRACES_RANGE_ERROR\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    assert.equal(existsSync(root), false);
+  }
 });
 
 test("deep braces and parentheses reject safely through public and private string/AST entries", () => {

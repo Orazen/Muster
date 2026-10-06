@@ -34,6 +34,9 @@ overrides:
   "@xmldom/xmldom@<0.8.15": "0.8.15"
   "sharp@<0.35.4": ">=0.35.4"
   "js-yaml@<4.3.2": ">=4.3.2"
+  # PostCSS and Tailwind node both declare ^1.2.1. 1.2.2 adds bounded indexed
+  # offsets and source-node fixes for CVE-2026-93749 without changing their major.
+  "source-map-js@<1.2.2": "1.2.2"
   # The committed lockfile resolves Miniflare 5.20260930.0-alpha, but this
   # selector targets absent 5.20260923.0-alpha and is therefore unmatched.
   # Confirm the exact graph selector against the lockfile before updating it.
