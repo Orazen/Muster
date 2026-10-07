@@ -32,7 +32,9 @@ overrides:
   "brace-expansion@>=2.0.0 <2.1.7": "2.1.7"
   "brace-expansion@>=5.0.0 <5.0.12": "5.0.12"
   "@xmldom/xmldom@<0.8.15": "0.8.15"
-  "sharp@<0.35.4": ">=0.35.4"
+  # Miniflare pins 0.35.4; 0.35.5 updates librsvg to 2.63.2 for
+  # GHSA-wq5f-xc86-pv6w. Keep Sharp and its optional native family coherent.
+  "sharp@<0.35.5": "0.35.5"
   "js-yaml@<4.3.2": ">=4.3.2"
   # PostCSS and Tailwind node both declare ^1.2.1. 1.2.2 adds bounded indexed
   # offsets and source-node fixes for CVE-2026-93749 without changing their major.
