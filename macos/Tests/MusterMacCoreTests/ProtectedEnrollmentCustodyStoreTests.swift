@@ -28,11 +28,22 @@ import XCTest
 /// Models the Keychain items the store owns: service → account → bytes, plus
 /// injectable per-service status faults and per-account garbage payloads so
 /// corrupt and unavailable custody can be exercised without any Security API.
-private final class FakeCustodyKeychain: EnrollmentCustodyKeychainOps, @unchecked Sendable {
+///
+/// Module-internal (not `private`) because the consumer suite drives the SAME
+/// double through the real store: custody is only integration-proven when the
+/// bytes a case asserts on are the bytes the store actually wrote.
+final class FakeCustodyKeychain: EnrollmentCustodyKeychainOps, @unchecked Sendable {
     struct Operation: Equatable {
         let op: String
         let service: String
         let account: String?
+    }
+
+    /// A read fault that begins once `after` further reads of the service have
+    /// been served.
+    struct ScheduledReadFault {
+        let after: Int
+        let status: OSStatus
     }
 
     private let lock = NSLock()
@@ -42,6 +53,12 @@ private final class FakeCustodyKeychain: EnrollmentCustodyKeychainOps, @unchecke
 
     /// Forced status for read/readAll, per service (unavailable-custody cases).
     var readFaults: [String: OSStatus] = [:]
+    /// A read fault armed to fire on a LATER read of one service, so a case can
+    /// let an operation succeed and then fault the confirmation that follows it
+    /// — the difference between "removal failed" and "removal could not be
+    /// proven".
+    private var readFaultsAfter: [String: ScheduledReadFault] = [:]
+    private var readCounts: [String: Int] = [:]
     /// Successful attribute results that cannot establish a valid fence list.
     var readAllRows: [String: [[String: Any]]] = [:]
     /// Forced status for add, per service.
@@ -85,11 +102,30 @@ private final class FakeCustodyKeychain: EnrollmentCustodyKeychainOps, @unchecke
         lock.lock(); defer { lock.unlock() }
         let service = self.service(query)
         let account = self.account(query) ?? ""
+        readCounts[service, default: 0] += 1
+        let served = readCounts[service] ?? 0
         operations.append(Operation(op: "read", service: service, account: self.account(query)))
         if let forced = readFaults[service] { return (forced, nil) }
+        if let scheduled = readFaultsAfter[service], served > scheduled.after {
+            return (scheduled.status, nil)
+        }
         guard let data = items[service]?[account] else { return (errSecItemNotFound, nil) }
         if garbageAccounts.contains(account) { return (errSecSuccess, Data("not a custody record".utf8)) }
         return (errSecSuccess, data)
+    }
+
+    /// Arm a read fault on `service` that begins once `afterSuccessfulReads`
+    /// further reads have been served from now.
+    func scheduleReadFault(service: String, status: OSStatus, afterSuccessfulReads: Int = 0) {
+        lock.lock(); defer { lock.unlock() }
+        let served = readCounts[service] ?? 0
+        readFaultsAfter[service] = ScheduledReadFault(after: served + afterSuccessfulReads, status: status)
+    }
+
+    /// Disarm every scheduled read fault for `service`.
+    func cancelScheduledReadFaults(service: String) {
+        lock.lock(); defer { lock.unlock() }
+        readFaultsAfter[service] = nil
     }
 
     func readAll(_ query: [String: Any]) -> (OSStatus, [[String: Any]]?) {
@@ -147,6 +183,13 @@ private final class FakeCustodyKeychain: EnrollmentCustodyKeychainOps, @unchecke
     func fenceCount() -> Int {
         lock.lock(); defer { lock.unlock() }
         return items[ProtectedEnrollmentCustodyStore.Service.fence]?.count ?? 0
+    }
+
+    /// Every stored value across every service, so a case can prove a secret
+    /// appears in NO Keychain item rather than only in the one it expected.
+    func allStoredValues() -> [Data] {
+        lock.lock(); defer { lock.unlock() }
+        return items.values.flatMap { $0.values }
     }
 }
 

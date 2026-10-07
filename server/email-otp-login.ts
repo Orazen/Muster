@@ -48,7 +48,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { auth, forwardedProtoOf, getDb, OTP_TTL_SECONDS } from "./auth.ts";
 import { isText, json, readBody } from "./http-helpers.ts";
-import { clearDelivery, deliveryOutcome, type DeliveryFailure } from "./otp-delivery.ts";
+import { clearDelivery, withOtpDeliveryCapture, type DeliveryFailure } from "./otp-delivery.ts";
 import { parseJson, type JsonObject, type JsonValue } from "./schema.ts";
 
 export const OTP_SEND_PATH = "/api/auth/email-otp/send-verification-otp";
@@ -633,7 +633,10 @@ export async function handleEmailOtpAuthRequest(
       clearDelivery(email);
       spendIpSend(clientIpOf(req), Date.now());
     }
-    const delegated = await delegateToAuth(req, path, body);
+    const captured = isSend
+      ? await withOtpDeliveryCapture(email, () => delegateToAuth(req, path, body))
+      : { value: await delegateToAuth(req, path, body), outcome: undefined };
+    const delegated = captured.value;
     if (isSend && delegated.status >= 200 && delegated.status < 300) {
       // A 2xx here is the PLUGIN's answer, not the mail's. The plugin stores
       // the code and then awaits our sender through runInBackgroundOrAwait,
@@ -643,29 +646,44 @@ export async function handleEmailOtpAuthRequest(
       // 60s cooldown and stored a replayable success: the user was told a code
       // was on its way and then blocked from asking again for a minute. The
       // recorded outcome is the only honest signal (server/otp-delivery.ts).
-      //
-      // Undefined means no delivery was attempted — the plugin short-circuits
-      // the send route for an unknown address when sign-up-on-verify is off, and
-      // answers success without ever calling the sender. That is not a failure
-      // and keeps its existing behavior.
-      const outcome = deliveryOutcome(email);
+      const outcome = captured.outcome;
       clearDelivery(email);
       if (outcome && !outcome.ok) {
         // Nothing armed: no cooldown, no replay entry. A failed send must leave
         // the mailbox exactly as able to try again as it was before.
         return rejectSend(res, 503, deliveryRejection(outcome), DELIVERY_RETRY_SECONDS);
       }
-      armCooldown(email, Date.now());
-      if (idemKey) {
-        rememberAcceptedSend(
-          email,
-          idemKey,
-          delegated.status,
-          delegated.body,
-          delegated.headers.get("content-type") ?? "application/json",
-          delegated.setCookies,
-          Date.now(),
-        );
+      // For ANY code kind, a delivery outcome present after the delegation
+      // means the sender ran and a code is now in play; `undefined` means no
+      // emails went out because the plugin short-circuited the send route
+      // before ever calling the sender (`routes.mjs:104`). `change-email`
+      // bounds this enumeration: the plugin rejects it outright with 400
+      // "Invalid OTP type", so it can never reach this branch. The plugin's
+      // own behaviour under a `disableSignUp: true` config would short-circuit
+      // a sign-in send for an unknown address too — and with THAT possibility
+      // in mind, the predicate deliberately keys on the sender's actual
+      // invocation, so a send that minted no code arms nothing no matter which
+      // config produces that outcome (server/otp-delivery.ts records the
+      // coupling with `runInBackgroundOrAwait`).
+      //
+      // What this deliberately reproduces is the bound the older behaviour
+      // gave a REGISTERED address: a non-sign-in code request on this route
+      // does genuinely mint and email a code, so it arms the same per-mailbox
+      // cooldown a sign-in send would, with the recorded verdict deciding
+      // rather than the request's own claim about its type.
+      if (outcome) {
+        armCooldown(email, Date.now());
+        if (idemKey) {
+          rememberAcceptedSend(
+            email,
+            idemKey,
+            delegated.status,
+            delegated.body,
+            delegated.headers.get("content-type") ?? "application/json",
+            delegated.setCookies,
+            Date.now(),
+          );
+        }
       }
       return relay(res, delegated);
     }
