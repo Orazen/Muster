@@ -1,21 +1,24 @@
 // Legal pages must be readable without running the app's JavaScript.
 const PAGE_STYLE = `
+  /* Readable even if the shared stylesheet cannot be loaded. */
   *{box-sizing:border-box}
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-       background:#070707;color:#e7e5e4;line-height:1.7;overflow-wrap:anywhere}
-  main{max-width:808px;margin:0 auto;padding:3rem 1.5rem 4rem}
-  header{border-bottom:1px solid #26262e;padding:1.25rem 1.5rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
-  a{color:#ffb478;text-underline-offset:3px}
-  a:focus-visible{outline:2px solid #ffb478;outline-offset:4px}
-  header a{color:#f08a24;font-weight:700;text-decoration:none;font-size:1.05rem}
-  header span{color:#a1a1aa;font-size:.85rem}
-  h1{font-size:1.9rem;margin:0 0 .4rem;color:#fafaf9;line-height:1.25}
-  h2{font-size:1.15rem;margin:2.2rem 0 .5rem;color:#f5f5f4}
-  p,li{color:#c9c7c4;font-size:1rem}
-  ul{padding-left:1.3rem}
-  li{margin:.5rem 0}
-  .updated{color:#a1a1aa;font-size:.85rem;margin-bottom:2rem}
-  footer{border-top:1px solid #26262e;margin-top:3rem;padding-top:1.25rem;color:#a1a1aa;font-size:.9rem}
+  body{margin:0;background:#f4f2e9;color:#252e26;font:16px/1.75 Arial,sans-serif;overflow-wrap:anywhere}
+  a{color:inherit;text-underline-offset:3px}
+  a:focus-visible{outline:2px solid #252e26;outline-offset:5px}
+  .legal-main{max-width:1120px;margin:0 auto;padding:72px 32px 24px}
+  .legal-heading{display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end;border-bottom:1px solid #d5d8ca;padding-bottom:40px}
+  .legal-heading h1{font-size:clamp(44px,6vw,76px);margin:16px 0 22px}
+  .legal-heading .updated{font-size:13px;color:#59644e;margin:0}
+  .legal-nav{display:flex;flex-direction:column;gap:10px;align-items:flex-start;padding-bottom:4px;font-size:14px}
+  .legal-nav a[aria-current=page]{font-weight:700;text-decoration-thickness:2px}
+  .legal-copy{max-width:760px;margin:48px auto 0}
+  .legal-copy h2{font-size:25px;line-height:1.25;letter-spacing:-.02em;margin:48px 0 16px}
+  .legal-copy h2:first-child{margin-top:0}
+  .legal-copy p,.legal-copy li{font-size:16px;line-height:1.8}
+  .legal-copy ul{padding-left:24px}
+  .legal-copy li{margin:12px 0}
+  .legal-copy code{font-size:.9em;background:#e8e9dd;padding:2px 5px;border-radius:3px}
+  @media(max-width:640px){.legal-main{padding:40px 22px 16px}.legal-heading{grid-template-columns:1fr;padding-bottom:28px}.legal-nav{flex-direction:row;gap:22px;flex-wrap:wrap}.legal-copy{margin-top:32px}.legal-copy h2{font-size:23px}}
 `;
 
 const CONTACT = '<a href="mailto:ramagiritharun@gmail.com">ramagiritharun@gmail.com</a>';
@@ -29,15 +32,26 @@ function legalShell(title: string, body: string): string {
 <meta property="og:site_name" content="Muster">
 <meta property="og:title" content="${title} — Muster">
 <title>${title} — Muster</title>
-<style>${PAGE_STYLE}</style></head>
+<meta name="theme-color" content="#f4f2e9">
+<link rel="icon" href="/landing-workroom/v1/favicon.svg" type="image/svg+xml">
+<style>${PAGE_STYLE}</style>
+<link rel="stylesheet" href="/public-site/v1/site.css"></head>
 <body>
-<header><a href="/">Muster</a><span>AI agent workforce</span></header>
-<main>
+<a class="site-skip" href="#main">Skip to content</a>
+<header class="site-header">
+<a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" width="25" height="28" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+<nav class="site-nav" aria-label="Main navigation"><a href="/docs">Documentation</a><a href="/download.html">Download</a><a class="site-cta" href="/app">Open Muster <span aria-hidden="true">↗</span></a></nav>
+</header>
+<main class="legal-main" id="main">
+<div class="legal-heading"><div><p class="site-eyebrow">THE FINE PRINT</p>
 <h1>${title}</h1>
-<p class="updated">Last updated: 12 September 2026</p>
+<p class="updated">Last updated: 12 September 2026</p></div>
+<nav class="legal-nav" aria-label="Legal pages"><a href="/privacy-policy"${title === "Privacy policy" ? ' aria-current="page"' : ""}>Privacy policy</a><a href="/terms-of-service"${title === "Terms of service" ? ' aria-current="page"' : ""}>Terms of service</a></nav></div>
+<div class="legal-copy">
 ${body}
-<footer><a href="/">Home</a> · <a href="/privacy-policy">Privacy policy</a> · <a href="/terms-of-service">Terms of service</a></footer>
+</div>
 </main>
+<footer class="site-footer"><a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p><nav aria-label="Footer"><a href="/docs">Documentation</a><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a></nav><small>© 2026 Muster · BSL 1.1</small></footer>
 </body></html>`;
 }
 

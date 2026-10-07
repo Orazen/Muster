@@ -5,28 +5,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Approvals &amp; privacy — Muster Docs</title>
 <meta name="description" content="Approval cards, standing grants, evidence, workspace data handling and connection permissions in Muster.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="/landing-workroom/v1/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/public-site/v1/site.css">
 <link rel="stylesheet" href="/docs/docs.css">
 </head>
-<body>
+<body class="docs-page">
+<a class="site-skip" href="#docs-content">Skip to content</a>
 
-<header class="docs-header">
-  <a class="brand-lockup" href="/">
-    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0460e"/><text x="16" y="22" font-family="ui-sans-serif,system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>
-    Muster
-  </a>
+<header class="site-header docs-header">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
   <span class="docs-tag">Docs</span>
   <div class="docs-header__spacer"></div>
-  <nav class="docs-header__links">
+  <nav class="site-nav docs-header__links" aria-label="Main navigation">
     <a href="/download.html">Download</a>
     <a href="/#features">Features</a>
-    <a class="button button--primary button--small" href="/app">Open app</a>
+    <a class="site-cta button button--primary button--small" href="/app">Open Muster</a>
   </nav>
 </header>
 
+<div class="docs-mobile-bar">
+  <span>Approvals &amp; privacy</span>
+  <button id="docs-menu-toggle" type="button" aria-expanded="false" aria-controls="docs-navigation" hidden>Browse docs <span aria-hidden="true">+</span></button>
+</div>
+
 <div class="docs-shell">
 
-  <aside class="docs-sidebar" aria-label="Docs navigation">
+  <aside id="docs-navigation" class="docs-sidebar" aria-label="Docs navigation">
     <div class="docs-sidebar__group">
       <p class="docs-sidebar__label">Start</p>
       <a href="/docs">Overview</a>
@@ -48,8 +52,9 @@
     </div>
   </aside>
 
-  <main class="docs-content">
+  <main id="docs-content" class="docs-content" tabindex="-1">
 
+    <p class="site-eyebrow docs-eyebrow">07 / Operate</p>
     <h1>Approvals &amp; privacy</h1>
     <p class="lead">Muster shows permission requests from supported engines in the conversation. Review approval cards, standing grants and the evidence behind your decisions, and understand how workspace content reaches connected services.</p>
 
@@ -61,12 +66,12 @@
       <span class="pill">Connection permissions</span>
     </div>
 
-    <h2>Bots ask before they act</h2>
+    <h2 id="bots-ask-before-they-act">Bots ask before they act</h2>
     <p>When a supported engine requests permission for a shell command or file edit, Muster displays the request as an inline card in the thread. You have three moves: <strong>Allow</strong>, <strong>Deny</strong>, or answer in the thread — often "no, do this instead" is the fastest review of all.</p>
     <p>While a card is open, the bot's activity reads <code>waiting-on-you</code>, so a glance at the presence bar tells you who needs a decision. You can answer from the desktop, the web app, or the mobile companions — thin clients built for exactly this: approvals and streaming replies on the go.</p>
     <p>Review a bot's configured permissions before enabling recurring work or automatic approvals. Engine capabilities, standing grants and connected tools affect which actions need a new decision.</p>
 
-    <h2>Always-allow scopes</h2>
+    <h2 id="always-allow-scopes">Always-allow scopes</h2>
     <p>Re-approving <code>git status</code> forty times a day isn't governance, it's friction. Pressing <strong>Always allow</strong> on a card grants standing permission per capability — and the grant is as narrow as the thing you actually looked at. Command tools are scoped by program: allowing <code>Bash:git</code> never hands the bot a permanent unattended shell.</p>
     <p>The grant's key is computed once, server-side, and echoed back to the client, so the two sides can never disagree about what was granted.</p>
     <p>Additional checks can flag recognized destructive or sensitive requests despite a standing grant:</p>
@@ -82,7 +87,7 @@
       <span>This backstop is deliberately literal. It is not a security boundary — an agent set on damage has a thousand spellings for <code>rm</code>. It's a "you probably didn't mean to hand <em>this</em> one over unattended" guard for the obvious catastrophes. Available isolation depends on the selected computer and runtime. Review the execution environment as well as the approval.</span>
     </div>
 
-    <h2>The evidence strip</h2>
+    <h2 id="the-evidence-strip">The evidence strip</h2>
     <p>Before you answer a card, Muster shows how <em>this bot's</em> past went with <em>this tool</em>: how many times it was allowed, denied, or auto-settled, and when the last one was.</p>
     <pre><code><span class="c"># what an evidence strip can say, rendered on the card itself:</span>
 Bash was allowed 12× before (last 3h ago) — never denied.
@@ -93,11 +98,11 @@ Bash history: 4 allowed, 2 denied (last 5d ago).</code></pre>
       <span>A passed history only counts what it counted. The summary is rendered server-side so every client says it the same way — and the human still decides.</span>
     </div>
 
-    <h2>Budgets and the Privacy Shield</h2>
+    <h2 id="budgets-and-the-privacy-shield">Budgets and the Privacy Shield</h2>
     <p>Configured token budgets, usage caps and reported costs help you control work. Check the settings available for the selected engine; provider reporting can be incomplete or delayed. You pay your provider for model usage, and connected services can charge separately.</p>
     <p>Privacy Shield can mask recognized emails, phone numbers and secret patterns on supported paths, with counts-only records. It does not guarantee detection of every sensitive value or prevent all external processing. Review the content and destination before sending a task.</p>
 
-    <h2>Where data is handled</h2>
+    <h2 id="where-data-is-handled">Where data is handled</h2>
     <ul>
       <li><strong>Hosted workspace.</strong> The Muster service stores account and workspace records and processes tasks. Model providers and connected apps receive the content needed for the requests you make.</li>
       <li><strong>Provider credentials.</strong> Hosted account keys are held server-side in an account-scoped encrypted vault. Existing desktop configurations can keep credentials on the installation. Neither the web app nor a phone interface implies device-only key custody.</li>
@@ -105,24 +110,28 @@ Bash history: 4 allowed, 2 denied (last 5d ago).</code></pre>
     </ul>
     <p>Read <a href="/docs/setup">Account &amp; device setup</a> and the <a href="/privacy-policy">privacy policy</a> before connecting more accounts or relying on a backup.</p>
 
-    <h2>Account and device access</h2>
+    <h2 id="account-and-device-access">Account and device access</h2>
     <p>Sign in through the Muster app and use the connection steps offered for the intended workspace and installed device version. Codes and links used for pairing or account handoff are credentials: only use ones you requested, do not share them, and obtain a fresh one when they expire.</p>
     <p>Existing desktop versions may offer local claim or pairing flows. Those flows do not merge the local workspace with a hosted one. Confirm the account, workspace and computer before sending a task or answering an approval, and revoke access through the controls available to that connection when it is no longer needed.</p>
     <p>Connected-app authorization and task approval are separate. Treat material from agent mail, rooms, webhooks and imported teams as untrusted content; it does not grant authority to act.</p>
 
-    <h2>The layers, in one line</h2>
+    <h2 id="the-layers-in-one-line">The layers, in one line</h2>
     <p>Approval cards record decisions, Privacy Shield applies supported redaction rules, and routines and receipts record work. For recurring bots, sentries and the why-journal, see <a href="/docs/automation">Automation</a>. For connections and data storage, see <a href="/docs/setup">Account &amp; device setup</a>.</p>
 
   </main>
 </div>
 
-<footer class="docs-footer">
-  <span>© 2026 Orazen · Muster</span>
-  <nav>
+<footer class="site-footer docs-footer">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+  <p>Your work. In good company.</p>
+  <nav aria-label="Footer">
     <a href="/">Home</a>
     <a href="/download.html">Download</a>
     <a href="/docs/security">Security</a>
+    <a href="/privacy-policy">Privacy</a>
+    <a href="/Terms-of-Service">Terms</a>
   </nav>
+  <small>© 2026 Orazen · Muster</small>
 </footer>
 
 <script src="/docs/docs.js"></script>

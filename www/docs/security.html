@@ -5,28 +5,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Security &amp; license — Muster Docs</title>
 <meta name="description" content="Muster's security model: local-first data, keys on your server, claim-gated workspaces, approval gating. How to report security issues, and the Business Source License 1.1 explained.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="/landing-workroom/v1/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/public-site/v1/site.css">
 <link rel="stylesheet" href="/docs/docs.css">
 </head>
-<body>
+<body class="docs-page">
+<a class="site-skip" href="#docs-content">Skip to content</a>
 
-<header class="docs-header">
-  <a class="brand-lockup" href="/">
-    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0460e"/><text x="16" y="22" font-family="ui-sans-serif,system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>
-    Muster
-  </a>
+<header class="site-header docs-header">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
   <span class="docs-tag">Docs</span>
   <div class="docs-header__spacer"></div>
-  <nav class="docs-header__links">
+  <nav class="site-nav docs-header__links" aria-label="Main navigation">
     <a href="/download.html">Download</a>
     <a href="/#features">Features</a>
-    <a class="button button--primary button--small" href="/app">Open app</a>
+    <a class="site-cta button button--primary button--small" href="/app">Open Muster</a>
   </nav>
 </header>
 
+<div class="docs-mobile-bar">
+  <span>Security &amp; license</span>
+  <button id="docs-menu-toggle" type="button" aria-expanded="false" aria-controls="docs-navigation" hidden>Browse docs <span aria-hidden="true">+</span></button>
+</div>
+
 <div class="docs-shell">
 
-  <aside class="docs-sidebar" aria-label="Docs navigation">
+  <aside id="docs-navigation" class="docs-sidebar" aria-label="Docs navigation">
     <div class="docs-sidebar__group">
       <p class="docs-sidebar__label">Start</p>
       <a href="/docs">Overview</a>
@@ -48,9 +52,10 @@
     </div>
   </aside>
 
-  <main class="docs-content">
+  <main id="docs-content" class="docs-content" tabindex="-1">
 
-<h1>Security &amp; license</h1>
+<p class="site-eyebrow docs-eyebrow">09 / Reference</p>
+    <h1>Security &amp; license</h1>
     <p class="lead">Understand where your workspace data is handled, what an approval controls, and how to report a problem. The controls described here have limits and do not guarantee that every task or integration is safe.</p>
     <div class="pill-row">
       <span class="pill">Account access</span>
@@ -59,7 +64,7 @@
       <span class="pill">Applicable licenses</span>
     </div>
 
-    <h2>Workspace data and credentials</h2>
+    <h2 id="workspace-data-and-credentials">Workspace data and credentials</h2>
     <ul>
       <li><strong>Hosted workspace.</strong> The Muster service stores and processes account and workspace records. Relevant task content can be sent to the model providers and connected services you use.</li>
       <li><strong>Provider keys.</strong> Keys saved through hosted account settings are held in an account-scoped encrypted vault on the service and used for provider requests. Settings reports whether a key is configured without returning its saved value.</li>
@@ -68,31 +73,35 @@
     </ul>
     <p>The <a href="/privacy-policy">privacy policy</a> describes data handling. <a href="/docs/setup">Account &amp; device setup</a> explains the distinction between an account, a provider connection, device permission and backup consent.</p>
 
-    <h2>Action controls and their limits</h2>
+    <h2 id="action-controls-and-their-limits">Action controls and their limits</h2>
     <p>Supported engines surface permission requests as approval cards. Read the proposed action and destination before responding. Standing grants apply within their configured scope; engine and tool behavior can differ. An approval record does not establish that the resulting work is correct.</p>
     <p>Configured budgets and available usage reports help you review consumption. Provider reporting can be incomplete or delayed, and connected services can bill separately. Privacy Shield can mask recognized patterns on supported paths; it is not a guarantee that all sensitive content is detected or kept on your device.</p>
     <p>Task receipts retain available activity and usage information. Signature verification checks a supported receipt's integrity; it does not prove task quality or comprehensive security. See <a href="/docs/approvals">Approvals &amp; privacy</a> for the controls in the conversation.</p>
 
-    <h2>Reporting a security issue</h2>
+    <h2 id="reporting-a-security-issue">Reporting a security issue</h2>
     <p>Use the private reporting contact in <a href="/.well-known/security.txt">security.txt</a>. Include the affected version and steps to reproduce, and omit real provider keys, session credentials and personal task content. Do not publish exploit details in a public support thread.</p>
 
-    <h2>Applicable licenses</h2>
+    <h2 id="applicable-licenses">Applicable licenses</h2>
     <p>The current source license identifies Muster under the Business Source License 1.1, © 2026-present Ramagiritharun (Tharun Ramagiri), with the terms in its accompanying <code>LICENSE</code>. It lists a change date of <strong>2030-08-19</strong> and Apache License, Version 2.0 as the change license. Content covered by a separate proprietary or third-party license follows that license.</p>
     <p>Use the license supplied with the particular version for its exact grants, restrictions and notices. These setup guides describe the Muster service and supported apps; they do not replace or amend an existing license. The service's <a href="/Terms-of-Service">terms of service</a> are separate.</p>
 
-    <h2>Where to go next</h2>
+    <h2 id="where-to-go-next">Where to go next</h2>
     <p>Read <a href="/docs/setup">Account &amp; device setup</a> for connections and storage, <a href="/docs/approvals">Approvals &amp; privacy</a> for human decisions, or <a href="/docs/agents">For agents</a> for authorized workspace access.</p>
 
   </main>
 </div>
 
-<footer class="docs-footer">
-  <span>© 2026 Orazen · Muster</span>
-  <nav>
+<footer class="site-footer docs-footer">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+  <p>Your work. In good company.</p>
+  <nav aria-label="Footer">
     <a href="/">Home</a>
     <a href="/download.html">Download</a>
     <a href="/docs/security">Security</a>
+    <a href="/privacy-policy">Privacy</a>
+    <a href="/Terms-of-Service">Terms</a>
   </nav>
+  <small>© 2026 Orazen · Muster</small>
 </footer>
 
 <script src="/docs/docs.js"></script>

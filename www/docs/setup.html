@@ -5,28 +5,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Account &amp; device setup — Muster Docs</title>
 <meta name="description" content="Set up your Muster account, bring a provider API key, review device access, and understand where workspace data and backups live.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="/landing-workroom/v1/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/public-site/v1/site.css">
 <link rel="stylesheet" href="/docs/docs.css">
 </head>
-<body>
+<body class="docs-page">
+<a class="site-skip" href="#docs-content">Skip to content</a>
 
-<header class="docs-header">
-  <a class="brand-lockup" href="/">
-    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0460e"/><text x="16" y="22" font-family="ui-sans-serif,system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>
-    Muster
-  </a>
+<header class="site-header docs-header">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
   <span class="docs-tag">Docs</span>
   <div class="docs-header__spacer"></div>
-  <nav class="docs-header__links">
+  <nav class="site-nav docs-header__links" aria-label="Main navigation">
     <a href="/download.html">Download</a>
     <a href="/#engines">Connections</a>
-    <a class="button button--primary button--small" href="/app">Open app</a>
+    <a class="site-cta button button--primary button--small" href="/app">Open Muster</a>
   </nav>
 </header>
 
+<div class="docs-mobile-bar">
+  <span>Account &amp; device setup</span>
+  <button id="docs-menu-toggle" type="button" aria-expanded="false" aria-controls="docs-navigation" hidden>Browse docs <span aria-hidden="true">+</span></button>
+</div>
+
 <div class="docs-shell">
 
-  <aside class="docs-sidebar" aria-label="Docs navigation">
+  <aside id="docs-navigation" class="docs-sidebar" aria-label="Docs navigation">
     <div class="docs-sidebar__group">
       <p class="docs-sidebar__label">Start</p>
       <a href="/docs">Overview</a>
@@ -48,9 +52,10 @@
     </div>
   </aside>
 
-  <main class="docs-content">
+  <main id="docs-content" class="docs-content" tabindex="-1">
 
-<h1>Account &amp; device setup</h1>
+<p class="site-eyebrow docs-eyebrow">03 / Start</p>
+    <h1>Account &amp; device setup</h1>
     <p class="lead">Open Muster on the web, connect a model provider, and choose the tools your team can use. Muster is a free app. You supply your own provider API key and pay that provider for usage; connected services can have separate charges.</p>
     <div class="pill-row">
       <span class="pill">Managed web service</span>
@@ -58,15 +63,15 @@
       <span class="pill">Device access by permission</span>
     </div>
 
-    <h2>1. Open your workspace</h2>
+    <h2 id="1-open-your-workspace">1. Open your workspace</h2>
     <p>Go to <a href="https://muster.today/app">Open Muster</a> and sign in using an option shown there. Follow the setup steps for your account. You do not need to deploy a server or configure a hosting service.</p>
     <p>A Muster account, a model-provider account, and permission to use a connected app are separate. Signing in to Muster does not supply a provider API key or authorize access to your files.</p>
 
-    <h2>2. Connect your model provider</h2>
+    <h2 id="2-connect-your-model-provider">2. Connect your model provider</h2>
     <p>Use the provider step in setup or <strong>Settings → Providers</strong> to save a supported provider API key. Choose an available engine and model for your bot, then send a small first task. Provider availability, rate limits and charges come from the provider account you connect.</p>
     <p>Muster's free app does not include paid model usage. Check your provider's billing and limits before starting recurring work. See <a href="/docs/engines">Engines &amp; models</a> for supported connection types and existing desktop CLI options.</p>
 
-    <h2>3. Choose where work runs</h2>
+    <h2 id="3-choose-where-work-runs">3. Choose where work runs</h2>
     <p>Start with the tools available in your workspace. For work that needs a device, install an available <a href="/download.html">Muster desktop app</a> and follow the connection and permission steps it offers. Review the selected computer and the action before granting access.</p>
     <p>Local files, local models, screen control and device tools need an available, capable computer and its permissions. Opening the website does not give it access to another computer. A sleeping or disconnected device cannot carry out device tasks.</p>
     <div class="callout callout--note">
@@ -74,12 +79,12 @@
       <span>Released desktop and companion versions can have their own workspace data and connection steps. Signing in with the same account does not by itself merge workspaces, route tasks to every device, or synchronize all history. Keep existing data until you have checked the destination workspace and any restore result.</span>
     </div>
 
-    <h2>4. Review connected apps and Drive consent</h2>
+    <h2 id="4-review-connected-apps-and-drive-consent">4. Review connected apps and Drive consent</h2>
     <p>Connect only the services you want Muster to use, and read the permissions shown during authorization. App connections and individual task approvals are separate decisions.</p>
     <p>If your current setup asks you to connect Google Drive, follow that step and review its consent screen. Signing in with Google is separate from granting Drive access. Use the backup and restore controls offered by your version; check what a backup contains before relying on it.</p>
     <p>Existing desktop backup controls support manual export and restore, with Drive connection available in supported versions. Check the listed contents and restore requirements for your version. Drive connection alone does not establish automatic synchronization, complete recovery, or a backup of every provider credential. A successful sign-in is not evidence that a backup or restore has completed.</p>
 
-    <h2>Where data and keys live</h2>
+    <h2 id="where-data-and-keys-live">Where data and keys live</h2>
     <div class="table-scroll" role="region" tabindex="0" aria-label="Workspace data and credentials">
       <table>
         <tr><th>What you use</th><th>Where it is handled</th></tr>
@@ -94,13 +99,17 @@
   </main>
 </div>
 
-<footer class="docs-footer">
-  <span>© 2026 Orazen · Muster</span>
-  <nav>
+<footer class="site-footer docs-footer">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+  <p>Your work. In good company.</p>
+  <nav aria-label="Footer">
     <a href="/">Home</a>
     <a href="/download.html">Download</a>
     <a href="/docs/security">Security</a>
+    <a href="/privacy-policy">Privacy</a>
+    <a href="/Terms-of-Service">Terms</a>
   </nav>
+  <small>© 2026 Orazen · Muster</small>
 </footer>
 
 <script src="/docs/docs.js"></script>

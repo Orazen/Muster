@@ -1,10 +1,8 @@
-/* Docs behaviors for every /docs/ page: persisted light/dark theme, the
- * right-hand "On this page" TOC (with scroll-spy) built from h2/h3, and a
- * copy button on every code block. Plain DOM, no dependencies, no build. */
+/* Progressive reading controls. Guides, navigation and heading anchors also
+ * work without JavaScript; the saved docs theme keeps its existing key. */
 (function () {
   "use strict";
 
-  // ── theme: light-first like the reference site, persisted choice ─────
   var stored = null;
   try { stored = localStorage.getItem("muster-docs-theme"); } catch {}
   function apply(theme) {
@@ -12,73 +10,103 @@
   }
   apply(stored === "dark" || stored === "light" ? stored : "light");
 
-  // ── helpers ───────────────────────────────────────────────────────────
   function slug(text, taken) {
     var base = text.toLowerCase().replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-").slice(0, 60) || "section";
-    var s = base, n = 2;
-    while (taken.has(s)) s = base + "-" + n++;
-    taken.add(s);
-    return s;
+    var value = base, suffix = 2;
+    while (taken.has(value)) value = base + "-" + suffix++;
+    taken.add(value);
+    return value;
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    // theme toggle in the header
     var links = document.querySelector(".docs-header__links");
     if (links) {
-      var btn = document.createElement("button");
-      btn.className = "theme-toggle";
-      btn.setAttribute("aria-label", "Toggle dark mode");
-      var SUN = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
-      var MOON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>';
-      function paint() {
-        btn.innerHTML = document.documentElement.getAttribute("data-theme") === "dark" ? SUN : MOON;
+      var themeButton = document.createElement("button");
+      themeButton.className = "theme-toggle";
+      themeButton.type = "button";
+      themeButton.setAttribute("aria-label", "Toggle dark mode");
+      var sun = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+      var moon = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>';
+      function paintTheme() {
+        var dark = document.documentElement.getAttribute("data-theme") === "dark";
+        themeButton.innerHTML = dark ? sun : moon;
+        themeButton.setAttribute("aria-pressed", String(dark));
+        themeButton.title = dark ? "Switch to light theme" : "Switch to dark theme";
       }
-      paint();
-      btn.addEventListener("click", function () {
+      paintTheme();
+      themeButton.addEventListener("click", function () {
         var next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
         apply(next);
         try { localStorage.setItem("muster-docs-theme", next); } catch {}
-        paint();
+        paintTheme();
       });
-      links.insertBefore(btn, links.firstChild);
+      links.insertBefore(themeButton, links.firstChild);
     }
 
-    // ── TOC: collect h2/h3 (giving them ids), build the right rail ─────
+    var menuButton = document.getElementById("docs-menu-toggle");
+    var sidebar = document.getElementById("docs-navigation");
+    if (menuButton && sidebar) {
+      var mobile = window.matchMedia("(max-width: 900px)");
+      function setMenu(open) {
+        menuButton.setAttribute("aria-expanded", String(open));
+        sidebar.classList.toggle("is-open", open);
+      }
+      menuButton.addEventListener("click", function () {
+        setMenu(menuButton.getAttribute("aria-expanded") !== "true");
+      });
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && mobile.matches && menuButton.getAttribute("aria-expanded") === "true") {
+          setMenu(false);
+          menuButton.focus();
+        }
+      });
+      mobile.addEventListener("change", function () {
+        var sidebarHadFocus = sidebar.contains(document.activeElement);
+        setMenu(false);
+        if (mobile.matches && sidebarHadFocus) menuButton.focus();
+      });
+      menuButton.hidden = false;
+      document.documentElement.classList.add("docs-enhanced");
+    }
+
     var content = document.querySelector(".docs-content");
     var shell = document.querySelector(".docs-shell");
     if (content && shell) {
-      var heads = [].slice.call(content.querySelectorAll("h2, h3")).filter(function (h) {
-        return h.textContent.trim();
+      var headings = Array.from(content.querySelectorAll("h2, h3")).filter(function (heading) {
+        return heading.textContent.trim();
       });
       var taken = new Set();
-      [].slice.call(document.querySelectorAll("[id]")).forEach(function (el) { taken.add(el.id); });
-      heads.forEach(function (h) { if (!h.id) h.id = slug(h.textContent, taken); });
-      if (heads.length >= 2) {
-        var nav = document.createElement("aside");
-        nav.className = "docs-toc";
-        nav.setAttribute("aria-label", "On this page");
-        var html = '<p class="docs-toc__title">On this page</p>';
-        heads.forEach(function (h) {
-          html += '<a class="' + (h.tagName === "H3" ? "lv3" : "") + '" href="#' + h.id + '"><span>' +
-            h.textContent.replace(/\s+/g, " ").trim() + "</span></a>";
+      document.querySelectorAll("[id]").forEach(function (element) { taken.add(element.id); });
+      headings.forEach(function (heading) { if (!heading.id) heading.id = slug(heading.textContent, taken); });
+      if (headings.length >= 2) {
+        var toc = document.createElement("aside");
+        toc.className = "docs-toc";
+        toc.setAttribute("aria-label", "On this page");
+        var title = document.createElement("p");
+        title.className = "docs-toc__title";
+        title.textContent = "On this page";
+        toc.appendChild(title);
+        var tocLinks = headings.map(function (heading) {
+          var link = document.createElement("a");
+          if (heading.tagName === "H3") link.className = "lv3";
+          link.setAttribute("href", "#" + heading.id);
+          link.textContent = heading.textContent.replace(/\s+/g, " ").trim();
+          toc.appendChild(link);
+          return link;
         });
-        nav.innerHTML = html;
-        shell.appendChild(nav);
-
-        // scroll-spy: the last heading above the fold is the active one
-        var tocLinks = [].slice.call(nav.querySelectorAll("a"));
-        var byId = {};
-        heads.forEach(function (h, i) { byId[h.id] = tocLinks[i]; });
+        shell.appendChild(toc);
         var ticking = false;
         function spy() {
           ticking = false;
-          var current = null;
-          for (var id in byId) {
-            var el = document.getElementById(id);
-            if (el && el.getBoundingClientRect().top < 96) current = id;
-          }
-          tocLinks.forEach(function (a) { a.classList.remove("active"); });
-          if (current) byId[current].classList.add("active");
+          var current = -1;
+          headings.forEach(function (heading, index) {
+            if (heading.getBoundingClientRect().top < 140) current = index;
+          });
+          tocLinks.forEach(function (link, index) {
+            link.classList.toggle("active", index === current);
+            if (index === current) link.setAttribute("aria-current", "location");
+            else link.removeAttribute("aria-current");
+          });
         }
         window.addEventListener("scroll", function () {
           if (!ticking) { ticking = true; requestAnimationFrame(spy); }
@@ -87,26 +115,38 @@
       }
     }
 
-    // ── copy button on every code block ─────────────────────────────────
-    [].slice.call(document.querySelectorAll("pre")).forEach(function (pre) {
-      var btn = document.createElement("button");
-      btn.className = "code-copy";
-      btn.type = "button";
-      btn.textContent = "Copy";
-      btn.setAttribute("aria-label", "Copy code to clipboard");
-      btn.addEventListener("click", function () {
+    var blocks = document.querySelectorAll(".docs-content pre");
+    if (blocks.length && content) {
+      var copyStatus = document.createElement("p");
+      copyStatus.className = "docs-copy-status";
+      copyStatus.setAttribute("role", "status");
+      content.appendChild(copyStatus);
+      blocks.forEach(function (pre) {
+        // Capture the example before adding the control, including pre-only examples.
         var text = (pre.querySelector("code") || pre).textContent || "";
-        function done(ok) {
-          btn.textContent = ok ? "Copied" : "Failed";
-          setTimeout(function () { btn.textContent = "Copy"; }, 1400);
-        }
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
-        } else {
-          done(false);
-        }
+        var button = document.createElement("button");
+        var resetTimer;
+        button.className = "code-copy";
+        button.type = "button";
+        button.textContent = "Copy";
+        button.setAttribute("aria-label", "Copy code to clipboard");
+        pre.setAttribute("tabindex", "0");
+        button.addEventListener("click", function () {
+          copyStatus.textContent = "";
+          function done(ok) {
+            clearTimeout(resetTimer);
+            button.textContent = ok ? "Copied" : "Failed";
+            copyStatus.textContent = ok ? "Code copied to clipboard." : "Could not copy. Select the code and copy it manually.";
+            resetTimer = setTimeout(function () { button.textContent = "Copy"; }, 1400);
+          }
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+          } else {
+            done(false);
+          }
+        });
+        pre.appendChild(button);
       });
-      pre.appendChild(btn);
-    });
+    }
   });
 })();

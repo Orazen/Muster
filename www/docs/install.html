@@ -5,28 +5,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Install &amp; apps — Muster Docs</title>
 <meta name="description" content="Every way to run Muster: desktop downloads for macOS (Apple Silicon and Intel), Windows, and Linux, auto-update behavior, the web app at /app, and the iOS and Android companions.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="/landing-workroom/v1/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/public-site/v1/site.css">
 <link rel="stylesheet" href="/docs/docs.css">
 </head>
-<body>
+<body class="docs-page">
+<a class="site-skip" href="#docs-content">Skip to content</a>
 
-<header class="docs-header">
-  <a class="brand-lockup" href="/">
-    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0460e"/><text x="16" y="22" font-family="ui-sans-serif,system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>
-    Muster
-  </a>
+<header class="site-header docs-header">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
   <span class="docs-tag">Docs</span>
   <div class="docs-header__spacer"></div>
-  <nav class="docs-header__links">
+  <nav class="site-nav docs-header__links" aria-label="Main navigation">
     <a href="/download.html">Download</a>
     <a href="/#features">Features</a>
-    <a class="button button--primary button--small" href="/app">Open app</a>
+    <a class="site-cta button button--primary button--small" href="/app">Open Muster</a>
   </nav>
 </header>
 
+<div class="docs-mobile-bar">
+  <span>Install &amp; apps</span>
+  <button id="docs-menu-toggle" type="button" aria-expanded="false" aria-controls="docs-navigation" hidden>Browse docs <span aria-hidden="true">+</span></button>
+</div>
+
 <div class="docs-shell">
 
-  <aside class="docs-sidebar" aria-label="Docs navigation">
+  <aside id="docs-navigation" class="docs-sidebar" aria-label="Docs navigation">
     <div class="docs-sidebar__group">
       <p class="docs-sidebar__label">Start</p>
       <a href="/docs">Overview</a>
@@ -48,9 +52,10 @@
     </div>
   </aside>
 
-  <main class="docs-content">
+  <main id="docs-content" class="docs-content" tabindex="-1">
 
-<h1>Install &amp; apps</h1>
+<p class="site-eyebrow docs-eyebrow">02 / Start</p>
+    <h1>Install &amp; apps</h1>
     <p class="lead">Start in the managed web app. Use a desktop app for supported device capabilities and a companion app for supported mobile actions. Each installed version has its own connection and permission steps.</p>
     <div class="pill-row">
       <span class="pill">Web app</span>
@@ -58,10 +63,10 @@
       <span class="pill">Phone &amp; Watch companions</span>
     </div>
 
-    <h2>The web app</h2>
+    <h2 id="the-web-app">The web app</h2>
     <p>Open <a href="https://muster.today/app">Muster</a> in your browser and complete the sign-in and setup steps shown. Muster is a free app; bring your own provider API key and pay the provider for usage. You do not need a separate server deployment. See <a href="/docs/setup">Account &amp; device setup</a>.</p>
 
-    <h2>Desktop downloads</h2>
+    <h2 id="desktop-downloads">Desktop downloads</h2>
     <p>Use the <a href="/download.html">download page</a> for the current version, available platforms and release-specific installation information. Keep your existing workspace data when upgrading.</p>
     <div class="table-scroll" role="region" tabindex="0" aria-label="Desktop downloads table">
       <table>
@@ -74,19 +79,19 @@
       </table>
     </div>
 
-    <h2>First launch and updates</h2>
+    <h2 id="first-launch-and-updates">First launch and updates</h2>
     <p>Open the installed app and follow its account, provider and permission steps. Signing, notarization and operating-system compatibility are specific to each package. If a package fails a platform check, confirm the download and release instructions before proceeding.</p>
     <p>Where the installed version offers an update, review its in-app controls and restart when you are ready. Updating the website does not update an installed desktop or companion app.</p>
 
-    <h2>Device capabilities</h2>
+    <h2 id="device-capabilities">Device capabilities</h2>
     <p>Supported desktop versions can use local agent CLIs, local models, files and computer controls. Those features run where the device tools are available, with the permissions you grant. A web sign-in alone does not make your laptop's tools available to a hosted bot.</p>
     <p>Keep the selected computer online for work that needs it. Capabilities differ by operating system, installed version and runtime; check the available controls rather than assuming every platform offers the same tools.</p>
 
-    <h2>Phone and Watch companions</h2>
+    <h2 id="phone-and-watch-companions">Phone and Watch companions</h2>
     <p>Companion availability and distribution are separate from the desktop downloads. Use a supported build and its pairing flow to connect the intended workspace or computer. Approval delivery and replies need an available connection; an installed app alone does not establish pairing.</p>
     <p>Companions may retain local credentials, drafts or cached content. They are not complete backups of the workspace. Confirm the correct account and destination before sending a task or answering an approval.</p>
 
-    <h2>The Muster CLI</h2>
+    <h2 id="the-muster-cli">The Muster CLI</h2>
     <p>The distributed CLI can operate an authorized workspace through commands such as <code>pair</code>, <code>bots</code>, <code>send</code>, <code>status</code> and <code>receipts</code>. Obtain it through the official <a href="/download.html">downloads</a>, use <code>muster help</code> for that version, and read <a href="/docs/agents">For agents</a> before connecting another agent. Public npm packages with similar names are not an installation path for Muster.</p>
 
     <div class="callout callout--note">
@@ -98,13 +103,17 @@
   </main>
 </div>
 
-<footer class="docs-footer">
-  <span>© 2026 Orazen · Muster</span>
-  <nav>
+<footer class="site-footer docs-footer">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+  <p>Your work. In good company.</p>
+  <nav aria-label="Footer">
     <a href="/">Home</a>
     <a href="/download.html">Download</a>
     <a href="/docs/security">Security</a>
+    <a href="/privacy-policy">Privacy</a>
+    <a href="/Terms-of-Service">Terms</a>
   </nav>
+  <small>© 2026 Orazen · Muster</small>
 </footer>
 
 <script src="/docs/docs.js"></script>
