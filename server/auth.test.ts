@@ -188,3 +188,70 @@ describe("gate composition", () => {
     expect(gated(true, "/assets/app.js", isPublicApiPath)).toBe(false);
   });
 });
+
+describe("paired mailbox proof is separate from a paired session", () => {
+  it.each([
+    undefined,
+    { version: 1, email: "different@example.test", source: "local-email" },
+    { version: 1, email: "paired-proof@example.test", source: "unverified" },
+    { version: 1, email: "paired-proof@example.test", source: "local-email", elevated: true },
+  ])("keeps an unknown or mismatched proof unverified", async (proof) => {
+    const { createBridgedUser, getDb, mailboxProofForPairing, pairedIdentitySchema } = await import("./auth.ts");
+    const email = `unproven-${crypto.randomUUID()}@example.test`;
+    const id = createBridgedUser(email, "Owned unknown proof", pairedIdentitySchema.parse({ email, mailboxProof: proof }).mailboxProof);
+    expect(getDb().prepare('SELECT "emailVerified" FROM "user" WHERE "id" = ?').get(id)?.emailVerified).toBe(0);
+    expect(getDb().prepare('SELECT count(*) AS n FROM "operator_mailbox_proof" WHERE "userId" = ?').get(id)?.n).toBe(0);
+    expect(mailboxProofForPairing(id)).toBeUndefined();
+  });
+  it.each([undefined, { version: 1, email: "other@example.test", source: "local-email" }])("refuses an existing proven identity collision without exact mailbox proof", async (proof) => {
+    const { createBridgedUser, getDb, mintSession, pairedIdentitySchema } = await import("./auth.ts");
+    const email = `collision-${crypto.randomUUID()}@example.test`;
+    const id = createBridgedUser(email, "Owned proven identity", { version: 1, email, source: "local-email" });
+    mintSession(id);
+    expect(() => createBridgedUser(email, "Attacker name", pairedIdentitySchema.parse({ email, mailboxProof: proof }).mailboxProof)).toThrow("Prove this mailbox locally");
+    expect(getDb().prepare('SELECT count(*) AS n FROM "session" WHERE "userId" = ?').get(id)?.n).toBe(1);
+    expect(getDb().prepare('SELECT "name" FROM "user" WHERE "id" = ?').get(id)?.name).toBe("Owned proven identity");
+  });
+  it("binds a configured upstream's exact proof but does not delegate that proof onward", async () => {
+    const { createBridgedUser, getDb, mailboxProofForPairing } = await import("./auth.ts");
+    const email = `proven-${crypto.randomUUID()}@example.test`;
+    const id = createBridgedUser(email, "Owned bound proof", { version: 1, email, source: "local-email" });
+    expect(getDb().prepare('SELECT "emailVerified" FROM "user" WHERE "id" = ?').get(id)?.emailVerified).toBe(1);
+    expect(getDb().prepare('SELECT "email", "source" FROM "operator_mailbox_proof" WHERE "userId" = ?').get(id)).toMatchObject({ email, source: "paired" });
+    expect(mailboxProofForPairing(id)).toBeUndefined();
+  });
+  it("refuses a valid remote proof into a preexisting unproven identity and preserves its old custody", async () => {
+    const { createBridgedUser, getDb, mintSession } = await import("./auth.ts");
+    const email = `existing-${crypto.randomUUID()}@example.test`;
+    const id = createBridgedUser(email, "Owned existing identity");
+    mintSession(id);
+    expect(() => createBridgedUser(email, "Changed name", { version: 1, email, source: "local-email" })).toThrow("Prove this mailbox locally");
+    expect(getDb().prepare('SELECT "emailVerified", "name" FROM "user" WHERE "id" = ?').get(id)).toMatchObject({ emailVerified: 0, name: "Owned existing identity" });
+    expect(getDb().prepare('SELECT count(*) AS n FROM "session" WHERE "userId" = ?').get(id)?.n).toBe(1);
+  });
+});
+
+
+describe("desktop mailbox provenance is a separate bounded response header", () => {
+  it.each(["local-email", "local-google"] as const)("round-trips current %s proof without widening the identity body", async (source) => {
+    const { encodePairingMailboxProof, decodePairingMailboxProof } = await import("./auth.ts");
+    const proof = { version: 1 as const, email: "owned-header@example.test", source };
+    const header = encodePairingMailboxProof(proof);
+    expect(header).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(decodePairingMailboxProof(header, "OWNED-HEADER@example.test")).toEqual(proof);
+  });
+  it.each([
+    null,
+    "",
+    "invalid.header",
+    "x".repeat(1025),
+    Buffer.from(JSON.stringify({ version: 2, email: "owned-header@example.test", source: "local-email" })).toString("base64url"),
+    Buffer.from(JSON.stringify({ version: 1, email: "other@example.test", source: "local-email" })).toString("base64url"),
+    Buffer.from(JSON.stringify({ version: 1, email: "owned-header@example.test", source: "paired" })).toString("base64url"),
+    Buffer.from(JSON.stringify({ version: 1, email: "owned-header@example.test", source: "local-email", elevated: true })).toString("base64url"),
+    Buffer.from(JSON.stringify({ version: 1, email: "owned-header@example.test", source: "local-email" })).toString("base64url") + "=",
+  ])("refuses missing, malformed, mismatched or delegated header bytes", async (header) => {
+    const { decodePairingMailboxProof } = await import("./auth.ts");
+    expect(decodePairingMailboxProof(header, "owned-header@example.test")).toBeUndefined();
+  });
+});

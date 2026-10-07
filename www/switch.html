@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="/public-site/v1/site.css">
 <style>
 
-:root { --ink:var(--site-ink); --bg:var(--site-paper); --card:var(--site-white); --body:var(--site-ink); --muted:var(--site-muted); --muted-2:var(--site-muted); --line:var(--site-line); --accent:var(--site-moss); --accent-border:var(--site-moss); --accent-line:var(--site-line); --accent-wash:var(--site-lime); --accent-wash-2:var(--site-lime); --shadow-soft:none; }
+:root { --ink:var(--site-ink); --bg:var(--site-paper); --card:var(--site-white); --body:var(--site-ink); --muted:var(--site-muted); --muted-2:var(--site-muted); --line:var(--site-line); --accent:var(--site-accent-text); --accent-border:var(--site-accent-text); --accent-line:var(--site-line); --accent-wash:var(--site-accent-soft); --accent-wash-2:var(--site-accent-soft); --shadow-soft:none; }
 .switch-wrap { width:min(1140px,calc(100% - 96px)); margin-inline:auto; }
 .switch-hero { display:grid; grid-template-columns:1.3fr .7fr; align-items:end; gap:64px; padding:72px 0 58px; }
 .switch-hero h1 { margin:18px 0 0; max-width:740px; font:650 clamp(53px,7.4vw,92px)/.98 var(--site-display); letter-spacing:-.065em; }
@@ -19,8 +19,8 @@ table { width:100%; border-collapse:collapse; font-size:14px; line-height:1.65; 
 th,td { text-align:left; padding:17px 20px; border-bottom:1px solid var(--site-line); vertical-align:top; }
 th { color:var(--site-muted); font-weight:550; font-size:12px; }
 .quick-table td:first-child { font-weight:600; width:22%; }
-.quick-table td:last-child { background:#edf0d9; width:43%; }
-.quick-table thead th:last-child { background:var(--site-lime); color:var(--site-ink); }
+.quick-table td:last-child { background:var(--site-accent-wash); width:43%; }
+.quick-table thead th:last-child { background:var(--site-accent-soft); color:var(--site-ink); }
 .table-scroll { overflow-x:auto; border:1px solid var(--site-line); border-radius:9px; background:var(--site-white); }
 .quick-table { min-width:590px; }
 .migration-paths { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:22px; padding:0 0 62px; }
@@ -37,12 +37,12 @@ code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; ba
 .comparison-table table { min-width:950px; }
 .comparison-table th[scope="row"] { width:16%; }
 .comparison-note { margin:18px 0 0; max-width:790px; font-size:12px; color:var(--site-muted); }
-.switch-steps { display:grid; grid-template-columns:.8fr 1.2fr; gap:64px; margin-bottom:56px; padding:42px; border-radius:11px; background:var(--site-lime); }
-.switch-steps .site-eyebrow { color:var(--site-moss); }
+.switch-steps { display:grid; grid-template-columns:.8fr 1.2fr; gap:64px; margin-bottom:56px; padding:42px; border-radius:11px; background:var(--site-accent-soft); }
+.switch-steps .site-eyebrow { color:var(--site-on-accent-soft); }
 .switch-steps h2 { margin:18px 0 0; font-size:clamp(36px,4.5vw,56px); }
 .switch-steps ol { margin:0; padding-left:22px; }
 .switch-steps li { padding:0 0 20px 7px; color:var(--site-ink); font-size:14px; line-height:1.65; }
-.switch-steps .cta { display:inline-flex; margin-top:12px; padding:13px 21px; background:var(--site-moss); color:var(--site-white); border-radius:6px; font-size:14px; text-decoration:none; }
+.switch-steps .cta { display:inline-flex; margin-top:12px; padding:13px 21px; background:var(--site-accent); color:var(--site-on-accent); border-radius:6px; font-size:14px; text-decoration:none; }
 @media(max-width:900px) { .migration-paths{grid-template-columns:1fr}.migration-paths .card{display:grid;grid-template-columns:1fr 1.7fr;gap:24px}.switch-hero{grid-template-columns:1fr;gap:28px}.switch-hero .intro{max-width:600px}.switch-steps{gap:32px;padding:32px} }
 @media(max-width:760px) { .switch-wrap{width:calc(100% - 40px)}.switch-hero{padding-top:44px}.switch-steps{grid-template-columns:1fr}.table-scroll{border-radius:7px}.migration-paths .card{grid-template-columns:1fr;gap:0}.card h3{max-width:none} }
 @media(max-width:420px) { .switch-steps{padding:25px}.switch-hero h1{font-size:52px} }
@@ -50,7 +50,7 @@ code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; ba
 </style></head><body>
 <a class="site-skip" href="#main">Skip to content</a>
 <header class="site-header">
-  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+  <a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
   <nav class="site-nav" aria-label="Primary"><a href="/teams.html">Teams</a><a href="/templates.html">Templates</a><a href="/download.html">Download</a><a href="/docs">Docs</a><a class="site-cta" href="/app">Open Muster <span aria-hidden="true">↗</span></a></nav>
 </header>
 <main id="main" class="switch-wrap">
@@ -109,7 +109,7 @@ code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; ba
         <tr>
           <!-- Column label cell -->
           <th scope="col" aria-label="Feature" style="padding:16px 18px;border-bottom:1px solid var(--line);"></th>
-          <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--accent-line);background:var(--site-lime);color:var(--accent-border);font-weight:600;font-size:15px;letter-spacing:-0.01em;">Muster</th>
+          <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--accent-line);background:var(--site-accent-soft);color:var(--site-on-accent-soft);font-weight:600;font-size:15px;letter-spacing:-0.01em;">Muster</th>
           <!-- Source: rival-osaurus/README.md L5 (<h1>Osaurus</h1>) -->
           <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--line);color:var(--ink);font-weight:600;font-size:15px;letter-spacing:-0.01em;">Osaurus</th>
           <!-- Source: rival-rakazo/README.md L1 (# Rakazo) -->
@@ -122,7 +122,7 @@ code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; ba
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Platforms</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">macOS · Windows · Ubuntu · hosted web</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:var(--site-accent-wash);color:var(--body);vertical-align:top;">macOS · Windows · Ubuntu · hosted web</td>
           <!-- Source: rival-osaurus/README.md L24 (badge “Platform macOS (Apple Silicon)”), L49, L69 (requires macOS 15.5+ Apple Silicon) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">macOS (Apple Silicon)</td>
           <!-- Source: rival-rakazo/README.md L8-L10 (“available on the web, as an Electron desktop app, and through an Expo mobile app”) -->
@@ -133,7 +133,7 @@ code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; ba
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">License</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">BSL 1.1 (source-available)</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:var(--site-accent-wash);color:var(--body);vertical-align:top;">BSL 1.1 (source-available)</td>
           <!-- Source: rival-osaurus/README.md L53 (“MIT licensed”), L359-L361 (License: MIT) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">MIT</td>
           <!-- Source: rival-rakazo/README.md L145 (“licensed under the Apache License 2.0”) -->
@@ -146,7 +146,7 @@ code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; ba
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Hosted workspace</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">Yes — Muster Cloud</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:var(--site-accent-wash);color:var(--body);vertical-align:top;">Yes — Muster Cloud</td>
           <!-- Source: rival-osaurus/README.md L151 (“Osaurus Router is the hosted path — pay-as-you-go with credits”; hosted model routing, not a hosted app) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Model routing only (Router, pay-as-you-go)</td>
           <!-- Not stated: rival-rakazo/README.md links rakazo.com (L12) but describes no hosted tier or plans -->
@@ -157,7 +157,7 @@ code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; ba
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Price</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">Free Muster app; AI provider usage billed separately</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:var(--site-accent-wash);color:var(--body);vertical-align:top;">Free Muster app; AI provider usage billed separately</td>
           <!-- Source: rival-osaurus/README.md L53 (MIT, free app), L151 (Router: “pay-as-you-go with credits”) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Free app; Router pay-as-you-go credits</td>
           <!-- Not stated: rival-rakazo/README.md contains no pricing; self-host is free under Apache-2.0 (L145) -->
@@ -169,7 +169,7 @@ code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; ba
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Privacy tech</th>
           <!-- Source: muster-audit/www/index.html L531-L553 (Privacy Shield: on-device scrubbing of emails/phones/secrets before cloud models, deterministic masking, counts-only receipt per turn) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">Optional on-device Privacy Shield with counts-only receipts per turn; supported flows depend on setup</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:var(--site-accent-wash);color:var(--body);vertical-align:top;">Optional on-device Privacy Shield with counts-only receipts per turn; supported flows depend on setup</td>
           <!-- Source: rival-osaurus/README.md L107 (on-device privacy filter: classifier + regex scrubbing, fail-closed send block, wire-level verification in Insights panel) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">On-device privacy filter (classifier + regex), fail-closed scrubbing, wire-level verification</td>
           <!-- Source: rival-rakazo/README.md L52 (ENCRYPTION_KEY), L58-L59 (“Connector credentials are encrypted on the server and are never returned by the API”) -->
@@ -180,7 +180,7 @@ code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; ba
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Computer providers</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">Cloud Linux desktop per bot (Box) or your own machine</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:var(--site-accent-wash);color:var(--body);vertical-align:top;">Cloud Linux desktop per bot (Box) or your own machine</td>
           <!-- Source: rival-osaurus/README.md L83-L99 (local sandbox Linux VM via Apple Containerization), L127 (per-agent WebKit browser session) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Local sandbox VM (Apple Containerization) + per-agent browser</td>
           <!-- Source: rival-rakazo/README.md L23 (“Docker, E2B, Daytona, and trusted local-computer support”) -->
@@ -191,7 +191,7 @@ code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; ba
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Voice mode</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">Spoken replies + bot calls (free built-in voice; ElevenLabs optional); on-device dictation</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:var(--site-accent-wash);color:var(--body);vertical-align:top;">Spoken replies + bot calls (free built-in voice; ElevenLabs optional); on-device dictation</td>
           <!-- Source: rival-osaurus/README.md L205 (on-device transcription via FluidAudio, voice input, VAD wake-word, global hotkey; “No audio leaves your Mac”) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">On-device voice input — transcription, wake word, global hotkey</td>
           <!-- Source: rival-rakazo/README.md L17 (“Voice mode: speak replies, dictate, and call a bot. Bring your own ElevenLabs, OpenAI, or Cartesia key”) -->
@@ -202,7 +202,7 @@ code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; ba
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Mobile apps</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">Built — store listings pending</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:var(--site-accent-wash);color:var(--body);vertical-align:top;">Built — store listings pending</td>
           <!-- Not mentioned: rival-osaurus/README.md covers macOS only; no mobile app referenced -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
           <!-- Source: rival-rakazo/README.md L9 (“through an Expo mobile app”), L80-L90 (Desktop and mobile section, docs/mobile-release.md) -->
@@ -235,7 +235,7 @@ code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; ba
 
 </main>
 <footer class="site-footer">
-  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p>
+  <a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p>
   <nav aria-label="Footer"><a href="/switch.html">Switch to Muster</a><a href="/docs">Docs</a><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a></nav>
   <small>© 2026 Orazen</small>
 </footer>

@@ -19,7 +19,7 @@
 @source "../index.html";
 @source "../tray.html";
 
-/* Grok Bot dark palette (pixel-sampled from the real app) */
+/* Neutral dark surfaces with Muster's orange action palette. */
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-pop-in: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
@@ -39,14 +39,14 @@
      clears 4.5:1 everywhere without looking heavy. */
   --color-ink: #fcfcfc;
   --color-ink-secondary: #cfd3d8;
-  --color-accent: #1084fe;
-  --color-accent-border: #459ffe;
+  --color-accent: #c64215;
+  --color-accent-border: #ff9768;
   /* Focus stays neutral and independent of brand/action colors. */
   --color-focus: #a3a3a3;
   /* User bubbles carry the accent hue so YOUR words are findable by color
      alone — plain grey read as part of the background on dark panels. */
-  --color-bubble-user: #2a5079;
-  --color-bubble-user-border: #459ffe66;
+  --color-bubble-user: #4a271a;
+  --color-bubble-user-border: #8c4a2d;
   --color-success: #38d591;
   --color-danger: #ff5667;
   --color-warning: #ff9800;
@@ -66,7 +66,7 @@
      chains resolve against whichever [data-theme] skin is active, so the
      aliases are skin-correct for free. Deliberately NOT aliased: `accent`
      — shadcn means neutral hover fill by it while Muster's bg-accent is
-     the brand blue; vendored components map hover states to bg-raised
+     the brand color; vendored components map hover states to bg-raised
      instead, and that mapping is part of the vendor checklist. */
   --color-background: var(--color-app);
   --color-foreground: var(--color-ink);
@@ -91,13 +91,20 @@
   --color-chart-5: #a78bfa;
 }
 
+/* Text actions need a brighter ink than filled buttons on dark surfaces.
+   Tailwind's text-color namespace keeps every text-accent variant aligned,
+   including body portals, without changing bg-accent or other hover inks. */
+@theme inline {
+  --text-color-accent: var(--color-accent-text, var(--color-accent));
+}
+
 /* Skins. Every surface already paints itself from the palette custom
    properties above, so a skin is just a block that re-points those variables
    under a [data-theme] attribute — nothing else needs to know a skin exists.
    The attribute selector is deliberately bare (not html[data-theme]) so any
    element can open a theme context for its own subtree, which is how the
    picker draws honest swatches. Midnight restates the @theme values exactly:
-   with no attribute set the app renders byte-for-byte as before. */
+   with no attribute set the app uses the same default palette. */
 [data-theme="midnight"] {
   --color-app: #070707;
   --color-panel: #111111;
@@ -108,11 +115,11 @@
   --color-hairline: #333333;
   --color-ink: #fcfcfc;
   --color-ink-secondary: #cfd3d8;
-  --color-accent: #1084fe;
-  --color-accent-border: #459ffe;
+  --color-accent: #c64215;
+  --color-accent-border: #ff9768;
   --color-focus: #a3a3a3;
-  --color-bubble-user: #2a5079;
-  --color-bubble-user-border: #459ffe66;
+  --color-bubble-user: #4a271a;
+  --color-bubble-user-border: #8c4a2d;
   --color-success: #38d591;
   --color-danger: #ff5667;
   --color-warning: #ff9800;
@@ -120,7 +127,7 @@
   --color-scrollbar-thumb: #3d3d3d;
 }
 
-/* Light is a separate saved choice; the four existing palettes stay intact. */
+/* Light keeps neutral surfaces as a separate saved choice. */
 [data-theme="light"] {
   color-scheme: light;
   --color-app: #ffffff;
@@ -132,11 +139,11 @@
   --color-hairline: #e6e6e6;
   --color-ink: #161616;
   --color-ink-secondary: #626262;
-  --color-accent: #0066cc;
-  --color-accent-border: #007cac;
+  --color-accent: #b83a10;
+  --color-accent-border: #c64215;
   --color-focus: #666666;
-  --color-bubble-user: #eaf7fc;
-  --color-bubble-user-border: #bbe6f7;
+  --color-bubble-user: #fbece3;
+  --color-bubble-user-border: #e5bda8;
   --color-success: #26734f;
   --color-danger: #b42332;
   --color-warning: #916329;
@@ -211,6 +218,17 @@
   --color-warning: #8f6004;
   --color-live: #0e7d8f;
   --color-scrollbar-thumb: #b4c8cd;
+}
+
+/* Reset at every skin boundary so alternate and nested custom skins retain
+   their own accent. A fresh install and saved Midnight use the brighter ink. */
+:root,
+[data-theme] {
+  --color-accent-text: var(--color-accent);
+}
+:root:not([data-theme]),
+[data-theme="midnight"] {
+  --color-accent-text: var(--color-accent-border);
 }
 
 html,

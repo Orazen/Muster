@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="/public-site/v1/site.css">
 <style>
 
-:root { --muted:var(--site-muted); --accent-soft:var(--site-moss); }
+:root { --muted:var(--site-muted); --accent-soft:var(--site-accent-text); }
 .download-wrap { width:min(1140px,calc(100% - 96px)); margin-inline:auto; }
 .hero { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(230px,.6fr); align-items:end; gap:64px; padding:76px 0 52px; }
 .hero h1 { margin:18px 0 24px; max-width:770px; font:650 clamp(52px,7.4vw,96px)/.98 var(--site-display); letter-spacing:-.065em; }
@@ -20,21 +20,21 @@
 .hero-note h2 { margin:18px 0 10px; font:600 24px/1.15 var(--site-display); letter-spacing:-.04em; }
 .hero-note p { color:var(--site-muted); font-size:14px; margin:0; }
 .hero-note a { display:inline-block; margin-top:20px; text-underline-offset:5px; text-decoration:underline; font-size:14px; }
-.detected-badge { display:inline-flex; align-items:center; flex-wrap:wrap; gap:8px; padding:7px 10px; margin-top:12px; background:var(--site-lime); border-radius:5px; font-size:12px; }
-.detected-badge__dot { width:6px; height:6px; background:var(--site-moss); border-radius:50%; }
+.detected-badge { display:inline-flex; align-items:center; flex-wrap:wrap; gap:8px; padding:7px 10px; margin-top:12px; background:var(--site-accent-soft); border-radius:5px; font-size:12px; }
+.detected-badge__dot { width:6px; height:6px; background:var(--site-accent-text); border-radius:50%; }
 .platform-heading { display:flex; align-items:baseline; justify-content:space-between; gap:16px; padding:20px 0; border-top:1px solid var(--site-line); }
 .platform-heading h2 { margin:0; font:600 27px/1.1 var(--site-display); letter-spacing:-.04em; }
 .platform-heading span { font-size:12px; color:var(--site-muted); }
 .cards { display:flex; flex-direction:column; gap:0; }
 .dl-card { display:flex; align-items:center; justify-content:space-between; gap:28px; padding:26px 24px; border-bottom:1px solid var(--site-line); }
-.dl-card--primary { background:var(--site-lime); border-radius:10px; border-color:transparent; }
+.dl-card--primary { background:var(--site-accent-soft); border-radius:10px; border-color:transparent; }
 .dl-card__os { font:600 25px/1.2 var(--site-display); letter-spacing:-.035em; }
 .dl-card__meta { max-width:670px; margin-top:6px; font-size:13px; color:var(--site-muted); }
 .dl-card__meta code { overflow-wrap:anywhere; }
-.dl-card__btn { display:inline-flex; align-items:center; justify-content:center; flex:none; gap:9px; min-height:46px; padding:10px 18px; border:1px solid var(--site-moss); border-radius:7px; background:var(--site-moss); color:var(--site-white); font-size:13px; font-weight:600; text-decoration:none; }
-.dl-card__btn:hover { background:var(--site-ink); }
+.dl-card__btn { display:inline-flex; align-items:center; justify-content:center; flex:none; gap:9px; min-height:46px; padding:10px 18px; border:1px solid var(--site-accent); border-radius:7px; background:var(--site-accent); color:var(--site-on-accent); font-size:13px; font-weight:600; text-decoration:none; }
+.dl-card__btn:hover { background:var(--site-accent-hover); border-color:var(--site-accent-hover); }
 .dl-card__btn--secondary { color:var(--site-ink); background:transparent; border-color:var(--site-line); }
-.dl-card__btn--secondary:hover { background:var(--site-white); border-color:var(--site-moss); }
+.dl-card__btn--secondary:hover { background:var(--site-white); border-color:var(--site-accent-text); }
 .dl-card__icon { width:17px; height:17px; flex:none; }
 .checksums { margin:20px 0 64px; font-size:12px; color:var(--site-muted); }
 .checksums__label { width:fit-content; cursor:pointer; padding:6px 0; }
@@ -45,8 +45,8 @@
 .docker-section p { color:var(--site-muted); font-size:14px; line-height:1.7; }
 .docker-section a { text-decoration:underline; text-underline-offset:4px; }
 .docker-section code { display:block; padding:16px; border-radius:6px; background:var(--site-paper); border:1px solid var(--site-line); overflow-x:auto; white-space:pre; font:12px/1.8 ui-monospace,SFMono-Regular,monospace; }
-#ios { grid-column:1/-1; background:var(--site-moss); color:var(--site-white); }
-#ios p,#ios a { color:#e1e6d7 !important; max-width:890px; }
+#ios { grid-column:1/-1; background:var(--site-accent); color:var(--site-on-accent); }
+#ios p,#ios a { color:var(--site-on-accent) !important; max-width:890px; }
 .note { margin:28px 0 86px; padding:20px 0; border-top:1px solid var(--site-line); color:var(--site-muted); font-size:12px; line-height:1.7; }
 @media(max-width:760px) { .download-wrap{width:calc(100% - 40px)} .hero{padding-top:44px;grid-template-columns:1fr;gap:22px} .hero-note{display:none} .hero h1{font-size:clamp(52px,11vw,76px)} .other-ways{grid-template-columns:1fr} .platform-heading{align-items:flex-start;flex-direction:column;gap:8px} }
 @media(max-width:520px) { .dl-card{align-items:flex-start;flex-direction:column;padding:24px 16px;gap:18px} .dl-card__btn{width:100%} .docker-section{padding:24px} }
@@ -57,7 +57,7 @@
 
 <a class="site-skip" href="#main">Skip to content</a>
 <header class="site-header">
-  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+  <a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
   <nav class="site-nav" aria-label="Primary"><a href="/teams.html">Teams</a><a href="/templates.html">Templates</a><a href="/download.html" aria-current="page">Download</a><a href="/docs">Docs</a><a class="site-cta" href="/app">Open Muster <span aria-hidden="true">↗</span></a></nav>
 </header>
 <main id="main" class="download-wrap">
@@ -182,7 +182,7 @@
   </main>
 
   <footer class="site-footer">
-  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p>
+  <a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p>
   <nav aria-label="Footer"><a href="/switch.html">Switch to Muster</a><a href="/docs">Docs</a><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a></nav>
   <small>© 2026 Orazen</small>
 </footer>

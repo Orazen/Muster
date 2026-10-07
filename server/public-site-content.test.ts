@@ -1,5 +1,7 @@
-/** Presentation work must not alter the approved landing or legal document bodies.
- * Baselines come from 3a4a091e; this test is portable and does not need git at runtime. */
+/** Typography, mascot/runtime assets and legal bodies stay locked. The owner
+ * approved M-outline removal and orange presentation on 7 October 2026; only
+ * the entry document, stylesheet and favicon hashes advance with that change.
+ * This portable contract does not need git at runtime. */
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -11,10 +13,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path: string) => readFileSync(join(ROOT, path), "utf8");
 const digest = (bytes: string | Buffer) => createHash("sha256").update(bytes).digest("hex");
 const LOCKED = {
-  "www/index.html": "7d83302dd50465938bca78acb3bbde3a27301a3b3f96290ebd676704a57ee461",
+  "www/index.html": "889291d8d997cff85354ca6c28263eb12e2b69b646e068f6862625c4c18302f1",
   "www/landing-workroom/v1/NOTICE.txt": "b71df88ab87bd4fa50342afb115a3a86f682b1aa1dcba94a44e3d1a17c9c407d",
   "www/landing-workroom/v1/app.js": "faa558ff2e56dc87a97e559b0a95ef5afbf2f78c4afc7fd0f0c24c9787547f82",
-  "www/landing-workroom/v1/favicon.svg": "b7b785941ed26a7163bd4482506f19954b8627d6c62dde31ae36c294aa98369d",
+  "www/landing-workroom/v1/favicon.svg": "28505c526c1631827136b006819490358388f267af99232ef0c96b8676cdcf63",
   "www/landing-workroom/v1/fonts/body-OFL.txt": "9e27a72ed30eb49a08678f6a5d6ed98ec7ba5368f541637ee0683ec9134ef966",
   "www/landing-workroom/v1/fonts/body.woff2": "2ee17598a98d8a59e4df8152d015bec9ab8e4d5672cc0ab42bef806b568e3971",
   "www/landing-workroom/v1/fonts/display-OFL.txt": "4b5a7d8f37f5602621c8a8d7358a6a2e71317e6c231c661e15aef0275d3e07ba",
@@ -31,7 +33,7 @@ const LOCKED = {
   "www/landing-workroom/v1/mascot/vendor/three.core.js": "eb077d2417f61d3e6d9264c317cabc4ea35769ed6b0ab533067292a550784c20",
   "www/landing-workroom/v1/mascot/vendor/three.module.js": "c8211c69345d2e9949dc7a8ac969380497aa0600a5a8ac6a459c8cd02dd9cb8a",
   "www/landing-workroom/v1/social.jpg": "904d06b4be8b19fc4f208eb50bede54359c554dd614b940ac76af72d7eab18a3",
-  "www/landing-workroom/v1/style.css": "f4ac266a40b3e7df9ac77456ca3d0b0da56162d8aef654cc583e5f952d252099"
+  "www/landing-workroom/v1/style.css": "6dd776f0fd5436c625f82503d5a91ab12a7d5b1b07b2117646ccb98d007cb684"
 } as const;
 const LEGAL_BODIES = {
   "privacyPolicy": "e42d6b6614762a0f570ce9d77fccbd5deb3aff52ade7e58296d0e86c02d61697",
@@ -55,9 +57,20 @@ function resourceLinks(html: string) {
 }
 
 describe("public-site presentation boundaries", () => {
-  it("keeps the complete approved landing and mascot bundle byte-identical", () => {
+  it("keeps approved typography, mascot/runtime assets and the current presentation bundle locked", () => {
     expect(["www/index.html", ...files("www/landing-workroom/v1")].sort()).toEqual(Object.keys(LOCKED).sort());
     for (const [path, expected] of Object.entries(LOCKED)) expect(digest(readFileSync(join(ROOT, path))), path).toBe(expected);
+  });
+  it("removes the retired outline mark from every public brand while retaining named home links", () => {
+    const pages = ["www/index.html", ...DOC_PAGES.map((name) => `www/docs/${name}.html`), ...SUPPORT_PAGES.map((name) => `www/${name}.html`)];
+    const retired = /<path\b[^>]*d=["']M4 26V6l12 13L28 6v20["']/;
+    for (const path of pages) {
+      const html = read(path);
+      expect(html, path).not.toMatch(retired);
+      expect(html, path).toContain('aria-label="Muster home"');
+    }
+    for (const route of ["/privacy-policy", "/terms-of-service"]) expect(legalPageFor(route)).not.toMatch(retired);
+    expect(read("www/landing-workroom/v1/favicon.svg")).not.toContain("M14 46V18l18 18 18-18v28");
   });
   it("preserves every byte of the privacy and terms document templates outside their shared shell", () => {
     const source = read("server/legal-pages.ts");

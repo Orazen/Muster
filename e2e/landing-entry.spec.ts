@@ -1,6 +1,6 @@
 /** Acceptance for actual marketing files served by an owned offline fixture.
  * Sample work never contacts an account, provider or application API. */
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -461,5 +461,59 @@ for (const failure of ["webgl", "module"] as const) {
     await expect(page.locator("#hello-button")).toBeDisabled(); await expect(page.locator("#motion-toggle")).toBeDisabled();
     const panel = await openReview(page, "research"); await panel.locator('[data-action="approve"]').click();
     await expect(panel.locator(".receipt-box")).toContainText(/approved/i); await expectNoOverflow(page, 390);
+  });
+}
+
+for (const width of [390, 1440]) {
+  test(`orange entry keeps approved typography and removes the outline logo at ${width}px`, async ({ openLanding }, info) => {
+    const page = await openLanding(width, true);
+    await page.evaluate(() => document.fonts.ready);
+    await expect(page.locator('.wordmark svg')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Muster home', exact: true }).first()).toBeVisible();
+    const appearance = await page.locator('.hero-actions .button.dark').evaluate((action) => {
+      const style = getComputedStyle(action);
+      const luminance = (color: string) => {
+        const rgb = color.match(/[\d.]+/g)!.slice(0, 3).map(Number).map(v => {
+          const s = v / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4;
+        });
+        return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+      };
+      const fg = luminance(style.color), bg = luminance(style.backgroundColor);
+      return { background: style.backgroundColor, contrast: (Math.max(fg, bg) + .05) / (Math.min(fg, bg) + .05),
+        body: getComputedStyle(document.body).fontFamily, heading: getComputedStyle(document.querySelector('h1')!).fontFamily };
+    });
+    expect(appearance.background).toBe('rgb(198, 66, 21)');
+    expect(appearance.contrast).toBeGreaterThanOrEqual(4.5);
+    expect(appearance.body).toMatch(/^Instrument,/);
+    expect(appearance.heading).toMatch(/^Bricolage,/);
+    expect(await page.evaluate(() => Array.from(document.fonts)
+      .filter(face => ['Instrument', 'Bricolage'].includes(face.family.replaceAll('"', '')))
+      .map(face => ({ family: face.family.replaceAll('"', ''), status: face.status })).sort((a, b) => a.family.localeCompare(b.family))))
+      .toEqual(expect.arrayContaining([{ family: 'Bricolage', status: 'loaded' }, { family: 'Instrument', status: 'loaded' }]));
+    for (const [selector, surface] of [['.arch canvas', '.arch'], ['.model-section a', '.model-section']]) {
+      const control = page.locator(selector).first();
+      await control.scrollIntoViewIfNeeded();
+      // Keyboard focus invokes the product's :focus-visible rules.
+      await control.focus();
+      await page.keyboard.press('Shift');
+      const contrast = await control.evaluate((node, parentSelector) => {
+        const luminance = (color: string) => {
+          const rgb = color.match(/[\d.]+/g)!.slice(0, 3).map(Number).map(v => {
+            const s = v / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4;
+          });
+          return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+        };
+        const outline = getComputedStyle(node);
+        if (outline.outlineStyle === 'none' || parseFloat(outline.outlineWidth) < 1) return 0;
+        const fg = luminance(outline.outlineColor), bg = luminance(getComputedStyle(node.closest(parentSelector)!).backgroundColor);
+        return (Math.max(fg, bg) + .05) / (Math.min(fg, bg) + .05);
+      }, surface);
+      expect(contrast, `${selector} focus remains visible on its stage`).toBeGreaterThanOrEqual(3);
+    }
+    await page.locator('.hero').scrollIntoViewIfNeeded();
+    await expectNoOverflow(page, width);
+    const output = process.env.MUSTER_PUBLIC_REVIEW_MEDIA_DIR;
+    if (output) { await mkdir(resolve(output), { recursive: true }); await page.screenshot({ path: resolve(output, `landing-${width === 390 ? 'mobile' : 'desktop'}-orange.png`) }); }
+    await info.attach(`orange-landing-${width}`, { body: await page.screenshot(), contentType: 'image/png' });
   });
 }

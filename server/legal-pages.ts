@@ -39,7 +39,7 @@ function legalShell(title: string, body: string): string {
 <body>
 <a class="site-skip" href="#main">Skip to content</a>
 <header class="site-header">
-<a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" width="25" height="28" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+<a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
 <nav class="site-nav" aria-label="Main navigation"><a href="/docs">Documentation</a><a href="/download.html">Download</a><a class="site-cta" href="/app">Open Muster <span aria-hidden="true">↗</span></a></nav>
 </header>
 <main class="legal-main" id="main">

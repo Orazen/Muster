@@ -25,7 +25,7 @@
   line-height: 1.6;
 }
 
-/* Only Midnight adopts the approved neutral/cyan palette. Alternate skins
+/* Midnight uses neutral workspace surfaces and orange actions. Alternate skins
  * continue to resolve every surface and action from their saved tokens. */
 [data-theme="midnight"] .muster-workspace,
 .muster-workspace[data-theme="midnight"] {
@@ -38,18 +38,18 @@
   --color-hairline: #2b2b2b;
   --color-ink: #f5f5f5;
   --color-ink-secondary: #adadad;
-  /* CTA fills need darker blue for their existing small white labels. */
-  --color-accent: #0066cc;
+  /* CTA fills use a deeper orange for their existing small white labels. */
+  --color-accent: #c64215;
   --color-primary: var(--color-accent);
-  --color-accent-border: #00bbff;
+  --color-accent-border: #ff9768;
   --color-focus: #a3a3a3;
-  --color-bubble-user: #013f56;
-  --color-bubble-user-border: #19536a;
-  --workspace-send: #00bbff;
-  --workspace-send-ink: #052d3c;
+  --color-bubble-user: #4a271a;
+  --color-bubble-user-border: #8c4a2d;
+  --workspace-send: #ff9768;
+  --workspace-send-ink: #2f140b;
 }
 
-/* Accent text and icons retain the approved bright blue on dark surfaces. */
+/* Bright orange keeps accent text and icons legible on dark surfaces. */
 [data-theme="midnight"] .muster-workspace :is(
   .text-accent,
   .wt-greeting h1 > span,

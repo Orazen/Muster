@@ -34,8 +34,9 @@
   border-color: var(--color-hairline);
 }
 .os-desktop .os-mark { letter-spacing: -.02em; text-transform: none; font-size: 18px; font-weight: 600; }
-.os-desktop .os-primary-action { background: #0066cc; border-color: #0066cc; color: #fff; }
-.os-desktop .os-primary-action:hover:not(:disabled) { background: #0058b0; border-color: #0058b0; }
+.os-desktop .os-primary-action { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-primary-foreground, #fff); }
+.os-desktop .os-primary-action:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 86%, #000); border-color: color-mix(in srgb, var(--color-accent) 86%, #000); }
+.os-desktop .rooms-plan-assigned { color: var(--color-accent-text, var(--color-accent)); }
 .os-desktop .os-console-glow { display: none; }
 .os-desktop .os-console-trigger { background: var(--color-panel); border-radius: 18px; box-shadow: none; }
 .os-desktop .os-workspace h1 { font-size: clamp(30px, 3.5vw, 46px); letter-spacing: -.04em; }

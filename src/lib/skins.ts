@@ -33,8 +33,8 @@ export const THEMES: readonly Theme[] = [
   {
     id: "midnight",
     label: "Midnight",
-    description: "The original. Cool and dark.",
-    swatch: { surface: "#070707", panel: "#111111", accent: "#1084fe" },
+    description: "Dark neutral surfaces. Orange details.",
+    swatch: { surface: "#070707", panel: "#111111", accent: "#c64215" },
     overlay: { color: "#070707", symbolColor: "#b5b5b5" },
   },
   {
@@ -61,8 +61,8 @@ export const THEMES: readonly Theme[] = [
   {
     id: "light",
     label: "Light",
-    description: "Neutral daylight. Clear surfaces and blue details.",
-    swatch: { surface: "#ffffff", panel: "#fafafa", accent: "#0066cc" },
+    description: "Neutral daylight. Warm orange details.",
+    swatch: { surface: "#ffffff", panel: "#fafafa", accent: "#b83a10" },
     overlay: { color: "#ffffff", symbolColor: "#626262" },
   },
 ];

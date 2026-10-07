@@ -8,6 +8,7 @@
 // OpenConnector has no runtime DELETE for disconnects — a disconnect here
 // means Muster stops advertising that service to its agents.
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import type { ConnectorRelayAuthority } from "./composio.ts";
 import type { AppConfig } from "./config.ts";
 import type { JsonValue } from "./schema.ts";
 import { z } from "zod";
@@ -36,7 +37,7 @@ export function configured(cfg: AppConfig): boolean {
   return access(cfg) !== null;
 }
 
-async function request(cfg: AppConfig, path: string, init?: RequestInit): Promise<Response> {
+async function request(cfg: AppConfig, path: string, init?: RequestInit, authority?: ConnectorRelayAuthority): Promise<Response> {
   const backend = access(cfg);
   if (!backend) throw new Error("The Muster Connector is unavailable");
   const headers = new Headers(init?.headers);
@@ -45,10 +46,12 @@ async function request(cfg: AppConfig, path: string, init?: RequestInit): Promis
   // headers (the MCP relay's session id), but they cannot override the
   // credential. Headers construction also normalizes any caller object.
   headers.set("authorization", `Bearer ${backend.token}`);
+  authority?.signal.throwIfAborted();
+  if (authority && !authority.current()) throw new Error("Connected-app authority changed");
   return fetch(`${backend.url}${path}`, {
     ...init,
     headers,
-    signal: init?.signal ?? AbortSignal.timeout(30_000),
+    signal: authority ? AbortSignal.any([authority.signal, init?.signal ?? AbortSignal.timeout(30_000)]) : init?.signal ?? AbortSignal.timeout(30_000),
   });
 }
 
@@ -190,6 +193,10 @@ export function mcpIntegration(_cfg: AppConfig, context: {
       OMB_COMMS_TOKEN: context.commsToken,
       OMB_BOT_ID: context.botId,
       OMB_THREAD_ID: context.threadId,
+      // connector approval gate (CONNECTOR-APPROVAL-GATE/v1): the flag and
+      // its test clock ride to the bridge; only an explicit "off" disables
+      MUSTER_CONNECTOR_APPROVAL: process.env.MUSTER_CONNECTOR_APPROVAL ?? "",
+      OMB_CONNECTOR_APPROVAL_TIMEOUT_MS: process.env.OMB_CONNECTOR_APPROVAL_TIMEOUT_MS ?? "",
     },
   };
 }
@@ -199,6 +206,7 @@ export async function relayMcp(
   cfg: AppConfig,
   payload: JsonValue,
   transportSessionId?: string,
+  authority?: ConnectorRelayAuthority,
 ): Promise<{ status: number; bytes: Uint8Array; contentType: string; transportSessionId?: string }> {
   const headers = new Headers({
     "content-type": "application/json",
@@ -210,7 +218,7 @@ export async function relayMcp(
     headers,
     body: JSON.stringify(payload),
     signal: AbortSignal.timeout(10 * 60_000),
-  });
+  }, authority);
   const declared = Number(response.headers.get("content-length") ?? "0");
   if (declared > 20 * 1024 * 1024) throw new Error("Connected-app response exceeded 20 MB");
   const bytes = new Uint8Array(await response.arrayBuffer());

@@ -17,7 +17,7 @@
 
 /* Directory interaction structure originally derived from BotMRR (MIT,
    github.com/milind-soni/openmausbot-teams). Workroom visual treatment. */
-:root { --orange:var(--site-moss); --mono:ui-monospace,SFMono-Regular,monospace; }
+:root { --orange:var(--site-accent-text); --mono:ui-monospace,SFMono-Regular,monospace; }
 .teams-wrap { width:min(1140px,calc(100% - 96px)); margin-inline:auto; padding:72px 0 40px; }
 .library-intro { display:grid; grid-template-columns:1.3fr .7fr; align-items:end; gap:64px; margin-bottom:46px; }
 .library-intro h1 { margin:18px 0 0; font:650 clamp(54px,7.5vw,94px)/.98 var(--site-display); letter-spacing:-.065em; }
@@ -30,11 +30,11 @@
 .count { margin-left:auto; color:var(--site-muted); font-size:12px; }
 .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; }
 .card { display:flex; flex-direction:column; min-width:0; min-height:320px; padding:26px; border:1px solid var(--site-line); border-radius:9px; background:var(--site-white); color:var(--site-ink); font:inherit; text-align:left; cursor:pointer; transition:border-color .18s,transform .18s; }
-.card:hover { border-color:var(--site-moss); transform:translateY(-3px); }
+.card:hover { border-color:var(--site-accent-text); transform:translateY(-3px); }
 .card .top { display:flex; align-items:flex-start; gap:14px; }
 .card h3 { margin:0; font:600 25px/1.08 var(--site-display); letter-spacing:-.04em; overflow-wrap:anywhere; }
 .card .by { margin-top:9px; color:var(--site-muted); font-size:11px; }
-.ava { display:grid; place-items:center; flex:none; width:var(--avatar-size); height:var(--avatar-size); border:1px solid var(--site-line); border-radius:10px; background:var(--site-lime); color:var(--site-ink); font:650 22px/1 var(--site-display); }
+.ava { display:grid; place-items:center; flex:none; width:var(--avatar-size); height:var(--avatar-size); border:1px solid var(--site-line); border-radius:10px; background:var(--site-accent-soft); color:var(--site-ink); font:650 22px/1 var(--site-display); }
 .card .ava { margin-left:auto; }
 .card .tag { color:var(--site-muted); font-size:14px; line-height:1.6; margin:22px 0; overflow-wrap:anywhere; }
 .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:auto; }
@@ -42,7 +42,7 @@
 .chip i { display:grid; place-items:center; width:17px; height:17px; background:var(--site-paper); font:600 10px var(--site-body); color:var(--site-ink); font-style:normal; }
 .chip.none { padding-inline:9px; }
 .card .foot { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:24px; padding-top:15px; border-top:1px solid var(--site-line); color:var(--site-muted); font-size:11px; }
-.card .foot .out { color:var(--site-moss); }
+.card .foot .out { color:var(--site-accent-text); }
 .card .foot .go { margin-left:auto; font-size:20px; line-height:1; }
 .empty { grid-column:1/-1; text-align:center; padding:60px 20px; border:1px solid var(--site-line); color:var(--site-muted); border-radius:8px; }
 .catalog-note { margin:30px 0 0; color:var(--site-muted); font-size:12px; }
@@ -55,8 +55,8 @@ dialog::backdrop { background:rgba(26,34,24,.55); }
 .sheet h2 { margin:0; font:600 clamp(29px,5vw,44px)/1.05 var(--site-display); letter-spacing:-.045em; }
 .sheet .facts { margin-top:10px; color:var(--site-muted); font-size:12px; }
 .sheet .close { flex:none; width:40px; height:40px; margin-left:auto; border:1px solid var(--site-line); border-radius:50%; background:var(--site-white); color:var(--site-ink); }
-.sheet .close:hover { background:var(--site-lime); }
-.sheet .install { display:inline-flex; margin:18px 0 8px; padding:12px 18px; background:var(--site-moss); color:var(--site-white); border-radius:6px; font-size:14px; text-decoration:none; }
+.sheet .close:hover { background:var(--site-accent-soft); }
+.sheet .install { display:inline-flex; margin:18px 0 8px; padding:12px 18px; background:var(--site-accent); color:var(--site-on-accent); border-radius:6px; font-size:14px; text-decoration:none; }
 .panel { margin:22px 0; padding:22px; border:1px solid var(--site-line); border-radius:8px; background:var(--site-white); color:var(--site-muted); font-size:14px; line-height:1.7; }
 .sect { margin:32px 0 14px; }
 .members { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
@@ -72,7 +72,7 @@ dialog::backdrop { background:rgba(26,34,24,.55); }
 .readme a { text-decoration:underline; }
 .related { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
 .rel { padding:18px; border:1px solid var(--site-line); border-radius:7px; background:var(--site-white); color:var(--site-ink); text-align:left; cursor:pointer; }
-.rel:hover { background:var(--site-lime); }
+.rel:hover { background:var(--site-accent-soft); }
 .rel b { display:block; font:600 19px/1.15 var(--site-display); letter-spacing:-.03em; }
 .rel span { display:block; margin-top:8px; color:var(--site-muted); font-size:12px; }
 @media(max-width:960px) { .grid{grid-template-columns:repeat(2,minmax(0,1fr))} .library-intro{grid-template-columns:1fr;gap:26px}.sub{max-width:650px} }
@@ -84,7 +84,7 @@ dialog::backdrop { background:rgba(26,34,24,.55); }
 <body>
 <a class="site-skip" href="#main">Skip to content</a>
 <header class="site-header">
-  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+  <a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
   <nav class="site-nav" aria-label="Primary"><a href="/teams.html" aria-current="page">Teams</a><a href="/templates.html">Templates</a><a href="/download.html">Download</a><a href="/docs">Docs</a><a class="site-cta" href="/app">Open Muster <span aria-hidden="true">↗</span></a></nav>
 </header>
 <main id="main" class="teams-wrap">
@@ -107,7 +107,7 @@ dialog::backdrop { background:rgba(26,34,24,.55); }
   <p class="catalog-note">Team packs are community content. Review their members, required tools and playbooks before importing.</p>
 </main>
 <footer class="site-footer">
-  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p>
+  <a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p>
   <nav aria-label="Footer"><a href="/switch.html">Switch to Muster</a><a href="/docs">Docs</a><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a></nav>
   <small>© 2026 Orazen</small>
 </footer>

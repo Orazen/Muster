@@ -1,6 +1,6 @@
 /** Owned, offline fixtures for the cloud-to-desktop browser pairing tests. */
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { access, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +14,59 @@ import { freePortBlock } from "../server/testing/ports.ts";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUTPUT_LIMIT = 16_384;
 const pause = (ms: number) => new Promise<void>((resolvePause) => setTimeout(resolvePause, ms));
+
+/** Seed only owned one-use challenges; the real auth routes establish proof
+ * and replace the password removed by the unproven-custody cleanup. This is
+ * offline fixture setup, not evidence of email delivery or Google consent. */
+async function proveFixtureMailbox(base: string, dataDirectory: string, email: string, password: string, userId: string): Promise<string> {
+  const api = (path: string, body: Record<string, string>) => fetch(`${base}/api/auth${path}`, {
+    method: "POST", redirect: "error", signal: AbortSignal.timeout(10_000),
+    headers: { "content-type": "application/json", origin: base }, body: JSON.stringify(body),
+  });
+  const seed = (identifier: string, value: string) => {
+    const db = new DatabaseSync(join(dataDirectory, "auth.db"));
+    const now = new Date();
+    try {
+      db.prepare('INSERT INTO "verification" ("id", "identifier", "value", "expiresAt", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)')
+        .run(randomBytes(16).toString("hex"), identifier, value, new Date(now.getTime() + 600_000).toISOString(), now.toISOString(), now.toISOString());
+    } finally { db.close(); }
+  };
+  const otp = randomBytes(4).readUInt32BE() % 1_000_000;
+  const code = String(otp).padStart(6, "0");
+  seed(`email-verification-otp-${email}`, `${createHash("sha256").update(code).digest("base64url")}:0`);
+  const verified = await api("/email-otp/verify-email", { email, otp: code });
+  if (!verified.ok) throw new Error(`Pairing fixture mailbox proof failed (${verified.status})`);
+  const cookie = verified.headers.getSetCookie().find(value => value.startsWith("better-auth.session_token="))?.split(";")[0];
+  if (!cookie) throw new Error("Pairing fixture verified session missing");
+  await verified.arrayBuffer();
+  const db = new DatabaseSync(join(dataDirectory, "auth.db"));
+  try {
+    z.object({ id: z.literal(userId), email: z.literal(email), emailVerified: z.literal(1), source: z.literal("local-email") }).parse(db.prepare(`
+      SELECT u."id", u."email", u."emailVerified", p."source" FROM "user" u
+      JOIN "operator_mailbox_proof" p ON p."userId" = u."id" AND p."email" = lower(u."email")
+      WHERE u."id" = ?`).get(userId));
+    if (db.prepare('SELECT count(*) AS n FROM "account" WHERE "userId" = ?').get(userId)?.n !== 0 ||
+        db.prepare('SELECT count(*) AS n FROM "verification" WHERE "identifier" = ?').get(`email-verification-otp-${email}`)?.n !== 0) {
+      throw new Error("Pairing fixture proof did not consume the code and remove unproven credentials");
+    }
+  } finally { db.close(); }
+  // Keep the existing password-sign-in browser journeys after real OTP
+  // cleanup. The library consumes this reset challenge and hashes the password.
+  const token = randomBytes(32).toString("base64url");
+  seed(`reset-password:${token}`, userId);
+  const reset = await api("/reset-password", { token, newPassword: password });
+  if (!reset.ok) {
+    throw new Error(`Pairing fixture password reset failed (${reset.status})`);
+  }
+  z.object({ status: z.literal(true) }).parse(await reset.json());
+  const after = new DatabaseSync(join(dataDirectory, "auth.db"));
+  try {
+    if (after.prepare('SELECT count(*) AS n FROM "verification" WHERE "identifier" = ?').get(`reset-password:${token}`)?.n !== 0) {
+      throw new Error("Pairing fixture reset challenge was not consumed");
+    }
+  } finally { after.close(); }
+  return cookie;
+}
 
 interface ServerEnvironmentOptions {
   home: string;
@@ -390,7 +443,8 @@ setInterval(() => { if (process.ppid !== owner) process.exit(0); }, 100).unref()
       body: JSON.stringify({ email, password, name: "Pairing E2E Owner" }),
     });
     if (!signup.ok) throw new Error(`Pairing fixture signup failed (${signup.status})`);
-    await signup.arrayBuffer();
+    const signupAccount = z.object({ user: z.object({ id: z.string().min(1), email: z.literal(email) }) }).parse(await signup.json());
+    await proveFixtureMailbox(cloudUrl, join(rootDirectory, "cloud", "data"), email, password, signupAccount.user.id);
     const harness: PairingHarness = { cloudUrl, desktopUrl, rootDirectory, email, password, stop };
     if (calendarFixture) {
       const response = await fetch(`${desktopUrl}/api/auth/sign-up/email`, {
@@ -400,8 +454,7 @@ setInterval(() => { if (process.ppid !== owner) process.exit(0); }, 100).unref()
       });
       if (!response.ok) throw new Error(`Calendar fixture signup failed (${response.status})`);
       const account = z.object({ user: z.object({ id: z.string().min(1) }) }).parse(await response.json());
-      const cookie = response.headers.getSetCookie().map(value => value.split(";")[0]).join("; ");
-      if (!cookie) throw new Error("Calendar fixture session missing");
+      const cookie = await proveFixtureMailbox(desktopUrl, join(rootDirectory, "desktop", "data"), email, password, account.user.id);
       const db = new DatabaseSync(join(rootDirectory, "desktop", "data", "auth.db"));
       try {
         const binding = { userId: account.user.id, sessionId: randomBytes(24).toString("hex") };

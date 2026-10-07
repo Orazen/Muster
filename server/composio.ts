@@ -130,28 +130,49 @@ function trustedAuthUrl(value: string | undefined, slug: string): string {
   return trustedComposioUrl(value, "authorization");
 }
 
-async function getProjectSession(apiKey: string, sessionId: string): Promise<SessionResponse | null> {
+/** Internal relay authority comes from the harness, never the connector frame. */
+export interface ConnectorRelayAuthority {
+  current: () => boolean;
+  signal: AbortSignal;
+}
+
+function requireRelayAuthority(authority?: ConnectorRelayAuthority): void {
+  authority?.signal.throwIfAborted();
+  if (authority && !authority.current()) throw new Error("Connected-app authority changed");
+}
+function relaySignal(milliseconds: number, authority?: ConnectorRelayAuthority): AbortSignal {
+  const timeout = AbortSignal.timeout(milliseconds);
+  return authority ? AbortSignal.any([authority.signal, timeout]) : timeout;
+}
+
+async function getProjectSession(apiKey: string, sessionId: string, authority?: ConnectorRelayAuthority): Promise<SessionResponse | null> {
+  requireRelayAuthority(authority);
   const res = await fetch(`${apiBase()}/tool_router/session/${encodeURIComponent(sessionId)}`, {
     redirect: "error",
     headers: projectHeaders(apiKey),
-    signal: AbortSignal.timeout(15_000),
+    signal: relaySignal(15_000, authority),
   });
+  requireRelayAuthority(authority);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await responseError(res, `Composio session: HTTP ${res.status}`));
-  return parseProjectSession(await composioJson(res));
+  const value = await composioJson(res);
+  requireRelayAuthority(authority);
+  return parseProjectSession(value);
 }
 
 /** Validate a project key and return one reusable Session for this install. */
 export async function prepareProjectSession(
   apiKey: string,
   current?: { apiKey?: string; userId?: string; sessionId?: string },
+  authority?: ConnectorRelayAuthority,
 ): Promise<{ apiKey: string; userId: string; sessionId: string }> {
+  requireRelayAuthority(authority);
   const trimmed = apiKey.trim();
   if (!trimmed) throw new Error("Enter a Composio project API key");
   if (!trimmed.startsWith("ak_")) throw new Error("Composio project API keys start with ak_");
 
   if (trimmed === current?.apiKey && current.sessionId) {
-    const existing = await getProjectSession(trimmed, current.sessionId);
+    const existing = await getProjectSession(trimmed, current.sessionId, authority);
     if (existing) {
       return {
         apiKey: trimmed,
@@ -161,6 +182,7 @@ export async function prepareProjectSession(
     }
   }
 
+  requireRelayAuthority(authority);
   const userId = current?.userId ?? `muster_${randomUUID()}`;
   const res = await fetch(`${apiBase()}/tool_router/session`, {
     redirect: "error",
@@ -174,28 +196,33 @@ export async function prepareProjectSession(
         enable_connection_removal: true,
       },
     }),
-    signal: AbortSignal.timeout(30_000),
+    signal: relaySignal(30_000, authority),
   });
+  requireRelayAuthority(authority);
   if (!res.ok) throw new Error(await responseError(res, `Composio rejected this key (HTTP ${res.status})`));
-  const session = parseProjectSession(await composioJson(res));
+  const value = await composioJson(res);
+  requireRelayAuthority(authority);
+  const session = parseProjectSession(value);
   return { apiKey: trimmed, userId, sessionId: session.session_id };
 }
 
-async function ensureProjectSession(cfg: AppConfig): Promise<SessionResponse> {
+async function ensureProjectSession(cfg: AppConfig, authority?: ConnectorRelayAuthority, persisted?: () => void): Promise<SessionResponse> {
   const composio = cfg.composio;
   if (!composio?.apiKey) throw new Error("No Composio project key configured");
   if (composio.sessionId) {
-    const existing = await getProjectSession(composio.apiKey, composio.sessionId);
+    const existing = await getProjectSession(composio.apiKey, composio.sessionId, authority);
     if (existing) return existing;
   }
-  // A missing/deleted session is recreated and its non-secret identifiers are
-  // persisted so an edited config/env setup does not recreate it every launch.
-  const prepared = await prepareProjectSession(composio.apiKey, composio);
-  const created = await getProjectSession(composio.apiKey, prepared.sessionId);
+  // Setup may already have created a remote session when cancellation arrives.
+  // Refuse subsequent local persistence and executable dispatch; do not claim undo.
+  const prepared = await prepareProjectSession(composio.apiKey, composio, authority);
+  const created = await getProjectSession(composio.apiKey, prepared.sessionId, authority);
   if (!created) throw new Error("Composio Session disappeared after creation");
+  requireRelayAuthority(authority);
   saveConfig({ composio: { userId: prepared.userId, sessionId: prepared.sessionId } });
   composio.userId = prepared.userId;
   composio.sessionId = prepared.sessionId;
+  persisted?.();
   return created;
 }
 
@@ -218,6 +245,10 @@ export async function mcpIntegration(
       OMB_COMMS_TOKEN: context.commsToken,
       OMB_BOT_ID: context.botId,
       OMB_THREAD_ID: context.threadId,
+      // connector approval gate (CONNECTOR-APPROVAL-GATE/v1): the flag and
+      // its test clock ride to the bridge; only an explicit "off" disables
+      MUSTER_CONNECTOR_APPROVAL: process.env.MUSTER_CONNECTOR_APPROVAL ?? "",
+      OMB_CONNECTOR_APPROVAL_TIMEOUT_MS: process.env.OMB_CONNECTOR_APPROVAL_TIMEOUT_MS ?? "",
     },
   };
 }
@@ -226,7 +257,15 @@ export async function relayMcp(
   cfg: AppConfig,
   payload: JsonValue,
   transportSessionId?: string,
+  authority?: ConnectorRelayAuthority,
 ): Promise<{ status: number; bytes: Uint8Array; contentType: string; transportSessionId?: string }> {
+  const configuration = cfg.composio;
+  let expectedConfiguration = JSON.stringify(configuration);
+  const current: ConnectorRelayAuthority | undefined = authority ? {
+    signal: authority.signal,
+    current: () => authority.current() && cfg.composio === configuration && JSON.stringify(configuration) === expectedConfiguration,
+  } : undefined;
+  requireRelayAuthority(current);
   const broker = brokerAccess();
   let url: string;
   const headers = new Headers({
@@ -239,16 +278,17 @@ export async function relayMcp(
     headers.set("authorization", `Bearer ${broker.token}`);
   } else {
     if (!cfg.composio?.apiKey) throw new Error("Connected apps are unavailable");
-    const session = await ensureProjectSession(cfg);
+    const session = await ensureProjectSession(cfg, current, () => { expectedConfiguration = JSON.stringify(configuration); });
     url = session.mcp.url;
     headers.set("x-api-key", cfg.composio.apiKey);
   }
+  requireRelayAuthority(current);
   const response = await fetch(url, {
     redirect: "error",
     method: "POST",
     headers,
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(10 * 60_000),
+    signal: relaySignal(10 * 60_000, current),
   });
   const declared = Number(response.headers.get("content-length") ?? "0");
   if (declared > 20 * 1024 * 1024) throw new Error("Connected-app response exceeded 20 MB");

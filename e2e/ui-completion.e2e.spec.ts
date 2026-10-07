@@ -1,5 +1,6 @@
 /** Owned-account acceptance for the approved presentation migration.
  * These are real routes/controls; no provider or personal session is used. */
+import { z } from "zod";
 import type { Locator } from "@playwright/test";
 import { test, expect, pairDesktop } from "./browser-fixtures.ts";
 
@@ -12,6 +13,24 @@ async function fits(surface: Locator, width: number) {
   expect(box.left).toBeGreaterThanOrEqual(-1);
   expect(box.right).toBeLessThanOrEqual(width + 1);
   expect(box.scroll).toBeLessThanOrEqual(box.client + 1);
+}
+
+async function readableAction(action: Locator, background?: Locator) {
+  const colors = await action.evaluate(node => ({ foreground: getComputedStyle(node).color, background: getComputedStyle(node).backgroundColor }));
+  if (background && /(?:rgba\(0, 0, 0, 0\)|transparent)/.test(colors.background)) {
+    colors.background = await background.evaluate(node => getComputedStyle(node).backgroundColor);
+  }
+  const luminance = (color: string) => {
+    const values = color.match(/[\d.]+/g)!.slice(0, 3).map(Number);
+    const channels = values.map(value => {
+      const s = color.startsWith('color(srgb') ? value : value / 255;
+      return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4;
+    });
+    return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
+  };
+  const fg = luminance(colors.foreground), bg = luminance(colors.background);
+  expect((Math.max(fg, bg) + .05) / (Math.min(fg, bg) + .05)).toBeGreaterThanOrEqual(4.5);
+  return colors;
 }
 
 for (const width of [320, 1280]) {
@@ -67,18 +86,9 @@ test("light sign-in keeps the Flower greeting and readable primary action at 320
   await fits(page.locator(".auth-layout"), 320);
   const action = page.locator(".auth-submit").first();
   await expect(action).toBeVisible();
-  const contrast = await action.evaluate(node => {
-    const style = getComputedStyle(node);
-    const luminance = (color: string) => {
-      const rgb = color.match(/[\d.]+/g)!.slice(0, 3).map(Number).map(v => {
-        const s = v / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4;
-      });
-      return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
-    };
-    const fg = luminance(style.color), bg = luminance(style.backgroundColor);
-    return (Math.max(fg, bg) + .05) / (Math.min(fg, bg) + .05);
-  });
-  expect(contrast).toBeGreaterThanOrEqual(4.5);
+  expect((await readableAction(action)).background).toBe("rgb(184, 58, 16)");
+  await action.hover();
+  await readableAction(action);
   await page.screenshot({ path: info.outputPath("light-auth-320.png"), fullPage: true });
 });
 
@@ -92,6 +102,10 @@ test("OS presentation keeps overview, command console and return-to-chat usable 
   const overview = page.getByRole("region", { name: "Workspace overview", exact: true });
   await expect(overview).toBeVisible();
   await fits(page.locator(".os-desktop"), 320);
+  const primary = page.locator(".os-primary-action").first();
+  expect((await readableAction(primary)).background).toBe("rgb(198, 66, 21)");
+  await primary.hover();
+  await readableAction(primary);
   await page.getByRole("button", { name: "Open command console", exact: true }).click();
   const console = page.getByRole("dialog", { name: "Command console", exact: true });
   await expect(console).toBeVisible();
@@ -142,4 +156,48 @@ test("Light onboarding keeps need choices readable and does not send a task", as
   await fits(needs, 320);
   expect(messages).toEqual([]);
   await page.screenshot({ path: info.outputPath("light-onboarding-320.png"), fullPage: true });
+});
+
+
+test("default orange keeps Inter loaded and portaled Undo readable without losing the draft", async ({ harness, newPage, pairCodeFromCloud }, info) => {
+  const page = await newPage();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await pairDesktop(page, harness, pairCodeFromCloud);
+  await page.getByRole("button", { name: "Quick start — skip setup, just get me in", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Set up Muster", exact: true })).toBeHidden();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "midnight");
+  const composer = page.getByRole("textbox", { name: /^Message / }).last();
+  const draft = "Keep this unsent while checking orange controls.";
+  await composer.fill(draft);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("omb-drafts"))).toContain(draft);
+  const sends: string[] = [];
+  page.on("request", request => { if (request.method() === "POST" && /\/api\/bots\/[^/]+\/messages$/.test(new URL(request.url()).pathname)) sends.push(request.url()); });
+  const savedDrafts = await page.evaluate(() => localStorage.getItem("omb-drafts"));
+  const created = await page.context().request.post(`${harness.desktopUrl}/api/bots`, { data: {} });
+  expect(created.ok()).toBe(true);
+  const { bot } = z.object({ bot: z.object({ id: z.string(), name: z.string() }) }).parse(await created.json());
+  const name = "Orange presentation fixture";
+  const renamed = await page.context().request.patch(`${harness.desktopUrl}/api/bots/${bot.id}`, { data: { name } });
+  expect(renamed.ok()).toBe(true);
+  const row = page.getByRole("complementary").first().getByRole("button", { name: `Rename ${name}`, exact: true });
+  await expect(row).toBeVisible();
+  await row.hover();
+  await page.getByRole("button", { name: `Archive ${name}`, exact: true }).click();
+  const status = page.getByRole("status").filter({ hasText: `${name} archived` });
+  const undo = status.getByRole("button", { name: "Undo", exact: true });
+  await expect(undo).toBeVisible();
+  expect(await undo.evaluate(node => node.closest('.muster-workspace') === null)).toBe(true);
+  const normal = await readableAction(undo, status);
+  expect(normal.foreground).toBe("rgb(255, 151, 104)");
+  await undo.hover();
+  await readableAction(undo, status);
+  await expect(composer).toHaveValue(draft);
+  await page.evaluate(() => document.fonts.ready);
+  expect(await page.evaluate(() => Array.from(document.fonts).some(face => face.family.replaceAll('"', '') === 'Inter Variable' && face.status === 'loaded'))).toBe(true);
+  expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toMatch(/Inter Variable/);
+  await page.screenshot({ path: info.outputPath("orange-workspace-undo.png"), fullPage: true });
+  await undo.click();
+  await expect(row).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("omb-drafts"))).toBe(savedDrafts);
+  expect(sends).toEqual([]);
 });

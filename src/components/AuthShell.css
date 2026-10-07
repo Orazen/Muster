@@ -3,11 +3,12 @@
 .auth-shell--welcome {
   --auth-ink: var(--color-ink);
   --auth-muted: var(--color-ink-secondary);
-  --auth-accent: var(--color-accent);
+  --auth-accent: var(--color-accent-text, var(--color-accent));
   --auth-surface: var(--color-panel);
   --auth-border: var(--color-hairline);
   --auth-control: var(--color-raised);
-  --auth-primary: #0066cc;
+  --auth-primary: var(--color-accent);
+  --auth-primary-hover: color-mix(in srgb, var(--auth-primary) 86%, #000);
   --color-focus: inherit;
   background: var(--color-app);
   color-scheme: dark;
@@ -40,8 +41,8 @@
 .auth-shell--welcome .auth-divider { color: var(--auth-muted); }
 .auth-shell--welcome .auth-divider::before, .auth-shell--welcome .auth-divider::after { background: var(--auth-border); }
 .auth-shell--welcome .auth-submit, .auth-shell--welcome .auth-google { min-height: 48px; border-radius: 12px; }
-.auth-shell--welcome .auth-submit { background: var(--auth-primary); border-color: var(--auth-primary); color: #fff; }
-.auth-shell--welcome .auth-submit:hover:not(:disabled) { background: #0058b0; border-color: #0058b0; }
+.auth-shell--welcome .auth-submit { background: var(--auth-primary); border-color: var(--auth-primary); color: var(--color-primary-foreground, #fff); }
+.auth-shell--welcome .auth-submit:hover:not(:disabled) { background: var(--auth-primary-hover); border-color: var(--auth-primary-hover); }
 .auth-shell--welcome .auth-google { background: var(--auth-control); border-color: var(--auth-border); color: var(--auth-ink); }
 .auth-shell--welcome .auth-google:hover:not(:disabled) { border-color: var(--auth-accent); }
 .auth-shell--welcome .auth-password-toggle { color: var(--auth-muted); }

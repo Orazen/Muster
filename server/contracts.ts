@@ -135,6 +135,10 @@ export type RuntimeEvent = RuntimeEventBase &
         requestType: "permission" | "question";
         tool: string;
         summary: string;
+        /** Complete command from the driver's structured execution input.
+         * Absent when only a display title/reason is known; never reconstructed
+         * from summary, which may be clipped. */
+        command?: string;
         choices?: string[];
       }
     | {

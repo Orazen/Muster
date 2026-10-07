@@ -274,9 +274,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           return send({ jsonrpc: "2.0", id: msg.id, result: { decision: legacy ? "approved" : "accept" } });
         }
         const requestId = newId();
+        const command = params.command !== undefined && isText(params.command) ? params.command : undefined;
         const summary =
-          params.command !== undefined
-            ? params.command.slice(0, 200)
+          command !== undefined
+            ? command.slice(0, 200)
             : Array.isArray(params.questions)
               ? params.questions.map((q: any) => q.question ?? q.header).filter(Boolean).join(" · ")
               : params.reason !== undefined
@@ -318,6 +319,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           requestType: isQuestion ? "question" : "permission",
           tool,
           summary,
+          command,
           choices,
         });
       };

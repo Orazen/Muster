@@ -1,12 +1,22 @@
 import { DatabaseSync } from "node:sqlite";
 import { betterAuth } from "better-auth";
+import { google as googleProvider, verifyGoogleIdToken, type GoogleOptions } from "better-auth/social-providers";
 import { revokeUnprovenAccountAccess } from "better-auth/db";
 import { emailOTP, organization } from "better-auth/plugins";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, existsSync, chmodSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { DATA_DIR } from "./config.ts";
+import {
+  operatorPinMode,
+  migrateOperatorMailboxProof,
+  recordOperatorMailboxProof,
+  pinnedOperatorMissingWarning,
+  resolveOperatorId,
+  UNPINNED_OPERATOR_WARNING,
+} from "./operator-pin.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { GOOGLE_SIGNIN_SCOPES, googleCredentials } from "./google-auth.ts";
 import {
@@ -16,6 +26,9 @@ import {
   sendVerificationEmail,
 } from "./email.ts";
 import { mailTransportFailing } from "./otp-delivery.ts";
+
+const mailboxProofContext = new AsyncLocalStorage<{ google?: { sub: string; email: string } }>();
+const verifiedGoogleProfile = z.object({ sub: z.string().min(1), email: z.email(), email_verified: z.literal(true) });
 
 /**
  * Self-hosting is opt-in and mirrors the same signal server/index.ts uses:
@@ -250,6 +263,7 @@ function migrate(db: DatabaseSync): void {
     const cols = db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === column)) db.exec(ddl);
   }
+  migrateOperatorMailboxProof(db);
 }
 
 export function getDb(): DatabaseSync {
@@ -263,17 +277,30 @@ export function getDb(): DatabaseSync {
   return _db;
 }
 
-/** The deployment's first account — the primary user. The boot migration
- * stamps pre-ownership bots/groups with this id, so everything that existed
- * before per-user ownership lands on the operator's account rather than
- * staying visible to every signed-in account. */
+/** How this deployment chooses its operator (see operator-pin.ts). Read once:
+ * the env is fixed for the life of the process. */
+const OPERATOR_PIN = operatorPinMode(process.env, SELF_HOSTED);
+let operatorWarned = false;
+
+/** The deployment's operator — the primary user. Without a pin (desktop,
+ * Muster Cloud, or an unpinned self-hosted deploy) this is the first account.
+ * A self-hosted MUSTER_OPERATOR_EMAIL pins it to that verified account. The
+ * boot migration stamps pre-ownership bots/groups with this id, so everything
+ * that existed before per-user ownership lands on the operator's account
+ * rather than staying visible to every signed-in account. */
 export function primaryUserId(): string | null {
   try {
-    // SAFETY: the SELECT projects only the users table's id column
-    const row = getDb().prepare("SELECT id FROM \"user\" ORDER BY \"createdAt\" ASC LIMIT 1").get() as
-      | { id: string }
-      | undefined;
-    return row?.id ?? null;
+    const id = resolveOperatorId(getDb(), OPERATOR_PIN);
+    if (!operatorWarned && OPERATOR_PIN.kind !== "legacy") {
+      if (OPERATOR_PIN.kind === "unpinned") {
+        operatorWarned = true;
+        console.warn(UNPINNED_OPERATOR_WARNING);
+      } else if (!id) {
+        operatorWarned = true;
+        console.warn(pinnedOperatorMissingWarning(OPERATOR_PIN.email));
+      }
+    }
+    return id;
   } catch {
     return null;
   }
@@ -307,22 +334,89 @@ export function findUserById(id: string): { id: string; name: string; email: str
   }
 }
 
-/** Provision a local account from a cloud-verified identity (pairing
- * bridge). Direct inserts for the same reason provisionOrganizationFor
+/** Parse configured pairing provenance separately from account identity.
+ * Direct inserts for the same reason provisionOrganizationFor
  * is: Better Auth's route handlers require a request context that doesn't
  * exist in server-to-server flows. The org hook fires here explicitly —
  * the databaseHooks.user.create.after path only covers Better Auth's own
  * sign-up routes. */
-export function createBridgedUser(email: string, name: string): string {
+const pairingMailboxProofSchema = z.object({
+  version: z.literal(1),
+  email: z.email(),
+  source: z.enum(["local-email", "local-google"]),
+}).strict();
+export type PairingMailboxProof = z.infer<typeof pairingMailboxProofSchema>;
+export const PAIRING_MAILBOX_PROOF_HEADER = "x-muster-mailbox-proof";
+
+/** Optional server-to-server provenance stays out of the strict desktop JSON
+ * body. This is metadata from the configured identity upstream, not a new
+ * bearer credential or a proof accepted from a browser request. */
+export function encodePairingMailboxProof(proof: PairingMailboxProof): string {
+  return Buffer.from(JSON.stringify(pairingMailboxProofSchema.parse(proof)), "utf8").toString("base64url");
+}
+
+export function decodePairingMailboxProof(value: string | null, email: string): PairingMailboxProof | undefined {
+  if (!value || value.length > 1024 || !/^[A-Za-z0-9_-]+$/.test(value)) return undefined;
+  try {
+    const bytes = Buffer.from(value, "base64url");
+    if (bytes.toString("base64url") !== value) return undefined;
+    const parsed = pairingMailboxProofSchema.safeParse(JSON.parse(bytes.toString("utf8")));
+    return parsed.success && parsed.data.email.toLowerCase() === email.trim().toLowerCase() ? parsed.data : undefined;
+  } catch { return undefined; }
+}
+
+export const pairedIdentitySchema = z.object({
+  email: z.email(),
+  name: z.string().optional(),
+  mailboxProof: pairingMailboxProofSchema.optional().catch(undefined),
+});
+
+/** Pairing carries mailbox proof separately from a valid account/session.
+ * Only this installation's local proof is re-exported; a paired identity
+ * cannot mint a chain of operator proofs on other deployments. */
+export function mailboxProofForPairing(userId: string): z.infer<typeof pairingMailboxProofSchema> | undefined {
+  const row = getDb().prepare(`SELECT u."email", p."source" FROM "user" u
+    JOIN "operator_mailbox_proof" p ON p."userId" = u."id"
+    WHERE u."id" = ? AND lower(u."email") = lower(p."email")
+      AND (u."emailVerified" = 1 OR u."emailVerified" = 'true')
+      AND NOT EXISTS (SELECT 1 FROM "operator_mailbox_quarantine" q WHERE q."userId" = u."id")`).get(userId);
+  const parsed = pairingMailboxProofSchema.safeParse(row && { version: 1, email: row.email, source: row.source });
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** A configured pairing upstream may authenticate an unverified account.
+ * That still pairs a session, but it is not mailbox proof or operator power.
+ * Existing identities are preserved and not promoted through this bridge:
+ * their owner can complete the local email-primary custody cleanup. */
+export class PairingIdentityConflict extends Error {
+  constructor() { super("Prove this mailbox locally before pairing an existing account."); }
+}
+
+export function createBridgedUser(email: string, name: string, mailboxProof?: PairingMailboxProof): string {
   const db = getDb();
   const normalized = email.trim().toLowerCase();
+  const parsed = pairingMailboxProofSchema.safeParse(mailboxProof);
+  const verified = parsed.success && parsed.data.email.toLowerCase() === normalized;
   const existing = findUserByEmail(normalized);
-  if (existing) return existing.id;
+  if (existing) {
+    // Incoming remote proof cannot upgrade surviving old local custody.
+    // The target must already have a current proof and be out of quarantine;
+    // genuine local email-primary cleanup establishes that state.
+    const proven = db.prepare(`SELECT u."id" FROM "user" u
+      JOIN "operator_mailbox_proof" p ON p."userId" = u."id"
+      WHERE u."id" = ? AND lower(p."email") = lower(u."email")
+        AND (u."emailVerified" = 1 OR u."emailVerified" = 'true')
+        AND NOT EXISTS (SELECT 1 FROM "operator_mailbox_quarantine" q WHERE q."userId" = u."id")`).get(existing.id);
+    if (!verified || !proven) throw new PairingIdentityConflict();
+    return existing.id;
+  }
   const userId = `usr_${randomBytes(12).toString("base64url")}`;
   const now = new Date().toISOString();
   db.prepare(
-    'INSERT INTO "user" ("id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt") VALUES (?, ?, ?, 1, NULL, ?, ?)',
-  ).run(userId, name || normalized.split("@")[0], normalized, now, now);
+    'INSERT INTO "user" ("id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, NULL, ?, ?)',
+  ).run(userId, name || normalized.split("@")[0], normalized, verified ? 1 : 0, now, now);
+  if (verified) recordOperatorMailboxProof(db, userId, "paired");
+  else db.prepare('INSERT INTO "operator_mailbox_quarantine" ("userId") VALUES (?)').run(userId);
   provisionOrganizationFor(userId, name || normalized);
   return userId;
 }
@@ -410,7 +504,7 @@ export function requestOwnOrigin(request?: Request): string | undefined {
 function socialProviders() {
   const providers: Record<
     string,
-    { clientId: string; clientSecret: string; scope?: string[]; accessType?: string; prompt?: string }
+    GoogleOptions
   > = {};
 
   const githubId = process.env.GITHUB_CLIENT_ID?.trim();
@@ -424,9 +518,39 @@ function socialProviders() {
   // disagree between them; a half pair counts as absent.
   const google = googleCredentials();
   if (google) {
+    const provider = googleProvider({ clientId: google.clientId, clientSecret: google.clientSecret });
     providers.google = {
       clientId: google.clientId,
       clientSecret: google.clientSecret,
+      getUserInfo: async (tokens) => {
+        if (!tokens.idToken) return null;
+        // The built-in mapper decodes claims; verify the current token's
+        // signature, Google issuer, client audience, expiry and age first.
+        const claims = await verifyGoogleIdToken({ token: tokens.idToken, audience: google.clientId });
+        const parsed = verifiedGoogleProfile.safeParse(claims);
+        if (!parsed.success) return null;
+        const email = parsed.data.email.toLowerCase();
+        const db = getDb();
+        const quarantined = db.prepare(`SELECT q."userId" FROM "operator_mailbox_quarantine" q
+          JOIN "user" u ON u."id" = q."userId"
+          WHERE lower(u."email") = ? OR EXISTS (SELECT 1 FROM "account" a
+            WHERE a."userId" = u."id" AND a."providerId" = 'google' AND a."accountId" = ?)`)
+          .get(email, parsed.data.sub);
+        // A Google stamp cannot bypass old bridge custody or leave its old
+        // sessions alive while making later email-primary cleanup a no-op.
+        if (quarantined) return null;
+        const linked = z.array(z.object({ email: z.string() })).safeParse(db.prepare(`SELECT u."email" FROM "account" a
+          JOIN "user" u ON u."id" = a."userId"
+          WHERE a."providerId" = 'google' AND a."accountId" = ?`).all(parsed.data.sub));
+        // BetterAuth resolves a known subject before its profile mapper and
+        // normally keeps the stored mailbox. A newly changed Google mailbox
+        // must not mint a session for that old proven local identity.
+        if (!linked.success || linked.data.some((row) => row.email.trim().toLowerCase() !== email)) return null;
+        const profile = await provider.getUserInfo(tokens);
+        const current = mailboxProofContext.getStore();
+        if (current && profile) current.google = { sub: parsed.data.sub, email };
+        return profile;
+      },
       // Sign-in stays basic-scope on purpose (GOOGLE_SIGNIN_SCOPES in
       // server/google-auth.ts is the one home for that list): Drive is a
       // separate opt-in connect, so a user sees and can decline it
@@ -582,9 +706,22 @@ export const auth = betterAuth({
     },
     session: {
       create: {
-        before: async (session) => {
+        before: async (session, context) => {
           try {
             const db = getDb();
+            // Endpoint context comes from Better Auth after OTP verification
+            // or its Google callback, not from request body identity fields.
+            if (context?.path === "/sign-in/email-otp") {
+              recordOperatorMailboxProof(db, session.userId, "local-email");
+            } else if (context?.path === "/callback/google" ||
+                (context?.path === "/callback/:id" && context.params?.id === "google")) {
+              const proof = mailboxProofContext.getStore()?.google;
+              if (proof) {
+                const bound = db.prepare(`SELECT u."id" FROM "user" u JOIN "account" a ON a."userId" = u."id"
+                  WHERE u."id" = ? AND lower(u."email") = ? AND a."providerId" = 'google' AND a."accountId" = ?`).get(session.userId, proof.email, proof.sub);
+                if (bound) recordOperatorMailboxProof(db, session.userId, "local-google");
+              }
+            }
             // SAFETY: the SELECT projects only member rows' organizationId column
             const existing = db
               .prepare('SELECT "organizationId" FROM "member" WHERE "userId" = ? ORDER BY "createdAt" ASC LIMIT 1')
@@ -648,6 +785,9 @@ export const auth = betterAuth({
     // reimplementation: unproven links and sessions end at the moment of
     // mailbox proof, whatever route proved it, and proven accounts pass
     // through untouched.
+    afterEmailVerification: async (user) => {
+      recordOperatorMailboxProof(getDb(), user.id, "local-email");
+    },
     beforeEmailVerification: async (user) => {
       if (user.emailVerified) return;
       type UnprovenAccessHelperContext = Parameters<typeof revokeUnprovenAccountAccess>[0];
@@ -661,7 +801,11 @@ export const auth = betterAuth({
       const cleanupCall = {
         context: await auth.$context,
       } as unknown as UnprovenAccessHelperContext;
-      await revokeUnprovenAccountAccess(cleanupCall, user.id);
+      const cleaned = await revokeUnprovenAccountAccess(cleanupCall, user.id);
+      if (!cleaned?.emailVerified || getDb().prepare('SELECT count(*) AS n FROM "session" WHERE "userId" = ?').get(user.id)?.n !== 0 ||
+          getDb().prepare('SELECT count(*) AS n FROM "account" WHERE "userId" = ?').get(user.id)?.n !== 0) {
+        throw new Error("Mailbox verification is waiting for account custody cleanup.");
+      }
     },
   },
   session: {
@@ -825,7 +969,7 @@ async function redactListSessionsResponse(request: Request, response: Response):
 
 const betterAuthHandler = auth.handler;
 const betterAuthFetch = auth.fetch;
-const handleAuthRequest = async (
+const handleAuthRequestInScope = async (
   request: Request,
   handler: (request: Request) => Promise<Response>,
 ): Promise<Response> => {
@@ -869,6 +1013,8 @@ const handleAuthRequest = async (
   const response = await handler(requestForHandler);
   return isListSessionsRequest(request) ? redactListSessionsResponse(request, response) : response;
 };
+const handleAuthRequest = (request: Request, handler: (request: Request) => Promise<Response>) =>
+  mailboxProofContext.run({}, () => handleAuthRequestInScope(request, handler));
 auth.handler = (request) => handleAuthRequest(request, betterAuthHandler);
 auth.fetch = (request) => handleAuthRequest(request, betterAuthFetch);
 
