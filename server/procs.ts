@@ -18,6 +18,7 @@ import {
 import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
 import { resolveCliSpawn, type ResolvedSpawn } from "./env-path.ts";
+import { stripServerSecrets } from "./drivers/child-env.ts";
 
 export function resolveCli(cli: string, args: string[] = []): ResolvedSpawn {
   return resolveCliSpawn(cli, args);
@@ -32,6 +33,9 @@ export function spawnCli(
   // SAFETY: opts always pipes all three stdio streams, so the child is the fully-stdio overload.
   const child = spawn(resolved.command, resolved.args, {
     ...opts,
+    // SAFETY: engine CLIs run model-driven shell commands; harness secrets
+    // (BETTER_AUTH_SECRET, VAULTGRAM_PASSPHRASE, Stripe, …) never ride along.
+    env: stripServerSecrets(opts.env ?? process.env),
     // posix: own process group so kill(-pid) reaps child MCP servers;
     // win32: taskkill /T does the reaping instead (see killCliTree)
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
@@ -60,8 +64,11 @@ export function execCli(
   cb: (err: Error | null, stdout: string) => void,
 ): void {
   const resolved = resolveCli(cli, args);
-  execFile(resolved.command, resolved.args, { ...opts, windowsHide: true }, (err, stdout) =>
-    cb(err, String(stdout)),
+  execFile(
+    resolved.command,
+    resolved.args,
+    { ...opts, env: stripServerSecrets(opts.env ?? process.env), windowsHide: true },
+    (err, stdout) => cb(err, String(stdout)),
   );
 }
 

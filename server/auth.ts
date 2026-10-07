@@ -7,6 +7,12 @@ import { mkdirSync, readFileSync, existsSync, chmodSync } from "node:fs";
 import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { DATA_DIR } from "./config.ts";
+import {
+  operatorPinMode,
+  pinnedOperatorMissingWarning,
+  resolveOperatorId,
+  UNPINNED_OPERATOR_WARNING,
+} from "./operator-pin.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { GOOGLE_SIGNIN_SCOPES, googleCredentials } from "./google-auth.ts";
 import {
@@ -263,17 +269,30 @@ export function getDb(): DatabaseSync {
   return _db;
 }
 
-/** The deployment's first account — the primary user. The boot migration
- * stamps pre-ownership bots/groups with this id, so everything that existed
- * before per-user ownership lands on the operator's account rather than
- * staying visible to every signed-in account. */
+/** How this deployment chooses its operator (see operator-pin.ts). Read once:
+ * the env is fixed for the life of the process. */
+const OPERATOR_PIN = operatorPinMode(process.env, SELF_HOSTED);
+let operatorWarned = false;
+
+/** The deployment's operator — the primary user. Without a pin (desktop,
+ * Muster Cloud, or an unpinned self-hosted deploy) this is the first account.
+ * A self-hosted MUSTER_OPERATOR_EMAIL pins it to that verified account. The
+ * boot migration stamps pre-ownership bots/groups with this id, so everything
+ * that existed before per-user ownership lands on the operator's account
+ * rather than staying visible to every signed-in account. */
 export function primaryUserId(): string | null {
   try {
-    // SAFETY: the SELECT projects only the users table's id column
-    const row = getDb().prepare("SELECT id FROM \"user\" ORDER BY \"createdAt\" ASC LIMIT 1").get() as
-      | { id: string }
-      | undefined;
-    return row?.id ?? null;
+    const id = resolveOperatorId(getDb(), OPERATOR_PIN);
+    if (!operatorWarned && OPERATOR_PIN.kind !== "legacy") {
+      if (OPERATOR_PIN.kind === "unpinned") {
+        operatorWarned = true;
+        console.warn(UNPINNED_OPERATOR_WARNING);
+      } else if (!id) {
+        operatorWarned = true;
+        console.warn(pinnedOperatorMissingWarning(OPERATOR_PIN.email));
+      }
+    }
+    return id;
   } catch {
     return null;
   }

