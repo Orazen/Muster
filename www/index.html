@@ -5,8 +5,6 @@
 <meta name="google-site-verification" content="x_3lnviKYxtXei8uUYOivK8iRCc9bsVF1FVpzT4Co9w" />
 <meta name="google-site-verification" content="2RLLlyWY664n4qsB2aThGpFi7uMl4iDMJT8y3VU3_cg" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <style>
   @font-face {
     font-family: "Inter";
@@ -1100,7 +1098,7 @@
 </style>
 <link rel="stylesheet" href="/landing-demo.css?v=workspace-1" />
 <link rel="stylesheet" href="/landing-showcase.css?v=showcase-1" />
-<link rel="stylesheet" href="/landing-gaia.css?v=1" />
+<link rel="stylesheet" href="/landing-editorial.css?v=editorial-2" />
 <script src="/landing-showcase.js?v=showcase-1" defer></script>
 <script src="/landing-demo.js?v=workspace-1" defer></script>
 </head>
@@ -1110,7 +1108,7 @@
 
 <div class="promo-banner" id="promo" role="note">
   <span class="promo-banner__dot" aria-hidden="true"></span>
-  <span>Muster beta · a little more room for what matters</span>
+  <span>A little team. A little more room for what matters. <span class="announcement-beta">Muster beta</span></span>
   <button class="promo-banner__close" type="button" aria-label="Dismiss announcement" data-promo-close>&times;</button>
 </div>
 
@@ -1125,8 +1123,8 @@
       <nav class="site-nav" aria-label="Primary">
         <a href="#how">How it works</a>
         <a href="#approvals">Try the demo</a>
-        <a href="#scenes">Products</a>
-        <a href="#download">Downloads</a>
+        <a href="#use-cases">Your team</a>
+        <a href="#download">Get Muster</a>
       </nav>
     </div>
     <div class="site-header__right">
@@ -1143,12 +1141,9 @@
         </summary>
         <nav class="site-menu__panel" aria-label="Site">
           <a href="#scenes">Scenes</a>
-          <a href="#ecosystem">Ecosystem</a>
-          <a href="#roster">Bots</a>
           <a href="#how">How it works</a>
           <a href="#trust">Trust</a>
           <a href="#engines">Engines</a>
-          <a href="#cli">CLI</a>
           <a href="#pricing">Free app</a>
           <a href="/teams.html">Teams</a>
           <a href="/switch.html">Switch</a>
@@ -1172,29 +1167,38 @@
       </svg>
       <div class="hero__layout">
         <div class="hero__intro">
-          <p class="eyebrow">Meet your everyday team</p>
+          <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span> A little team. A world of possibilities.</p>
           <h1 id="hero-title">A personal AI team for your <span class="accent">everyday work.</span></h1>
-          <p class="lead">A few good teammates for everything on your mind. Plan your day, research an idea, draft the next step — with you deciding what happens next.</p>
+          <p class="lead">For the plans, the research, the “where do I start?” Meet a team of AI assistants that helps you move things forward. You keep the final say.</p>
           <div class="hero__actions">
             <a class="button button--primary" href="/app">Open Muster <span aria-hidden="true">↗</span></a>
             <a class="button button--secondary" href="#approvals">Try the demo <span aria-hidden="true">→</span></a>
           </div>
           <p class="hero__note">Free app. Bring a model you trust.</p>
-          <p class="hero__platforms"><a id="hero-dl" href="/download.html"><span id="hero-dl-label">Get the desktop app</span><span class="hero__dl-version" id="hero-dl-version"></span></a> · <a href="#ecosystem">Find your device</a></p>
+          <p class="hero__platforms"><a id="hero-dl" href="/download.html"><span id="hero-dl-label">Get the desktop app</span><span class="hero__dl-version" id="hero-dl-version"></span></a> · <a href="#download">Explore your devices</a></p>
         </div>
-        <aside class="day-preview" aria-label="Illustrative daily plan, sample data only">
-          <div class="day-preview__top"><span>MADE FOR YOUR EVERYDAY</span><span>Sample plan</span></div>
-          <div class="day-preview__hello">
-            <svg class="day-preview__mascot" viewBox="-112 -112 224 224" width="100" height="100" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#23211f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#23211f"/></g></svg>
-            <div><span class="day-preview__from">ATLAS · YOUR PLANNER</span><h2>Let’s make room<br>for a good day.</h2></div>
+        <aside class="hero-workshop" data-hero-workshop aria-label="Illustrative AI teammate, sample data only">
+          <div class="workshop-stage">
+            <div class="workshop-orbit" aria-hidden="true"></div>
+            <span class="workshop-label">A LITTLE HELP GOES A LONG WAY</span>
+            <svg class="workshop-mascot" viewBox="-112 -112 224 224" aria-hidden="true"><use href="#hero-face-body" fill="currentColor"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#29291f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#29291f"/></g></svg>
+            <span class="workshop-spark workshop-spark--one" aria-hidden="true">✳</span><span class="workshop-spark workshop-spark--two" aria-hidden="true">+</span>
+            <div class="workshop-sticky" aria-hidden="true"><span>ONE GOOD NEXT STEP</span><p>Less on your plate.<br>More on your mind.</p><svg viewBox="0 0 75 25"><path d="M3 12C14 2 32 3 29 13S9 20 10 12 43 2 71 12M64 6l8 7-10 5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></div>
+            <div class="workshop-paper">
+              <div class="workshop-paper__top"><span class="sample-dot" aria-hidden="true"></span><span data-hero-role-label>ATLAS · YOUR PLANNER</span><span class="workshop-paper__badge">Sample</span></div>
+              <h2 data-hero-task-title>A little room for your day.</h2>
+              <ol class="workshop-tasks" data-hero-tasks><li><span>01</span>Make time for the important work</li><li><span>02</span>Get a head start on that reply</li><li><span>03</span>Leave a little space for yourself</li></ol>
+              <div class="workshop-paper__foot"><span aria-hidden="true">↳</span><span data-hero-task-note>Sample plan · no calendar changes</span></div>
+            </div>
+            <button class="workshop-replay" type="button" data-hero-replay hidden aria-label="Replay the scene"><span aria-hidden="true">↻</span> Replay</button>
           </div>
-          <p class="day-preview__caption">Three priorities. One place to start.</p>
-          <ol class="day-preview__tasks">
-            <li><span>01</span><div><strong>Move the important work forward</strong><small>A quiet hour for your proposal</small></div><span class="day-preview__time">09:00</span></li>
-            <li><span>02</span><div><strong>Make the next reply easier</strong><small>Review a draft before sending</small></div><span class="day-preview__time">11:30</span></li>
-            <li><span>03</span><div><strong>Leave space for yourself</strong><small>A walk, away from the screen</small></div><span class="day-preview__time">15:00</span></li>
-          </ol>
-          <div class="day-preview__footer"><span class="day-preview__status">Draft for your review</span><span>No calendar changes</span></div>
+          <div class="workshop-controls" data-hero-controls hidden aria-label="Choose a sample task">
+            <button type="button" data-hero-role="plan" aria-pressed="true">Plan my day</button>
+            <button type="button" data-hero-role="research" aria-pressed="false">Explore an idea</button>
+            <button type="button" data-hero-role="draft" aria-pressed="false">Draft a reply</button>
+          </div>
+          <span class="sr-only" data-hero-feedback role="status"></span>
+          <p class="workshop-disclosure">An illustrative scene. No AI calls or real actions.</p>
         </aside>
       </div>
       <div class="trust-strip" role="list" aria-label="How your team works">
@@ -1213,41 +1217,15 @@
       </div>
     </section>
     <section id="how" class="section">
-      <div class="section-intro"><div class="eyebrow">How it works</div><h2 class="section-heading">From “I need to…”<br>to a clear next step.</h2></div>
+      <div class="section-intro"><div class="eyebrow">01 / Make a little room</div><h2 class="section-heading">Big plans.<br><em>Small first steps.</em></h2></div>
       <div class="card-grid-3">
         <article class="feature-card"><div class="feature-card__icon" aria-hidden="true">01</div><h3>Meet your teammate</h3><p>Open Muster, sign in and choose a role for your bot. Give it a name and a task that matters to you.</p><a class="feature-link" href="/docs/quick-start">Getting started →</a></article>
         <article class="feature-card"><div class="feature-card__icon" aria-hidden="true">02</div><h3>Connect what it needs</h3><p>Choose a model and connect only the tools you need. Desktop engines and hosted providers have separate setup.</p><a class="feature-link" href="/docs/engines">Models &amp; tools →</a></article>
         <article class="feature-card"><div class="feature-card__icon" aria-hidden="true">03</div><h3>Stay in control</h3><p>Keep approval settings explicit, review action cards and read the result before taking the next step.</p><a class="feature-link" href="/docs/approvals">How approvals work →</a></article>
       </div>
     </section>
-    <!-- Approval simulation: static sample data, no network or model calls -->
-    <section id="approvals" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Approvals</div>
-        <h2 class="section-heading">You decide what your bots may do</h2>
-        <p class="section-copy">
-          See an approval card in action with sample data. Pick a task, review the proposed action,
-          then Allow or Deny. In your workspace, what requires approval depends on your
-          permissions and the tools your model supports.
-        </p>
-      </div>
-      <div class="apx">
-        <p class="apx-sim-badge" role="note">Simulation — sample data only. Nothing real runs, no model is called, nothing leaves this page.</p>
-        <div class="apx-card">
-          <div class="apx-head">
-            <img src="/app-icon.svg" width="28" height="28" alt="" aria-hidden="true" />
-            <div>
-              <div class="apx-head__name" data-apx-agent>Scout</div>
-              <div class="apx-head__role" data-apx-role>Sample bot · Inbox Manager</div>
-            </div>
-            <span class="apx-head__state" data-apx-state>Sample</span>
-          </div>
-          <div class="apx-body" data-apx-body aria-live="polite"></div>
-        </div>
-      </div>
-    </section>
     <section id="workspace" class="section">
-      <div class="section-intro"><div class="eyebrow">A place for the work</div><h2 class="section-heading">Your teammates.<br>Your conversations.</h2><p class="section-copy">Keep each task close to its context, its questions and its result.</p></div>
+      <div class="section-intro" id="features"><div class="eyebrow">02 / Meet your workspace</div><h2 class="section-heading">Good company.<br><em>Real momentum.</em></h2><p class="section-copy">Keep each task close to its context, its questions and its result.</p></div>
       <div class="hero__teamstrip" aria-label="Your roster, the way the app draws it">
         <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#009957" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
         <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#377FE6" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
@@ -1312,25 +1290,34 @@
       <p class="hero__micro">Web workspace · desktop execution · companions in development</p>
 
     </section>
-    <!-- Statement card — one belief, one panel -->
-    <section id="statement" class="section" aria-label="What Muster believes">
-      <div class="statement-card">
-        <div class="statement-card__copy">
-          <h2 class="section-heading">Message your agents like teammates.</h2>
-          <p>
-            Give tasks to bots the way you'd hand work to a teammate — on desktop, web or phone.
-            Keep each task in its own conversation, choose the tools it can use, and review
-            the result with a record of what happened.
-          </p>
-        </div>
-        <div class="statement-card__panel" aria-hidden="true">
-          <svg viewBox="-112 -112 224 224" width="120" height="120"><use href="#hero-face-body" fill="#f08a24"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9"/></g></svg>
+    <!-- Approval simulation: static sample data, no network or model calls -->
+    <section id="approvals" class="section">
+      <div class="section-intro">
+        <div class="eyebrow">03 / You have the final say</div>
+        <h2 class="section-heading">A helping hand.<br><em>Never a free hand.</em></h2>
+        <p class="section-copy">
+          See an approval card in action with sample data. Pick a task, review the proposed action,
+          then Allow or Deny. In your workspace, what requires approval depends on your
+          permissions and the tools your model supports.
+        </p>
+      </div>
+      <div class="apx">
+        <p class="apx-sim-badge" role="note">Simulation — sample data only. Nothing real runs, no model is called, nothing leaves this page.</p>
+        <div class="apx-card">
+          <div class="apx-head">
+            <img src="/app-icon.svg" width="28" height="28" alt="" aria-hidden="true" />
+            <div>
+              <div class="apx-head__name" data-apx-agent>Scout</div>
+              <div class="apx-head__role" data-apx-role>Sample bot · Inbox Manager</div>
+            </div>
+            <span class="apx-head__state" data-apx-state>Sample</span>
+          </div>
+          <div class="apx-body" data-apx-body aria-live="polite"></div>
         </div>
       </div>
     </section>
-
     <section id="scenes" class="section muster-story" data-story-reveal>
- <div class="section-intro"><div class="eyebrow">A place for your whole day</div><h2 class="section-heading">One familiar team.<br>So many ways to begin.</h2><p class="section-copy">Explore how Muster fits your life, your work and your devices. These are illustrations; availability is shown for each surface.</p></div>
+ <div class="section-intro"><div class="eyebrow">04 / Make it yours</div><h2 class="section-heading">One familiar team.<br><em>However you work.</em></h2><p class="section-copy">Explore how Muster fits your life, your work and your devices. These are illustrations; availability is shown for each surface.</p></div>
  <div data-product-showcase><div class="product-tabs" data-product-tabs aria-label="Explore Muster" hidden><button id="product-tab-personal" data-product-tab="personal" type="button">Personal</button><button id="product-tab-teams" data-product-tab="teams" type="button">For teams</button><button id="product-tab-desktop" data-product-tab="desktop" type="button">Desktop</button><button id="product-tab-companions" data-product-tab="companions" type="button">On the go</button></div><div class="product-panels"><article id="product-personal" class="product-panel" data-product-panel="personal" aria-labelledby="product-tab-personal">
  <div class="product-copy"><span class="story-kicker">01 / A little room for you</span><h3>Your day.<br>A little lighter.</h3><p>A calendar to untangle. An idea to explore. A reply to get right. Start with one teammate who helps you find a useful next step.</p><div class="product-features">Planning · research · writing</div><a class="button button--primary" href="/app">Open your workspace <span aria-hidden="true">↗</span></a><small class="product-availability">Web workspace · model setup required</small></div>
  <div class="product-visual product-visual--personal" aria-label="Illustrative personal workflow"><div class="story-note"><span class="story-note__label">AN ILLUSTRATIVE MORNING</span><h4>Make space for<br>what matters.</h4><ul><li><span>09:00</span>A little focused work</li><li><span>11:30</span>A thoughtful follow-up</li><li><span>15:00</span>Time away from the screen</li></ul><div class="story-note__foot">A suggested plan. You decide.</div></div><div class="story-flower story-flower--one"><svg class="" viewBox="-112 -112 224 224" width="110" height="110" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></div><div class="story-flower story-flower--two"><svg class="" viewBox="-112 -112 224 224" width="65" height="65" aria-hidden="true"><use href="#hero-face-body" fill="#b799d4"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></div></div>
@@ -1346,180 +1333,15 @@
  </article></div></div>
  </section>
     <!-- Platform roles and availability are deliberately stated separately. -->
-    <section id="ecosystem" class="section">
-      <div class="section-intro"><div class="eyebrow">Your devices, different roles</div><h2 class="section-heading">A team that fits<br>the way you work.</h2><p class="section-copy">Choose where you talk to Muster and where the work runs. Each app has its own release and capabilities; signing in does not automatically sync separate workspaces.</p></div>
-      <div class="card-grid-3">
-        <article class="feature-card"><div class="platform-status">OPEN IN YOUR BROWSER</div><h3>Muster Web</h3><p>Open your hosted workspace, talk to teammates and review their work. Your browser does not gain access to your computer’s apps or files.</p><a class="feature-link" href="/app">Open Muster <span aria-hidden="true">↗</span></a></article>
-        <article class="feature-card"><div class="platform-status">MAC · WINDOWS · LINUX</div><h3>Muster Desktop</h3><p>A workspace on your computer, with supported local engines and tools. Computer control and dictation depend on the operating system and permissions.</p><a class="feature-link" href="/download.html">Get the desktop app <span aria-hidden="true">→</span></a></article>
-        <article class="feature-card"><div class="platform-status">COMPANION BETA</div><h3>iPhone &amp; Android</h3><p>Companions connect to a running Muster host for chats and approvals. Features and installation availability differ; device testing is ongoing.</p><a class="feature-link" href="/download.html#ios">Check mobile availability <span aria-hidden="true">→</span></a></article>
-        <article class="feature-card"><div class="platform-status">COMPANION BETA</div><h3>Apple Watch</h3><p>Quick approvals and bot calls are being tested for the wrist. A connected, capable host does the work; the Watch does not run desktop engines.</p><a class="feature-link" href="/download.html#ios">Explore the companion <span aria-hidden="true">→</span></a></article>
-        <article class="feature-card"><div class="platform-status">ANOTHER WORKSPACE VIEW</div><h3>Muster OS</h3><p>A windowed view of the same workspace’s bots and rooms. Choose a different view without creating a different team.</p><a class="feature-link" href="/os">Open Muster OS <span aria-hidden="true">↗</span></a></article>
-        <article class="feature-card"><div class="platform-status">FOR YOUR WORKFLOW</div><h3>Models &amp; connections</h3><p>Use compatible providers and connected apps. Each model has its own tools, usage limits and costs; app permissions stay explicit.</p><a class="feature-link" href="#engines">Explore models <span aria-hidden="true">→</span></a></article>
-      </div>
-    </section>
     <!-- Use cases: real jobs on a schedule -->
-    <section id="use-cases" class="section muster-story" data-story-reveal><div class="section-intro"><div class="eyebrow">Start with someone useful</div><h2 class="section-heading">A good team starts<br>with one good teammate.</h2><p class="section-copy">Meet six starter roles from Muster’s Agent Hub. Choose one in your workspace, add context and review the first task before sending it.</p></div><div class="starter-grid"><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Daylight</h3><span>Personal assistant</span></div></div><p>Find a calmer start to your day.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Choose three priorities and suggest time blocks from the schedule I share.”</blockquote><small>Connect a calendar for live events, or share your schedule.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#dfc46b"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Compass</h3><span>Chief of Staff</span></div></div><p>Keep the important work in view.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Help me sort this week’s work into priorities, owners and decisions.”</blockquote><small>Delegation needs teammates and tools you have configured.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#819fdb"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Forge</h3><span>Engineer</span></div></div><p>Turn a clear brief into a first build.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Plan a small implementation and tell me how we will verify it.”</blockquote><small>Coding needs a compatible engine and permitted workspace access.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#75b896"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Probe</h3><span>Reviewer</span></div></div><p>Give the result a useful second look.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Review this change for gaps and tell me what evidence is missing.”</blockquote><small>Give it the files, context or results you want reviewed.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#b799d4"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Quill</h3><span>Researcher</span></div></div><p>Make the next choice more informed.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Compare these options, show your sources and separate facts from assumptions.”</blockquote><small>Live research needs configured search or browser tools.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#e899aa"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Slate</h3><span>Writer</span></div></div><p>Get from rough notes to a clear draft.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Turn these notes into a concise first draft for me to review.”</blockquote><small>Nothing is published or sent by selecting a starter role.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article></div><p class="showcase-footnote">Starter roles do not connect accounts, grant permissions or start work for you. Build your team at your own pace.</p></section>
-    <section id="roster" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">The Agent Hub</div>
-        <h2 class="section-heading">Hire a cast. Every one a real teammate.</h2>
-        <p class="section-copy">
-          Ten curated personas ship with the app — each with a persona file, conservative guardrails,
-          and a first task already waiting in the composer. Or start a blank bot and it interviews you.
-        </p>
-      </div>
-      <div class="roster-marquee" aria-label="Agent Hub roster">
-        <div class="roster-marquee__track">
-          <div class="roster-card"><svg viewBox="-112 -112 224 224" width="38" height="38" aria-hidden="true"><use href="#hero-face-body" fill="#facc15"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Compass</div><div class="roster-card__role">Chief of Staff</div></div></div>
-          <div class="roster-card"><svg viewBox="-112 -112 224 224" width="38" height="38" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Atlas</div><div class="roster-card__role">Planner</div></div></div>
-          <div class="roster-card"><svg viewBox="-112 -112 224 224" width="38" height="38" aria-hidden="true"><use href="#hero-face-body" fill="#377FE6"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Forge</div><div class="roster-card__role">Engineer</div></div></div>
-          <div class="roster-card"><svg viewBox="-112 -112 224 224" width="38" height="38" aria-hidden="true"><use href="#hero-face-body" fill="#009957"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Probe</div><div class="roster-card__role">QA / Reviewer</div></div></div>
-          <div class="roster-card"><svg viewBox="-112 -112 224 224" width="38" height="38" aria-hidden="true"><use href="#hero-face-body" fill="#8057C8"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Quill</div><div class="roster-card__role">Researcher</div></div></div>
-          <div class="roster-card"><svg viewBox="-112 -112 224 224" width="38" height="38" aria-hidden="true"><use href="#hero-face-body" fill="#f472b6"/><g transform="translate(-15 -2) rotate(-4)"><path d="M -9 4 Q 0 -6 9 4" stroke="#0a0a0a" stroke-width="7" stroke-linecap="round" fill="none"/></g><g transform="translate(38 -6) rotate(-4)"><path d="M -9 4 Q 0 -6 9 4" stroke="#0a0a0a" stroke-width="7" stroke-linecap="round" fill="none"/></g></svg><div><div class="roster-card__name">Slate</div><div class="roster-card__role">Writer</div></div></div>
-          <div class="roster-card"><svg viewBox="-112 -112 224 224" width="38" height="38" aria-hidden="true"><use href="#hero-face-body" fill="#2dd4bf"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Anchor</div><div class="roster-card__role">Automator</div></div></div>
-          <div class="roster-card"><svg viewBox="-112 -112 224 224" width="38" height="38" aria-hidden="true"><use href="#hero-face-body" fill="#0EA5C6"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Ranger</div><div class="roster-card__role">Web Scout</div></div></div>
-          <div class="roster-card"><svg viewBox="-112 -112 224 224" width="38" height="38" aria-hidden="true"><use href="#hero-face-body" fill="#fb7185"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Ledger</div><div class="roster-card__role">Analyst</div></div></div>
-          <div class="roster-card" aria-hidden="true"><svg viewBox="-112 -112 224 224" width="38" height="38"><use href="#hero-face-body" fill="#facc15"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Compass</div><div class="roster-card__role">Chief of Staff</div></div></div>
-          <div class="roster-card" aria-hidden="true"><svg viewBox="-112 -112 224 224" width="38" height="38"><use href="#hero-face-body" fill="#f08a24"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Atlas</div><div class="roster-card__role">Planner</div></div></div>
-          <div class="roster-card" aria-hidden="true"><svg viewBox="-112 -112 224 224" width="38" height="38"><use href="#hero-face-body" fill="#377FE6"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Forge</div><div class="roster-card__role">Engineer</div></div></div>
-          <div class="roster-card" aria-hidden="true"><svg viewBox="-112 -112 224 224" width="38" height="38"><use href="#hero-face-body" fill="#009957"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Probe</div><div class="roster-card__role">QA / Reviewer</div></div></div>
-          <div class="roster-card" aria-hidden="true"><svg viewBox="-112 -112 224 224" width="38" height="38"><use href="#hero-face-body" fill="#8057C8"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Quill</div><div class="roster-card__role">Researcher</div></div></div>
-          <div class="roster-card" aria-hidden="true"><svg viewBox="-112 -112 224 224" width="38" height="38"><use href="#hero-face-body" fill="#f472b6"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Slate</div><div class="roster-card__role">Writer</div></div></div>
-          <div class="roster-card" aria-hidden="true"><svg viewBox="-112 -112 224 224" width="38" height="38"><use href="#hero-face-body" fill="#2dd4bf"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Anchor</div><div class="roster-card__role">Automator</div></div></div>
-          <div class="roster-card" aria-hidden="true"><svg viewBox="-112 -112 224 224" width="38" height="38"><use href="#hero-face-body" fill="#0EA5C6"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Ranger</div><div class="roster-card__role">Web Scout</div></div></div>
-          <div class="roster-card" aria-hidden="true"><svg viewBox="-112 -112 224 224" width="38" height="38"><use href="#hero-face-body" fill="#fb7185"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#0a0a0a"/></g></svg><div><div class="roster-card__name">Ledger</div><div class="roster-card__role">Analyst</div></div></div>
-        </div>
-      </div>
-    </section>
+    <section id="use-cases" class="section muster-story" data-story-reveal><div class="section-intro"><div class="eyebrow">A role for what’s on your mind</div><h2 class="section-heading">A good team starts<br>with one good teammate.</h2><p class="section-copy">Meet six starter roles from Muster’s Agent Hub. Choose one in your workspace, add context and review the first task before sending it.</p></div><div class="starter-grid"><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Daylight</h3><span>Personal assistant</span></div></div><p>Find a calmer start to your day.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Choose three priorities and suggest time blocks from the schedule I share.”</blockquote><small>Connect a calendar for live events, or share your schedule.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#dfc46b"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Compass</h3><span>Chief of Staff</span></div></div><p>Keep the important work in view.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Help me sort this week’s work into priorities, owners and decisions.”</blockquote><small>Delegation needs teammates and tools you have configured.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#819fdb"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Forge</h3><span>Engineer</span></div></div><p>Turn a clear brief into a first build.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Plan a small implementation and tell me how we will verify it.”</blockquote><small>Coding needs a compatible engine and permitted workspace access.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#75b896"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Probe</h3><span>Reviewer</span></div></div><p>Give the result a useful second look.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Review this change for gaps and tell me what evidence is missing.”</blockquote><small>Give it the files, context or results you want reviewed.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#b799d4"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Quill</h3><span>Researcher</span></div></div><p>Make the next choice more informed.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Compare these options, show your sources and separate facts from assumptions.”</blockquote><small>Live research needs configured search or browser tools.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#e899aa"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Slate</h3><span>Writer</span></div></div><p>Get from rough notes to a clear draft.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Turn these notes into a concise first draft for me to review.”</blockquote><small>Nothing is published or sent by selecting a starter role.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article></div><p class="showcase-footnote">Starter roles do not connect accounts, grant permissions or start work for you. Build your team at your own pace.</p></section>
     <!-- How the pieces fit — two tables, zero adjectives -->
 
-    <section id="engines" class="section muster-story" data-story-reveal><div class="section-intro"><div class="eyebrow">Made to connect</div><h2 class="section-heading">Your tools.<br>A little more together.</h2><p class="section-copy">Muster brings models, apps and computers into a workspace you direct. Start with the connections that matter to you.</p></div><div class="connection-grid"><article class="connection-family"><span class="story-kicker">Models</span><h3>The thinking behind your team.</h3><p>Choose supported model accounts or compatible endpoints. Provider costs and limits still apply.</p><ul><li>OpenAI</li><li>Anthropic</li><li>Google</li><li>xAI</li><li>OpenRouter</li><li>Local models</li></ul><a class="feature-link" href="/docs/engines">Explore model setup <span aria-hidden="true">↗</span></a></article><article class="connection-family"><span class="story-kicker">Connected apps</span><h3>Context from the tools you choose.</h3><p>Connect the services you need and grant access deliberately. Catalog availability depends on your host and connector setup.</p><ul><li>Gmail</li><li>Google Calendar</li><li>Google Drive</li><li>Slack</li><li>Notion</li><li>Linear</li></ul><a class="feature-link" href="/app">Manage your connections <span aria-hidden="true">↗</span></a></article><article class="connection-family"><span class="story-kicker">Computers</span><h3>A place to do the work.</h3><p>Use browser tools or an available desktop environment. Each needs setup, a capable host and the permissions you allow.</p><ul><li>Browser</li><li>This computer</li><li>Local VM</li><li>Cloud computer</li></ul><a class="feature-link" href="/docs">Explore the guides <span aria-hidden="true">↗</span></a></article></div><p class="showcase-footnote">Supported services, not a list of commercial partnerships. Connecting an account does not approve every action.</p></section>
-    <!-- Coding agents (what they're actually for) -->
-    <section id="coding" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Coding agents</div>
-        <h2 class="section-heading">Your terminal agents, promoted to teammates</h2>
-        <p class="section-copy">
-          Claude Code, Codex, and their cousins are brilliant and stranded — one conversation,
-          one terminal, gone when you close the laptop. Muster gives each one a name, a desk,
-          and a job list that survives the weekend.
-        </p>
-      </div>
-      <div class="card-grid-3">
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">⌨️</div>
-          <h3>Drive them from anywhere</h3>
-          <p>Assign a task from your phone, the web console, or the terminal. The agent works on its own machine with its own credentials — not inside your terminal session.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🖥️</div>
-          <h3>Each agent gets a desk</h3>
-          <p>Choose an available computer for a supported engine. Separate workspaces can keep tasks apart; computer availability and isolation depend on your configuration.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🚦</div>
-          <h3>Approvals, not vibes</h3>
-          <p>Supported tool actions can pause at approval cards. Review the proposed action and your bot’s permissions before granting broader access.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🧾</div>
-          <h3>Receipts per task</h3>
-          <p>Review a task's recorded turns and usage, with cost when the engine reports it. Copy the receipt into a standup note alongside the result.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🔁</div>
-          <h3>Routines on a schedule</h3>
-          <p>Schedule repeatable work such as a weekly draft or a review checklist. The connected host and provider must remain available for a routine to run.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">👥</div>
-          <h3>Delegation between bots</h3>
-          <p>Ask a supported teammate to delegate or review another bot’s output. Keep the discussion and your final decision together in the workspace.</p>
-        </article>
-      </div>
-    </section>
+    <section id="engines" class="section muster-story" data-story-reveal><div class="section-intro"><div class="eyebrow">Your toolkit, brought together</div><h2 class="section-heading">Your tools.<br><em>Better together.</em></h2><p class="section-copy">Muster brings models, apps and computers into a workspace you direct. Start with the connections that matter to you.</p></div><div class="connection-grid"><article class="connection-family"><span class="story-kicker">Models</span><h3>The thinking behind your team.</h3><p>Choose supported model accounts or compatible endpoints. Provider costs and limits still apply.</p><ul><li>OpenAI</li><li>Anthropic</li><li>Google</li><li>xAI</li><li>OpenRouter</li><li>Local models</li></ul><a class="feature-link" href="/docs/engines">Explore model setup <span aria-hidden="true">↗</span></a></article><article class="connection-family"><span class="story-kicker">Connected apps</span><h3>Context from the tools you choose.</h3><p>Connect the services you need and grant access deliberately. Catalog availability depends on your host and connector setup.</p><ul><li>Gmail</li><li>Google Calendar</li><li>Google Drive</li><li>Slack</li><li>Notion</li><li>Linear</li></ul><a class="feature-link" href="/app">Manage your connections <span aria-hidden="true">↗</span></a></article><article class="connection-family"><span class="story-kicker">Computers</span><h3>A place to do the work.</h3><p>Use browser tools or an available desktop environment. Each needs setup, a capable host and the permissions you allow.</p><ul><li>Browser</li><li>This computer</li><li>Local VM</li><li>Cloud computer</li></ul><a class="feature-link" href="/docs">Explore the guides <span aria-hidden="true">↗</span></a></article></div><p class="showcase-footnote">Supported services, not a list of commercial partnerships. Connecting an account does not approve every action.</p></section>
     <!-- CLI (the fifth surface) -->
-    <section id="cli" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Muster CLI</div>
-        <h2 class="section-heading">For the work you do in a terminal</h2>
-        <p class="section-copy">
-          The CLI is another way to reach a running Muster host: send work, review approvals and
-          read receipts. It requires Node.js and a configured runtime. These are sample commands,
-          not a live session.
-        </p>
-      </div>
-
-      <div class="term" role="img" aria-label="Terminal session showing the Muster CLI booting a server, listing bots, sending a task, and approving it">
-        <div class="term__bar" aria-hidden="true">
-          <span class="term__dot"></span><span class="term__dot"></span><span class="term__dot term__dot--accent"></span>
-          <span class="term__title">~/projects/webapp — muster</span>
-        </div>
-<pre class="term__body"><span class="dim"># sample commands for a configured local runtime</span>
-<span class="dim">$</span> <span class="c">muster up -d</span>
-
-  Muster is up in the background on port 8799.
-<span class="dim">  Scan to open the console on your phone:</span>
-
-  https://muster.today/claim#4KJ2XQ9P
-  <span class="dim">▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄</span>
-  <span class="dim">█</span> <span class="p">▓▓  QR  ▓▓</span> <span class="dim">— the real QR prints in your terminal</span>
-  <span class="dim">▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀</span>
-
-<span class="dim"># or pair with a running harness — local or Muster Cloud</span>
-<span class="dim">$</span> <span class="c">muster pair --cloud</span>
-Paired. Config: ~/.muster/config.json
-
-<span class="dim">$</span> <span class="c">muster bots</span>
-<span class="p">atlas</span>            idle       claude        128,402 tok
-<span class="p">vesper</span>           busy       codex          62,117 tok
-<span class="p">juniper</span>           waiting    gemini         9,880 tok
-
-<span class="dim">$</span> <span class="c">muster send atlas "triage the failing CI job on main"</span>
-On it — main is red on test_payments. Two flakes, one real failure:
-the Docker cache wasn't invalidated after the pgvector bump. PR incoming.
-
-<span class="dim">$</span> <span class="c">muster approve</span>
-Allowed juniper: npm test -- --filter=cart
-
-<span class="dim">$</span> <span class="c">muster receipts 2</span>
-atlas           triage failing CI job on main     3 turns · 18,432 tok · $0.2130
-vesper          fix flaky cart test               7 turns · 62,096 tok · $0.7442</pre>
-      </div>
-
-      <div class="install-line">
-        <span aria-hidden="true">$</span>
-        <code data-install-line>curl -fsSL https://muster.today/downloads/muster-cli.mjs -o muster && chmod +x muster && ./muster help</code>
-        <button type="button" data-install-copy>Copy</button>
-      </div>
-      <p style="margin-top:14px;text-align:center;color:var(--muted-2);font-size:13px;">
-        Requires Node 23.4+ and a configured Muster host. Commands that start a local server require the runtime; the standalone CLI is not a server installer.
-      </p>
-          <div class="hero__terminal" aria-hidden="true">
-        <div class="hero__terminal-bar">muster · live fleet (sample data)</div>
-        <ol id="term-lines">
-          <li><span class="t-dim">10:02</span> scout: triaged 14 messages · 2 drafts ready</li>
-          <li><span class="t-dim">10:03</span> forge: <span class="t-ok">tests green</span> — 41 passed in 2.3s</li>
-          <li><span class="t-dim">10:04</span> inbox: PRIVACY SHIELD → <span class="t-red">3 patterns masked</span> in supported text</li>
-          <li><span class="t-dim">10:05</span> filer: asked to move 7 invoices — <span class="t-ok">allowed once</span></li>
-          <li><span class="t-dim">10:06</span> scout: receipt recorded · 6 turns · 41s · 12,431 tokens</li>
-          <li><span class="t-dim">10:07</span> night-shift: digest posted to #team before you woke up</li>
-        </ol>
-      </div>
-      <div class="hero__agent-setup">
-        <button class="setup-copy" type="button" data-setup-copy="Set up Muster for me. Follow the quick start at https://muster.today/docs/quick-start">
-          <span class="setup-copy__prefix" aria-hidden="true">$</span>
-          <span class="setup-copy__label">Set up with your agent</span>
-          <svg class="setup-copy__icon" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="8" y="8" width="12" height="12" rx="2"></rect>
-            <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
-          </svg>
-        </button>
-      </div>
-</section>
     <!-- Trust — what runs where, your responsibility, honesty callout -->
     <section id="trust" class="section">
-      <div class="section-intro"><div class="eyebrow">Know what you’re connecting</div><h2 class="section-heading">Clear boundaries.<br>Decisions you can see.</h2><p class="section-copy">Your workspace, its tools and your backups have different jobs. Here is what to expect today.</p></div>
+      <div class="section-intro"><div class="eyebrow">Know what you’re connecting</div><h2 class="section-heading">Your work matters.<br><em>So do the boundaries.</em></h2><p class="section-copy">Your workspace, its tools and your backups have different jobs. Here is what to expect today.</p></div>
       <div class="card-grid-3">
         <article class="feature-card"><h3>Know where work lives</h3><p>The web workspace is stored on Muster’s server. Desktop workspaces are stored on your computer. Google sign-in does not merge these copies.</p></article>
         <article class="feature-card"><h3>Connect deliberately</h3><p>Model providers and connected apps receive requests when used. Review their permissions and terms, and your bot’s approval settings.</p></article>
@@ -1530,25 +1352,11 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
 
 
     <section id="pricing" class="section beta-section">
-      <div class="section-intro"><div class="eyebrow">Build your everyday team</div><h2 class="section-heading">Free to use.<br>Your AI, your choice.</h2><p class="section-copy">We host Muster. Bring your own provider key and pay your provider for the AI you use. No server setup is needed.</p></div>
+      <div class="section-intro"><div class="eyebrow">Build your everyday team</div><h2 class="section-heading">Free app.<br><em>Your AI, your choice.</em></h2><p class="section-copy">We host Muster. Bring your own provider key and pay your provider for the AI you use. No server setup is needed.</p></div>
       <div class="comparison-grid">
         <article class="comparison-card"><div class="comparison-kicker"><h3>Muster beta</h3><span class="comparison-badge">Free app</span></div><p class="comparison-meta">Start with one teammate and one task.</p><div class="comparison-list"><div>Open your workspace on the web</div><div>Bring a compatible provider or model account</div><div>Review actions and results in the conversation</div></div><div class="comparison-actions"><a class="button button--primary" href="/app">Open Muster ↗</a></div></article>
         <article class="comparison-card comparison-card--muted"><h3>Your models. Your choice.</h3><p class="comparison-meta">The free app is separate from the services you connect.</p><div class="comparison-list"><div>Provider usage may have its own costs</div><div>Optional computer services can charge separately</div><div>Available models and features depend on your setup</div></div><div class="comparison-actions"><a class="button button--secondary" href="/docs/engines">See model setup →</a></div></article>
       </div>
-    </section>
-    <!-- Rooms (multiplayer agent spaces) -->
-    <section id="rooms" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Rooms</div>
-        <h2 class="section-heading">Teams, working together — in one place</h2>
-        <p style="color:var(--muted-2);max-width:560px;">Rooms bring related bots and conversations together. Available computer backends and tools depend on your host and configuration.</p>
-      </div>
-      <div id="rooms-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;max-width:900px;margin:0 auto;">
-        <div class="room-card"><div class="room-kind">localvm</div><h3>Support Squad</h3><p>Inbox triage and customer replies in one shared desktop.</p></div>
-        <div class="room-card"><div class="room-kind">box</div><h3>Deal Desk</h3><p>Research, outreach drafts and follow-up watchers on one cloud computer.</p></div>
-        <div class="room-card"><div class="room-kind">opensandbox</div><h3>Release Room</h3><p>Bug triage and release notes while the human reviews.</p></div>
-      </div>
-      <p style="margin-top:18px;text-align:center;"><a class="button button--secondary button--small" href="/app">Open Muster to see your rooms</a></p>
     </section>
     <section id="faq" class="section"><div class="faq-cols"><h2 class="section-heading">A few things<br>worth knowing.</h2><div class="faq-list">
         <details class="faq-item" open><summary>What can I use Muster for?</summary><div class="faq-a">Give a named assistant a task, discuss a plan, and review its results. Start with research, organizing work, or drafting a reply. Available tools depend on the model, connections and computer you choose.</div></details>
@@ -1560,7 +1368,18 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
         <details class="faq-item"><summary>What does Privacy Shield cover?</summary><div class="faq-a">Privacy Shield is optional masking for supported API-driver text. When enabled for a compatible bot, it masks recognized patterns before that text is sent and records masking counts. It is not a guarantee that every secret, attachment or provider request is filtered. Review sensitive content and your provider’s terms.</div></details>
         <details class="faq-item"><summary>Does the app send analytics?</summary><div class="faq-a">Muster can send product-usage events and check for updates. You can turn usage analytics off in Settings. Models, connected apps and other online features send requests to their services when used. See the privacy policy for details.</div></details>
       </div></div></section>
-    <section id="download" class="section muster-story" data-story-reveal><div class="section-intro"><div class="eyebrow">Make yourself at home</div><h2 class="section-heading">Your devices.<br>Your way into Muster.</h2><p class="section-copy">Open the web workspace or choose a desktop app. Phone and Watch companions have their own beta availability.</p></div><div class="download-release"><span class="download-release__dot" aria-hidden="true"></span><span data-release-status role="status">Checking published desktop downloads…</span><a href="/app">Use Muster on the web ↗</a></div><noscript><p class="showcase-footnote">JavaScript is off. Check the download page for current builds and checksums.</p></noscript><div class="download-grid"><article class="download-card"><div class="download-card__icon" aria-hidden="true">⌘</div><div class="download-card__heading"><h3>macOS</h3><span>Apple silicon & Intel</span></div><p>Your own workspace, right on your Mac.</p><div class="download-card__actions"><div class="download-option"><a class="download-action" data-download-file="Muster.dmg" href="/download.html" data-download-label="Apple silicon .dmg">Apple silicon .dmg <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster.dmg">Check availability</span><details class="download-checksum" data-download-checksum="Muster.dmg" hidden><summary>SHA-256 checksum</summary><code></code></details></div><div class="download-option"><a class="download-action" data-download-file="Muster-intel.dmg" href="/download.html" data-download-label="Intel .dmg">Intel .dmg <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster-intel.dmg">Check availability</span><details class="download-checksum" data-download-checksum="Muster-intel.dmg" hidden><summary>SHA-256 checksum</summary><code></code></details></div></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">⊞</div><div class="download-card__heading"><h3>Windows</h3><span>64-bit desktop</span></div><p>A familiar team alongside your everyday apps.</p><div class="download-card__actions"><div class="download-option"><a class="download-action" data-download-file="Muster-setup.exe" href="/download.html" data-download-label="Download .exe">Download .exe <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster-setup.exe">Check availability</span><details class="download-checksum" data-download-checksum="Muster-setup.exe" hidden><summary>SHA-256 checksum</summary><code></code></details></div></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">›_</div><div class="download-card__heading"><h3>Linux</h3><span>x86-64 desktop</span></div><p>Choose a Debian package or a portable AppImage.</p><div class="download-card__actions"><div class="download-option"><a class="download-action" data-download-file="Muster.deb" href="/download.html" data-download-label="Download .deb">Download .deb <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster.deb">Check availability</span><details class="download-checksum" data-download-checksum="Muster.deb" hidden><summary>SHA-256 checksum</summary><code></code></details></div><div class="download-option"><a class="download-action" data-download-file="Muster.AppImage" href="/download.html" data-download-label="Download AppImage">Download AppImage <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster.AppImage">Check availability</span><details class="download-checksum" data-download-checksum="Muster.AppImage" hidden><summary>SHA-256 checksum</summary><code></code></details></div></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">▯</div><div class="download-card__heading"><h3>iPhone</h3><span>Companion beta</span></div><p>Connect to a running Muster host for conversations and approvals.</p><div class="download-card__actions"><a class="download-action" href="/download.html#ios">Check iPhone availability ↗</a><span class="download-file-meta">Separate beta distribution</span></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">▯</div><div class="download-card__heading"><h3>Android</h3><span>Companion beta</span></div><p>Take your conversations with you. Installation and device testing are still in progress.</p><div class="download-card__actions"><span class="download-file-meta">Android beta in development.<br>Public installation is not yet listed.</span></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">◉</div><div class="download-card__heading"><h3>Apple Watch</h3><span>Companion beta</span></div><p>A small place for a useful check-in. Your paired host handles the work.</p><div class="download-card__actions"><a class="download-action" href="/download.html#ios">Check Watch availability ↗</a><span class="download-file-meta">Requires companion setup</span></div></article></div><p class="showcase-footnote">Desktop links use Muster’s download service. Release details update from its published manifest. <a href="/download.html">Installation guide</a> · <a href="#cli">Command-line access</a></p></section>
+    <section id="download" class="section muster-story" data-story-reveal><div class="section-intro"><div class="eyebrow">Make yourself at home</div><h2 class="section-heading">A place on your desktop.<br><em>Or a tab in your browser.</em></h2><p class="section-copy">Open the web workspace or choose a desktop app. Phone and Watch companions have their own beta availability.</p></div><div class="download-release"><span class="download-release__dot" aria-hidden="true"></span><span data-release-status role="status">Checking published desktop downloads…</span><a href="/app">Use Muster on the web ↗</a></div><noscript><p class="showcase-footnote">JavaScript is off. Check the download page for current builds and checksums.</p></noscript><div class="download-grid"><article class="download-card"><div class="download-card__icon" aria-hidden="true">⌘</div><div class="download-card__heading"><h3>macOS</h3><span>Apple silicon & Intel</span></div><p>Your own workspace, right on your Mac.</p><div class="download-card__actions"><div class="download-option"><a class="download-action" data-download-file="Muster.dmg" href="/download.html" data-download-label="Apple silicon .dmg">Apple silicon .dmg <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster.dmg">Check availability</span><details class="download-checksum" data-download-checksum="Muster.dmg" hidden><summary>SHA-256 checksum</summary><code></code></details></div><div class="download-option"><a class="download-action" data-download-file="Muster-intel.dmg" href="/download.html" data-download-label="Intel .dmg">Intel .dmg <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster-intel.dmg">Check availability</span><details class="download-checksum" data-download-checksum="Muster-intel.dmg" hidden><summary>SHA-256 checksum</summary><code></code></details></div></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">⊞</div><div class="download-card__heading"><h3>Windows</h3><span>64-bit desktop</span></div><p>A familiar team alongside your everyday apps.</p><div class="download-card__actions"><div class="download-option"><a class="download-action" data-download-file="Muster-setup.exe" href="/download.html" data-download-label="Download .exe">Download .exe <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster-setup.exe">Check availability</span><details class="download-checksum" data-download-checksum="Muster-setup.exe" hidden><summary>SHA-256 checksum</summary><code></code></details></div></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">›_</div><div class="download-card__heading"><h3>Linux</h3><span>x86-64 desktop</span></div><p>Choose a Debian package or a portable AppImage.</p><div class="download-card__actions"><div class="download-option"><a class="download-action" data-download-file="Muster.deb" href="/download.html" data-download-label="Download .deb">Download .deb <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster.deb">Check availability</span><details class="download-checksum" data-download-checksum="Muster.deb" hidden><summary>SHA-256 checksum</summary><code></code></details></div><div class="download-option"><a class="download-action" data-download-file="Muster.AppImage" href="/download.html" data-download-label="Download AppImage">Download AppImage <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster.AppImage">Check availability</span><details class="download-checksum" data-download-checksum="Muster.AppImage" hidden><summary>SHA-256 checksum</summary><code></code></details></div></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">▯</div><div class="download-card__heading"><h3>iPhone</h3><span>Companion beta</span></div><p>Connect to a running Muster host for conversations and approvals.</p><div class="download-card__actions"><a class="download-action" href="/download.html#ios">Check iPhone availability ↗</a><span class="download-file-meta">Separate beta distribution</span></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">▯</div><div class="download-card__heading"><h3>Android</h3><span>Companion beta</span></div><p>Take your conversations with you. Installation and device testing are still in progress.</p><div class="download-card__actions"><span class="download-file-meta">Android beta in development.<br>Public installation is not yet listed.</span></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">◉</div><div class="download-card__heading"><h3>Apple Watch</h3><span>Companion beta</span></div><p>A small place for a useful check-in. Your paired host handles the work.</p><div class="download-card__actions"><a class="download-action" href="/download.html#ios">Check Watch availability ↗</a><span class="download-file-meta">Requires companion setup</span></div></article></div><p class="showcase-footnote">Desktop links use Muster’s download service. Release details update from its published manifest. <a href="/download.html">Installation guide</a> ·</p></section>
+    <details class="cli-guide" id="cli">
+      <summary><span>Prefer a terminal?</span> A few commands, one familiar team <span aria-hidden="true">+</span></summary>
+      <div class="cli-guide__body"><p>The CLI talks to a configured Muster host. These are illustrative commands and sample output; nothing runs on this page.</p><pre><code>$ muster bots
+atlas    idle       your configured engine
+scout    waiting    your configured engine
+
+$ muster send atlas "Help me plan the next step"
+
+$ muster receipts 2
+# Read the outcomes of two task receipts.</code></pre><p>Requires Node.js 24+ and a configured host. The standalone CLI does not install a server. <a href="/docs/cli">Read the CLI guide →</a></p></div>
+    </details>
     <!-- Releases band — newest first, from /downloads/releases.json -->
     <section id="releases" class="section">
       <div class="section-intro">
@@ -1574,7 +1393,7 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
     </section>
 
 
-<section id="meet-muster" class="section muster-story meet-muster" data-story-reveal><div class="eyebrow">Something good starts small</div><h2 class="section-heading">Meet your<br>first teammate.</h2><p class="section-copy">One task. A little context.<br>Let’s make room for what comes next.</p><div class="meet-muster__actions"><a class="button button--primary" href="/app">Open Muster <span aria-hidden="true">↗</span></a><a class="button button--secondary" href="#download">Get the desktop app <span aria-hidden="true">↓</span></a></div><p class="meet-muster__note">Free app. Connected providers may charge separately.</p><div class="meet-muster__cast" aria-hidden="true"><span><svg class="" viewBox="-112 -112 224 224" width="130" height="130" aria-hidden="true"><use href="#hero-face-body" fill="#75b896"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span><span><svg class="" viewBox="-112 -112 224 224" width="200" height="200" aria-hidden="true"><use href="#hero-face-body" fill="#819fdb"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span><span class="meet-muster__lead"><svg class="" viewBox="-112 -112 224 224" width="340" height="340" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span><span><svg class="" viewBox="-112 -112 224 224" width="190" height="190" aria-hidden="true"><use href="#hero-face-body" fill="#b799d4"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span><span><svg class="" viewBox="-112 -112 224 224" width="125" height="125" aria-hidden="true"><use href="#hero-face-body" fill="#dfc46b"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span></div><div class="meet-muster__hello"><button type="button" data-mascot-greet hidden>Say hello to Muster <span aria-hidden="true">↗</span></button><span data-mascot-greeting role="status"></span></div></section>
+<section id="meet-muster" class="section muster-story meet-muster" data-story-reveal><div class="eyebrow">Something good starts small</div><h2 class="section-heading">A little help.<br><em>A good place to start.</em></h2><p class="section-copy">One task. A little context.<br>Let’s make room for what comes next.</p><div class="meet-muster__actions"><a class="button button--primary" href="/app">Open Muster <span aria-hidden="true">↗</span></a><a class="button button--secondary" href="#download">Get the desktop app <span aria-hidden="true">↓</span></a></div><p class="meet-muster__note">Free app. Connected providers may charge separately.</p><div class="meet-muster__cast" aria-hidden="true"><span><svg class="" viewBox="-112 -112 224 224" width="130" height="130" aria-hidden="true"><use href="#hero-face-body" fill="#75b896"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span><span><svg class="" viewBox="-112 -112 224 224" width="200" height="200" aria-hidden="true"><use href="#hero-face-body" fill="#819fdb"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span><span class="meet-muster__lead"><svg class="" viewBox="-112 -112 224 224" width="340" height="340" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span><span><svg class="" viewBox="-112 -112 224 224" width="190" height="190" aria-hidden="true"><use href="#hero-face-body" fill="#b799d4"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span><span><svg class="" viewBox="-112 -112 224 224" width="125" height="125" aria-hidden="true"><use href="#hero-face-body" fill="#dfc46b"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span></div><div class="meet-muster__hello"><button type="button" data-mascot-greet hidden>Say hello to Muster <span aria-hidden="true">↗</span></button><span data-mascot-greeting role="status"></span></div></section>
   </main>
 
   <footer class="site-footer">
@@ -1879,47 +1698,7 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
     });
   })();
 
-  // Hero headline: per-letter soft-blur-in reveal (word wrappers keep the
-  // text wrappable; ~40 nodes is nothing for a static landing).
-  (function () {
-    var h1 = document.getElementById("hero-title");
-    if (!h1) return;
-    if (REDUCED) { h1.classList.add("revealed"); return; }
-    var walk = function (node) {
-      var out = [];
-      // snapshot first: replaceChild mutates the live childNodes and a
-      // live iteration would skip the .accent span entirely
-      var kids = Array.prototype.slice.call(node.childNodes);
-      kids.forEach(function (child) {
-        if (child.nodeType === 3) {
-          var words = child.textContent.split(/(\s+)/);
-          var frag = document.createDocumentFragment();
-          words.forEach(function (w) {
-            if (!w) return;
-            if (/^\s+$/.test(w)) { frag.appendChild(document.createTextNode(w)); return; }
-            // word wrapper keeps words unbreakable; letters carry the stagger
-            var word = document.createElement("span");
-            word.className = "wr";
-            Array.prototype.forEach.call(w, function (ch) {
-              var l = document.createElement("span");
-              l.className = "w";
-              l.textContent = ch;
-              word.appendChild(l);
-            });
-            frag.appendChild(word);
-          });
-          node.replaceChild(frag, child);
-        } else if (child.nodeType === 1) {
-          out.push(child);
-        }
-      });
-      out.forEach(walk);
-    };
-    walk(h1);
-    var spans = h1.querySelectorAll(".w");
-    spans.forEach(function (s, i) { s.style.setProperty("--d", Math.min(i * 40, 700) + "ms"); });
-    requestAnimationFrame(function () { h1.classList.add("revealed"); });
-  })();
+  // The heading stays whole for assistive technology; motion is decorative.
 
   // Live terminal: cycle which lines are "on" — a calm typewriter feel.
   (function () {
@@ -1995,6 +1774,51 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
 
   // Download metadata and device links are handled by landing-showcase.js.
 
+</script>
+
+
+<script>
+// A decorative, explicitly synthetic scene. No provider, storage or account calls.
+(function () {
+  var scene = document.querySelector('[data-hero-workshop]');
+  if (!scene) return;
+  var choices = scene.querySelectorAll('[data-hero-role]');
+  var replay = scene.querySelector('[data-hero-replay]');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var samples = {
+    plan: { label: 'Plan my day', by: 'ATLAS · YOUR PLANNER', title: 'A little room for your day.', note: 'Sample plan · no calendar changes', tasks: ['Make time for the important work', 'Get a head start on that reply', 'Leave a little space for yourself'] },
+    research: { label: 'Explore an idea', by: 'NOVA · YOUR RESEARCHER', title: 'A clearer picture, before you decide.', note: 'Sample research · no browsing performed', tasks: ['Turn your question into a clear brief', 'Compare a few useful perspectives', 'Bring the open questions back to you'] },
+    draft: { label: 'Draft a reply', by: 'SCOUT · YOUR WRITER', title: 'The right words. Still yours.', note: 'Sample draft · no message sent', tasks: ['Find the point you want to make', 'Prepare a thoughtful first draft', 'Leave the final words up to you'] }
+  };
+  function play() {
+    scene.classList.remove('is-playing');
+    if (reduce.matches) return;
+    void scene.offsetWidth;
+    scene.classList.add('is-playing');
+  }
+  choices.forEach(function (button) {
+    button.addEventListener('click', function () {
+      var key = button.dataset.heroRole;
+      var sample = samples[key];
+      if (!sample) return;
+      choices.forEach(function (choice) { choice.setAttribute('aria-pressed', String(choice === button)); });
+      scene.dataset.role = key;
+      scene.querySelector('[data-hero-role-label]').textContent = sample.by;
+      scene.querySelector('[data-hero-task-title]').textContent = sample.title;
+      scene.querySelector('[data-hero-task-note]').textContent = sample.note;
+      scene.querySelectorAll('[data-hero-tasks] li').forEach(function (item, index) {
+        item.lastChild.textContent = sample.tasks[index];
+      });
+      scene.querySelector('[data-hero-feedback]').textContent = sample.label + ' selected. Illustrative sample only.';
+      play();
+    });
+  });
+  scene.querySelector('[data-hero-controls]').hidden = false;
+  replay.hidden = false;
+  replay.addEventListener('click', play);
+  reduce.addEventListener('change', function () { if (reduce.matches) scene.classList.remove('is-playing'); });
+  play();
+})();
 </script>
 
 </body>

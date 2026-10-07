@@ -105,6 +105,7 @@ const test = baseTest.extend<{
 async function expectVisibleHeadline(page: Page) {
   const heading = page.getByRole("heading", { level: 1 });
   await expect(heading).toHaveText("A personal AI team for your everyday work.");
+  await expect(heading).toHaveAccessibleName("A personal AI team for your everyday work.");
   await expect(heading).toBeInViewport();
   // Visibility alone ignores opacity: the old animated letters occupied
   // space yet became transparent again when their entrance animation ended.
@@ -566,4 +567,159 @@ test("the mascot greets from the keyboard with finite motion and respects reduce
       return style.animationName === "none" || style.animationDuration.split(",").every((duration) => parseFloat(duration) === 0);
     }))).toBe(true);
   }
+});
+
+test("hero scenes are keyboard operable and keep their sample work local", async ({ openLanding }) => {
+  const page = await openLanding(390);
+  const workshop = page.locator("[data-hero-workshop]");
+  const plan = { key: "plan", name: "Plan my day", title: "A little room for your day.", note: "Sample plan · no calendar changes", announcement: /plan/i };
+  const modes = [
+    { key: "research", name: "Explore an idea", title: "A clearer picture, before you decide.", note: "Sample research · no browsing performed", announcement: /research|explore an idea/i },
+    { key: "draft", name: "Draft a reply", title: "The right words. Still yours.", note: "Sample draft · no message sent", announcement: /draft/i },
+    plan,
+  ];
+  await expect(workshop).toBeVisible();
+  await expect(workshop.locator("[data-hero-role]")).toHaveCount(3);
+  await expect(workshop.locator('[data-hero-role="plan"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(workshop.locator('[data-hero-role][aria-pressed="true"]')).toHaveCount(1);
+  await expect(workshop.locator("[data-hero-task-title]")).toHaveText(plan.title);
+  await expect(workshop.locator("[data-hero-task-note]")).toHaveText(plan.note);
+  const feedback = workshop.locator("[data-hero-feedback]");
+  await expect(feedback).toHaveAttribute("role", "status");
+
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(`${request.method()} ${request.url()}`));
+  const storageBefore = await page.evaluate(() => ({
+    local: Object.entries(localStorage), session: Object.entries(sessionStorage),
+  }));
+  const cookiesBefore = await page.context().cookies();
+  const initialUrl = page.url();
+  for (const mode of modes) {
+    const button = workshop.getByRole("button", { name: mode.name, exact: true });
+    await expect(button).toHaveAttribute("data-hero-role", mode.key);
+    await button.focus();
+    await page.keyboard.press("Enter");
+    await expect(button).toBeFocused();
+    await expect(button).toHaveAttribute("aria-pressed", "true");
+    await expect(workshop.locator('[data-hero-role][aria-pressed="true"]')).toHaveCount(1);
+    await expect(workshop.locator("[data-hero-task-title]")).toHaveText(mode.title);
+    await expect(workshop.locator("[data-hero-task-note]")).toHaveText(mode.note);
+    await expect(feedback).toContainText(mode.announcement);
+  }
+
+  const replay = workshop.getByRole("button", { name: "Replay the scene", exact: true });
+  await expect(replay).toHaveAttribute("data-hero-replay", /.*/);
+  await expect.poll(() => workshop.evaluate((element) => element.getAnimations({ subtree: true })
+    .filter((animation) => animation.playState === "running").length)).toBe(0);
+  await replay.focus();
+  await page.keyboard.press("Space");
+  await expect.poll(() => workshop.evaluate((element) => element.getAnimations({ subtree: true })
+    .filter((animation) => animation.playState === "running").length)).toBeGreaterThan(0);
+  await expect(replay).toBeFocused();
+  await expect(workshop.locator('[data-hero-role="plan"]')).toHaveAttribute("aria-pressed", "true");
+  await expect(workshop.locator('[data-hero-role][aria-pressed="true"]')).toHaveCount(1);
+  await expect(workshop.locator("[data-hero-task-title]")).toHaveText(plan.title);
+  await expect(workshop.locator("[data-hero-task-note]")).toHaveText(plan.note);
+  expect(await workshop.evaluate((element) => element.getAnimations({ subtree: true })
+    .every((animation) => animation.effect?.getTiming().iterations !== Infinity))).toBe(true);
+  expect(page.url()).toBe(initialUrl);
+  expect(await page.evaluate(() => ({
+    local: Object.entries(localStorage), session: Object.entries(sessionStorage),
+  }))).toEqual(storageBefore);
+  expect(await page.context().cookies()).toEqual(cookiesBefore);
+  expect(requests, "Changing or replaying an illustrative hero never starts a request").toEqual([]);
+});
+
+test("hero controls still work with reduced motion and introduce no animated workshop", async ({ openLanding }) => {
+  const page = await openLanding(320, true);
+  const workshop = page.locator("[data-hero-workshop]");
+  await expect(workshop).toBeVisible();
+  for (const mode of [
+    { key: "research", name: "Explore an idea", title: "A clearer picture, before you decide." },
+    { key: "draft", name: "Draft a reply", title: "The right words. Still yours." },
+    { key: "plan", name: "Plan my day", title: "A little room for your day." },
+  ]) {
+    const button = workshop.getByRole("button", { name: mode.name, exact: true });
+    await button.click();
+    await expect(workshop.locator(`[data-hero-role="${mode.key}"]`)).toHaveAttribute("aria-pressed", "true");
+    await expect(workshop.locator('[data-hero-role][aria-pressed="true"]')).toHaveCount(1);
+    await expect(workshop.locator("[data-hero-task-title]")).toHaveText(mode.title);
+  }
+  await workshop.getByRole("button", { name: "Replay the scene", exact: true }).click();
+  expect(await workshop.evaluate((element) => [element, ...element.querySelectorAll("*")].every((target) => {
+    const style = getComputedStyle(target);
+    return style.animationName === "none" || style.animationDuration.split(",").every((duration) => parseFloat(duration) === 0);
+  }))).toBe(true);
+  expect(await workshop.evaluate((element) => element.getAnimations({ subtree: true })
+    .every((animation) => Number(animation.effect?.getTiming().duration ?? 0) === 0))).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+});
+
+test("hero sample stays readable without JavaScript and its unavailable controls are hidden", async ({ openLanding }) => {
+  const page = await openLanding(390, false, false);
+  const workshop = page.locator("[data-hero-workshop]");
+  await expect(workshop).toBeVisible();
+  await expect(workshop.locator("[data-hero-task-title]")).toHaveText("A little room for your day.");
+  await expect(workshop.locator("[data-hero-task-note]")).toHaveText("Sample plan · no calendar changes");
+  for (const role of ["plan", "research", "draft"]) {
+    await expect(workshop.locator(`[data-hero-role="${role}"]`)).toHaveCount(1);
+    await expect(workshop.locator(`[data-hero-role="${role}"]`)).toBeHidden();
+  }
+  await expect(workshop.locator("[data-hero-replay]")).toHaveCount(1);
+  await expect(workshop.locator("[data-hero-replay]")).toBeHidden();
+  await expect(page.locator(".hero__actions").getByRole("link", { name: "Open Muster" })).toHaveAttribute("href", "/app");
+});
+
+test("the download page CLI destination opens a keyboard-operable illustrative guide", async ({ openLanding }) => {
+  const page = await openLanding(390, false, false);
+  const downloadHtml = await readFile(resolve(SITE_ROOT, "download.html"), "utf8");
+  const cliHref = z.literal("/#cli").parse(await page.evaluate((html) => {
+    const document = new DOMParser().parseFromString(html, "text/html");
+    return document.querySelector('a[href="/#cli"]')?.getAttribute("href");
+  }, downloadHtml));
+  await page.goto(new URL(cliHref, page.url()).href, { waitUntil: "networkidle" });
+  await expect(page).toHaveURL(/\/#cli$/);
+  const guide = page.locator("details#cli");
+  await expect(guide).toHaveCount(1);
+  await expect(guide).toHaveJSProperty("open", false);
+  const summary = guide.locator("summary");
+  await expect(summary).toHaveAccessibleName("Prefer a terminal? A few commands, one familiar team");
+  await summary.focus();
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(`${request.method()} ${request.url()}`));
+  await page.keyboard.press("Enter");
+  await expect(guide).toHaveJSProperty("open", true);
+  await expect(summary).toBeFocused();
+  const commands = guide.locator("pre code");
+  await expect(commands).toBeVisible();
+  await expect(commands).toContainText("$ muster bots");
+  await expect(commands).toContainText('$ muster send atlas "Help me plan the next step"');
+  await expect(commands).toContainText("$ muster receipts 2");
+  await expect(guide.getByText("The CLI talks to a configured Muster host. These are illustrative commands and sample output; nothing runs on this page.", { exact: true })).toBeVisible();
+  await expect(guide.getByRole("link", { name: "Read the CLI guide" })).toHaveAttribute("href", "/docs/cli");
+  expect(requests, "Expanding the illustrative CLI guide executes no request").toEqual([]);
+});
+
+test("homepage presentation stays isolated from the real download page", async ({ openLanding }) => {
+  const page = await openLanding(390);
+  await expect(page.locator('link[rel="stylesheet"][href^="/landing-editorial.css"]')).toHaveCount(1);
+  await expect(page.locator('link[rel="stylesheet"][href^="/landing-gaia.css"]')).toHaveCount(0);
+  const downloadUrl = new URL("/download.html", page.url());
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(request.url()));
+  const originalStyleResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/landing-gaia.css");
+  await page.goto(downloadUrl.href, { waitUntil: "networkidle" });
+  const originalStyle = await originalStyleResponse;
+  expect(originalStyle.ok(), "The download page loads its actual retained stylesheet").toBe(true);
+  expect(await originalStyle.text()).toBe(await readFile(resolve(SITE_ROOT, "landing-gaia.css"), "utf8"));
+  await expect(page.locator('link[rel="stylesheet"][href^="/landing-gaia.css"]')).toHaveCount(1);
+  await expect(page.locator('link[rel="stylesheet"][href^="/landing-editorial.css"]')).toHaveCount(0);
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(17, 17, 17)");
+  const heading = page.getByRole("heading", { level: 1 });
+  await expect(heading).toBeVisible();
+  await expect(heading).toContainText("Download Muster");
+  await expect(page.getByRole("link", { name: "Muster home", exact: true })).toHaveAttribute("href", "/");
+  await expect(page.locator('a[href="/#cli"]')).toHaveCount(1);
+  expect(requests.every((url) => new URL(url).origin === downloadUrl.origin), "Download resources stay on the owned origin").toBe(true);
+  expect(requests.some((url) => new URL(url).pathname === "/landing-editorial.css"), "The homepage-only stylesheet is never loaded by download.html").toBe(false);
 });
