@@ -10,155 +10,117 @@
 <meta property="og:description" content="Installable AI teammate packs. Hire a finished team.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://muster.today/teams">
-<meta property="og:image" content="https://muster.today/hero.png">
-<link rel="icon" href="/app-icon.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<meta property="og:image" content="https://muster.today/landing-workroom/v1/social.jpg">
+<link rel="icon" href="/landing-workroom/v1/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/public-site/v1/site.css">
 <style>
-/* BotMRR directory design (MIT, github.com/milind-soni/openmausbot-teams)
-   rendered in Muster's editorial tokens: near-black monochrome chrome,
-   Fraunces for statements, Plex Mono for kickers, one orange, hairlines
-   instead of elevation. */
-:root{
-  --canvas:#09090b;--surface:#18181b;--raised:#1f1f23;--ink:#f5f5f4;--muted:#9a9aa4;--faint:#6b6b74;
-  --line:rgba(245,245,244,.09);--line-strong:rgba(245,245,244,.16);--orange:#f0460e;
-  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
-  --serif:"Fraunces",Georgia,serif;--sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  --col:min(848px,calc(100% - 32px));
-}
-*{box-sizing:border-box}
-html{color-scheme:dark}
-body{margin:0;background:var(--canvas);color:var(--ink);font:400 16px/1.6 var(--sans);-webkit-font-smoothing:antialiased}
-a{color:inherit;text-decoration:none}
-::selection{background:rgba(240,70,14,.35)}
-/* floating pill header */
-.nav{position:sticky;top:12px;z-index:40;margin:0 auto;width:var(--col);display:flex;align-items:center;gap:10px;
-  padding:9px 10px 9px 14px;border:1px solid var(--line);border-radius:999px;background:rgba(24,24,27,.72);backdrop-filter:blur(14px) saturate(1.3)}
-.nav .mark{display:flex;align-items:center;gap:9px;font-weight:600;font-size:15px;letter-spacing:-.01em}
-.nav .mark svg{transition:transform .25s ease}
-.nav .mark:hover svg{transform:rotate(-8deg) scale(1.08)}
-.nav .links{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:13.5px;color:var(--muted)}
-.nav .links a{padding:7px 12px;border-radius:999px;transition:background .15s,color .15s}
-.nav .links a:hover{color:var(--ink);background:rgba(245,245,244,.06)}
-.nav .links a.cta{background:var(--orange);color:#fff;font-weight:600}
-.nav .links a.cta:hover{filter:brightness(1.12)}
-@media (max-width:480px){.nav .links a:not(.cta){display:none}}
-main{width:var(--col);margin:0 auto;padding:56px 0 96px}
-.kicker{font:500 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--orange)}
-h1{font:600 clamp(34px,6vw,49px)/1.05 var(--serif);letter-spacing:-.035em;margin:14px 0 10px}
-.sub{max-width:560px;color:var(--muted);font-size:16.5px;margin:0 0 30px}
-.search{width:100%;padding:14px 16px;border-radius:12px;border:1px solid var(--line-strong);background:var(--surface);
-  color:var(--ink);font:400 15px var(--sans);outline:none;transition:border-color .15s}
-.search:focus{border-color:rgba(240,70,14,.55)}
-.search::placeholder{color:var(--faint)}
-.controls{display:flex;align-items:center;gap:10px;margin:14px 0 26px;flex-wrap:wrap}
-.controls select{appearance:none;padding:8px 30px 8px 12px;border-radius:999px;border:1px solid var(--line);
-  background:var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239a9aa4' fill='none' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 11px center;
-  color:var(--muted);font:400 12.5px var(--sans);cursor:pointer}
-.controls select:hover{color:var(--ink);border-color:var(--line-strong)}
-.count{margin-left:auto;font:400 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
-/* card grid */
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
-@media (max-width:760px){.grid{grid-template-columns:repeat(2,1fr)}}
-@media (max-width:560px){.grid{grid-template-columns:1fr}}
-.card{position:relative;display:flex;flex-direction:column;min-height:300px;padding:20px;border:1px solid var(--line);
-  border-radius:20px;background:var(--surface);cursor:pointer;text-align:left;color:inherit;font:inherit;
-  transition:transform .22s ease,border-color .22s,box-shadow .22s;animation:rise .38s cubic-bezier(.16,1,.3,1) both}
-.card:hover{transform:translateY(-2px);border-color:var(--line-strong);box-shadow:0 12px 32px rgba(0,0,0,.38)}
-.card:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
-@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-.card .top{display:flex;align-items:flex-start;gap:10px}
-.card h3{font:600 18px/1.25 var(--serif);letter-spacing:-.02em;margin:0}
-.card .by{font:400 11px/1.4 var(--mono);color:var(--faint);margin-top:3px}
-.card .ava{margin-left:auto;flex:none}
-.card .tag{display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden;color:var(--muted);font-size:13.5px;margin:12px 0 14px}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto}
-.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px 4px 5px;border:1px solid var(--line);border-radius:999px;
-  font:400 11.5px var(--sans);color:var(--muted)}
-.chip i{width:16px;height:16px;border-radius:5px;background:var(--raised);display:grid;place-items:center;font:600 9px var(--mono);color:var(--ink);font-style:normal}
-.chip.none{padding-inline:10px;color:var(--faint)}
-.card .foot{display:flex;align-items:center;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--line);
-  font:400 11px/1 var(--mono);letter-spacing:.05em;color:var(--faint)}
-.card .foot .out{color:var(--orange)}
-.card .foot .go{margin-left:auto;opacity:0;transition:opacity .2s}
-.card:hover .foot .go{opacity:1}
-.empty{grid-column:1/-1;padding:48px 0;text-align:center;color:var(--muted)}
-/* detail overlay */
-dialog{margin:auto;width:min(848px,calc(100% - 24px));max-height:88vh;overflow:auto;border:1px solid var(--line-strong);
-  border-radius:24px;background:var(--canvas);color:var(--ink);padding:0}
-dialog::backdrop{background:rgba(0,0,0,.62);backdrop-filter:blur(4px)}
-.sheet{padding:30px 32px 36px}
-@media (max-width:560px){.sheet{padding:22px 18px 28px}}
-.sheet .crumb{font:400 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
-.sheet .head{display:flex;align-items:flex-start;gap:16px;margin:14px 0 6px}
-.sheet h2{font:600 clamp(26px,4.6vw,38px)/1.1 var(--serif);letter-spacing:-.03em;margin:0}
-.sheet .facts{font:400 12px var(--mono);color:var(--faint);margin-top:6px}
-.sheet .close{margin-left:auto;flex:none;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;font-size:15px}
-.sheet .close:hover{color:var(--ink);border-color:var(--line-strong)}
-.sheet .install{display:inline-flex;align-items:center;gap:8px;margin:16px 0 4px;padding:11px 18px;border-radius:999px;background:var(--orange);color:#fff;font-weight:600;font-size:14px}
-.sheet .install:hover{filter:brightness(1.12)}
-.panel{margin:20px 0;padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:var(--surface);font-size:14.5px;color:var(--muted)}
-.sect{font:500 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin:28px 0 12px}
-.members{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media (max-width:560px){.members{grid-template-columns:1fr}}
-.member{display:flex;align-items:center;gap:12px;padding:13px 14px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
-.member b{display:block;font-weight:600;font-size:14.5px}
-.member span{display:block;font-size:12px;color:var(--faint)}
-.readme{font-size:14.5px;line-height:1.7;color:var(--muted)}
-.readme h1,.readme h2,.readme h3{color:var(--ink);font-family:var(--serif);letter-spacing:-.02em;margin:1.4em 0 .5em}
-.readme h1{font-size:22px}.readme h2{font-size:18px}.readme h3{font-size:15.5px}
-.readme code{font:12px var(--mono);background:var(--surface);border:1px solid var(--line);border-radius:5px;padding:1.5px 5px;color:var(--ink)}
-.readme pre{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;overflow:auto}
-.readme pre code{border:0;background:transparent;padding:0}
-.readme ul{padding-left:20px}
-.readme a{color:var(--orange)}
-.readme p:first-child{margin-top:0}
-.related{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-@media (max-width:700px){.related{grid-template-columns:1fr}}
-.rel{padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface);cursor:pointer;transition:border-color .15s}
-.rel:hover{border-color:var(--line-strong)}
-.rel b{display:block;font:600 14px/1.3 var(--serif)}
-.rel span{font-size:12px;color:var(--faint)}
-footer{width:var(--col);margin:0 auto;padding:0 0 40px;display:flex;gap:14px;justify-content:center;
-  font-size:10px;color:var(--faint);letter-spacing:.04em}
-footer a:hover{color:var(--muted)}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* Directory interaction structure originally derived from BotMRR (MIT,
+   github.com/milind-soni/openmausbot-teams). Workroom visual treatment. */
+:root { --orange:var(--site-moss); --mono:ui-monospace,SFMono-Regular,monospace; }
+.teams-wrap { width:min(1140px,calc(100% - 96px)); margin-inline:auto; padding:72px 0 40px; }
+.library-intro { display:grid; grid-template-columns:1.3fr .7fr; align-items:end; gap:64px; margin-bottom:46px; }
+.library-intro h1 { margin:18px 0 0; font:650 clamp(54px,7.5vw,94px)/.98 var(--site-display); letter-spacing:-.065em; }
+.sub { color:var(--site-muted); margin:0 0 4px; max-width:410px; line-height:1.7; }
+.library-tools { padding:25px 0 28px; border-top:1px solid var(--site-line); }
+.search { width:100%; padding:17px 20px; border:1px solid var(--site-line); border-radius:7px; background:var(--site-white); color:var(--site-ink); font:16px var(--site-body); }
+.search::placeholder { color:var(--site-muted); opacity:1; }
+.controls { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:14px; }
+.controls select { min-height:42px; max-width:100%; padding:8px 32px 8px 13px; border:1px solid var(--site-line); border-radius:6px; background:var(--site-paper); color:var(--site-ink); font-size:13px; cursor:pointer; }
+.count { margin-left:auto; color:var(--site-muted); font-size:12px; }
+.grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; }
+.card { display:flex; flex-direction:column; min-width:0; min-height:320px; padding:26px; border:1px solid var(--site-line); border-radius:9px; background:var(--site-white); color:var(--site-ink); font:inherit; text-align:left; cursor:pointer; transition:border-color .18s,transform .18s; }
+.card:hover { border-color:var(--site-moss); transform:translateY(-3px); }
+.card .top { display:flex; align-items:flex-start; gap:14px; }
+.card h3 { margin:0; font:600 25px/1.08 var(--site-display); letter-spacing:-.04em; overflow-wrap:anywhere; }
+.card .by { margin-top:9px; color:var(--site-muted); font-size:11px; }
+.ava { display:grid; place-items:center; flex:none; width:var(--avatar-size); height:var(--avatar-size); border:1px solid var(--site-line); border-radius:10px; background:var(--site-lime); color:var(--site-ink); font:650 22px/1 var(--site-display); }
+.card .ava { margin-left:auto; }
+.card .tag { color:var(--site-muted); font-size:14px; line-height:1.6; margin:22px 0; overflow-wrap:anywhere; }
+.chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:auto; }
+.chip { display:inline-flex; align-items:center; gap:6px; padding:5px 9px 5px 5px; border:1px solid var(--site-line); border-radius:5px; color:var(--site-muted); font-size:11px; }
+.chip i { display:grid; place-items:center; width:17px; height:17px; background:var(--site-paper); font:600 10px var(--site-body); color:var(--site-ink); font-style:normal; }
+.chip.none { padding-inline:9px; }
+.card .foot { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:24px; padding-top:15px; border-top:1px solid var(--site-line); color:var(--site-muted); font-size:11px; }
+.card .foot .out { color:var(--site-moss); }
+.card .foot .go { margin-left:auto; font-size:20px; line-height:1; }
+.empty { grid-column:1/-1; text-align:center; padding:60px 20px; border:1px solid var(--site-line); color:var(--site-muted); border-radius:8px; }
+.catalog-note { margin:30px 0 0; color:var(--site-muted); font-size:12px; }
+dialog { width:min(860px,calc(100% - 32px)); max-height:88dvh; overflow:auto; margin:auto; padding:0; border:1px solid var(--site-line); border-radius:14px; background:var(--site-paper); color:var(--site-ink); }
+dialog::backdrop { background:rgba(26,34,24,.55); }
+.sheet { padding:32px; overflow-wrap:anywhere; }
+.sheet .crumb,.sect { color:var(--site-muted); font:600 10px/1.5 var(--site-body); text-transform:uppercase; letter-spacing:.12em; }
+.sheet .head { display:flex; align-items:flex-start; gap:18px; margin:20px 0 8px; }
+.sheet .head > div { min-width:0; }
+.sheet h2 { margin:0; font:600 clamp(29px,5vw,44px)/1.05 var(--site-display); letter-spacing:-.045em; }
+.sheet .facts { margin-top:10px; color:var(--site-muted); font-size:12px; }
+.sheet .close { flex:none; width:40px; height:40px; margin-left:auto; border:1px solid var(--site-line); border-radius:50%; background:var(--site-white); color:var(--site-ink); }
+.sheet .close:hover { background:var(--site-lime); }
+.sheet .install { display:inline-flex; margin:18px 0 8px; padding:12px 18px; background:var(--site-moss); color:var(--site-white); border-radius:6px; font-size:14px; text-decoration:none; }
+.panel { margin:22px 0; padding:22px; border:1px solid var(--site-line); border-radius:8px; background:var(--site-white); color:var(--site-muted); font-size:14px; line-height:1.7; }
+.sect { margin:32px 0 14px; }
+.members { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.member { display:flex; align-items:center; gap:12px; min-width:0; padding:14px; border:1px solid var(--site-line); border-radius:7px; }
+.member b { display:block; font-size:14px; }
+.member div span { display:block; color:var(--site-muted); font-size:12px; }
+.readme { color:var(--site-muted); font-size:14px; line-height:1.75; }
+.readme h1,.readme h2,.readme h3 { margin:1.5em 0 .55em; color:var(--site-ink); font:600 25px/1.2 var(--site-display); letter-spacing:-.035em; }
+.readme h2 { font-size:22px; }.readme h3 { font-size:19px; }
+.readme code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; background:var(--site-white); color:var(--site-ink); font:12px/1.6 var(--mono); }
+.readme pre { overflow:auto; padding:16px; border:1px solid var(--site-line); border-radius:6px; background:var(--site-white); }
+.readme pre code { padding:0; border:0; }
+.readme a { text-decoration:underline; }
+.related { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.rel { padding:18px; border:1px solid var(--site-line); border-radius:7px; background:var(--site-white); color:var(--site-ink); text-align:left; cursor:pointer; }
+.rel:hover { background:var(--site-lime); }
+.rel b { display:block; font:600 19px/1.15 var(--site-display); letter-spacing:-.03em; }
+.rel span { display:block; margin-top:8px; color:var(--site-muted); font-size:12px; }
+@media(max-width:960px) { .grid{grid-template-columns:repeat(2,minmax(0,1fr))} .library-intro{grid-template-columns:1fr;gap:26px}.sub{max-width:650px} }
+@media(max-width:760px) { .teams-wrap{width:calc(100% - 40px);padding-top:44px}.sheet{padding:24px}.related{grid-template-columns:1fr} }
+@media(max-width:520px) { .grid,.members{grid-template-columns:1fr}.card{min-height:280px}.count{width:100%;margin:6px 0 0}.sheet .head>.ava{display:none}.sheet{padding:20px}.controls select{flex:1} }
+
 </style>
 </head>
 <body>
-<nav class="nav">
-  <a class="mark" href="/"><svg width="22" height="22" viewBox="0 0 100 100" aria-hidden="true"><g fill="#f08a24"><circle cx="50" cy="24" r="19"/><circle cx="75" cy="42" r="19"/><circle cx="66" cy="71" r="19"/><circle cx="34" cy="71" r="19"/><circle cx="25" cy="42" r="19"/></g><ellipse cx="43" cy="47" rx="4.5" ry="8" fill="#0a0a0a"/><ellipse cx="57" cy="47" rx="4.5" ry="8" fill="#0a0a0a"/></svg>Muster</a>
-  <div class="links"><a href="/docs">Docs</a><a href="/#features">Features</a><a class="cta" href="/app">Open Muster</a></div>
-</nav>
-<main>
-  <p class="kicker">Team library</p>
-  <h1>Hire a finished team.</h1>
+<a class="site-skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+  <nav class="site-nav" aria-label="Primary"><a href="/teams.html" aria-current="page">Teams</a><a href="/templates.html">Templates</a><a href="/download.html">Download</a><a href="/docs">Docs</a><a class="site-cta" href="/app">Open Muster <span aria-hidden="true">↗</span></a></nav>
+</header>
+<main id="main" class="teams-wrap">
+  <section class="library-intro">
+  <div>
+  <p class="site-eyebrow">THE WORKROOM / TEAM LIBRARY</p>
+  <h1>Meet your<br>next team.</h1></div>
   <p class="sub">Installable packs of teammates — personas, skills and routines, reviewed by you before anything is imported. Open any card to meet the team.</p>
+  </section>
+  <div class="library-tools">
   <input class="search" id="q" type="search" placeholder="Search teams, roles, skills…" aria-label="Search teams">
   <div class="controls">
     <select id="sort" aria-label="Sort teams"><option value="featured">Featured first</option><option value="bots">Most bots</option><option value="az">Name A–Z</option></select>
     <select id="cat" aria-label="Filter by category"><option value="">All categories</option></select>
-    <span class="count" id="count"></span>
+    <span class="count" id="count" role="status" aria-live="polite"></span>
   </div>
-  <div class="grid" id="grid"></div>
+  </div>
+  <div class="grid" id="grid"><p class="empty">Loading the team library…</p></div>
+  <noscript><p class="catalog-note">Enable JavaScript to search the library, or <a href="/app">browse teams in Muster</a>.</p></noscript>
+  <p class="catalog-note">Team packs are community content. Review their members, required tools and playbooks before importing.</p>
 </main>
-<footer><span>Templates are community content.</span><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a><span>© Orazen</span></footer>
-<dialog id="detail"><div class="sheet" id="sheet"></div></dialog>
+<footer class="site-footer">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p>
+  <nav aria-label="Footer"><a href="/switch.html">Switch to Muster</a><a href="/docs">Docs</a><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a></nav>
+  <small>© 2026 Orazen</small>
+</footer>
+<dialog id="detail" aria-label="Team details"><div class="sheet" id="sheet"></div></dialog>
 <script>
 (function(){
 "use strict";
 var APP={gmail:"Gmail",googlesheets:"Google Sheets",googlecalendar:"Calendar",drive:"Drive",slack:"Slack",notion:"Notion",github:"GitHub",x:"X",twitter:"X",web:"Web",outlook:"Outlook",jira:"Jira",linear:"Linear",hubspot:"HubSpot",salesforce:"Salesforce"};
-var COLORS={green:"#34d399",blue:"#38bdf8",red:"#f87171",orange:"#fb923c",purple:"#a78bfa",cyan:"#22d3ee",pink:"#f472b6",yellow:"#facc15",teal:"#2dd4bf",coral:"#ff7f66"};
 var teams=[],grid=document.getElementById("grid"),count=document.getElementById("count");
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
-function hue(seed){var h=0;for(var i=0;i<seed.length;i++){h=(h*31+seed.charCodeAt(i))>>>0;}return h;}
-function flower(color,size,seed){
-  var c=COLORS[color]||"#f08a24",happy=hue(seed)%2===0;
-  var eyes=happy
-    ?'<path d="M40 50q5 6 10 0" stroke="#0a0a0a" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M52 50q5 6 10 0" stroke="#0a0a0a" stroke-width="5" fill="none" stroke-linecap="round"/>'
-    :'<ellipse cx="44" cy="47" rx="4.5" ry="8" fill="#0a0a0a"/><ellipse cx="57" cy="47" rx="4.5" ry="8" fill="#0a0a0a"/>';
-  return '<svg class="ava" width="'+size+'" height="'+size+'" viewBox="0 0 100 100" aria-hidden="true"><g fill="'+c+'"><circle cx="50" cy="24" r="19"/><circle cx="75" cy="42" r="19"/><circle cx="66" cy="71" r="19"/><circle cx="34" cy="71" r="19"/><circle cx="25" cy="42" r="19"/></g>'+eyes+'</svg>';
+function avatar(size,seed){
+  var initial=String(seed||"M").trim().charAt(0).toUpperCase();
+  return '<span class="ava" style="--avatar-size:'+size+'px" aria-hidden="true">'+esc(initial)+'</span>';
 }
 function appChip(slug){var label=APP[String(slug).toLowerCase()]||String(slug).replace(/[-_]/g," ").replace(/\b\w/g,function(m){return m.toUpperCase();});
   return '<span class="chip"><i>'+esc(label.slice(0,1))+'</i>'+esc(label)+'</span>';}
@@ -169,8 +131,8 @@ function cardHTML(t,i){
   if(!chips)chips='<span class="chip none">No connector required</span>';
   var by=t.author&&t.author.name?'<div class="by">by '+esc(t.author.name)+'</div>':'';
   var out=t.outcome?'<span class="out">'+esc(t.outcome)+'</span>':'';
-  return '<button class="card" data-slug="'+esc(t.slug)+'" style="animation-delay:'+Math.min(i*34,340)+'ms">'
-    +'<div class="top"><div><h3>'+esc(t.name)+'</h3>'+by+'</div>'+flower(null,52,t.slug)+'</div>'
+  return '<button type="button" class="card" data-slug="'+esc(t.slug)+'" style="animation-delay:'+Math.min(i*34,340)+'ms">'
+    +'<div class="top"><div><h3>'+esc(t.name)+'</h3>'+by+'</div>'+avatar(52,t.name)+'</div>'
     +'<p class="tag">'+esc(t.summary)+'</p><div class="chips">'+chips+'</div>'
     +'<div class="foot"><span>'+t.members+' bots · '+((t.skills||[]).length)+' playbooks</span>'+out+'<span class="go">↗</span></div></button>';
 }
@@ -204,35 +166,42 @@ function md(src){
   if(inCode)out.push("<pre><code>"+esc(code.join("\n"))+"</code></pre>");
   return out.join("\n");
 }
-var dlg=document.getElementById("detail"),sheet=document.getElementById("sheet");
+var dlg=document.getElementById("detail"),sheet=document.getElementById("sheet"),detailRequest=0;
+function closeTeam(){detailRequest++;dlg.close();}
 function openTeam(slug){
-  sheet.innerHTML='<p class="crumb">loading…</p>';dlg.showModal();
+  var request=++detailRequest;
+  sheet.innerHTML='<p class="crumb">loading…</p><button type="button" class="close" aria-label="Close">✕</button>';
+  if(!dlg.open)dlg.showModal();
+  sheet.querySelector(".close").addEventListener("click",closeTeam);
   fetch("/api/directory/teams/"+encodeURIComponent(slug)).then(function(r){if(!r.ok)throw new Error("http");return r.json();}).then(function(d){
+    if(request!==detailRequest||!dlg.open)return;
     var t=d.team,entry=teams.filter(function(x){return x.slug===slug;})[0]||{};
     var members=(t.team&&t.team.members||[]).map(function(m){
-      return '<div class="member">'+flower(m.appearance&&m.appearance.color,42,m.name||m.key)+'<div><b>'+esc(m.name)+'</b><span>'+esc(m.title||"")+'</span></div></div>';}).join("");
+      return '<div class="member">'+avatar(42,m.name||m.key)+'<div><b>'+esc(m.name)+'</b><span>'+esc(m.title||"")+'</span></div></div>';}).join("");
     var apps=((entry.requires&&entry.requires.apps)||[]).map(appChip).join("")||'<span class="chip none">No connector required</span>';
     var setup=entry.setupMinutes?' · ~'+entry.setupMinutes+' min setup':'';
     var rel=teams.filter(function(x){return x.slug!==slug&&(!entry.category||x.category===entry.category);}).slice(0,3)
-      .map(function(x){return '<div class="rel" data-slug="'+esc(x.slug)+'"><b>'+esc(x.name)+'</b><span>'+x.members+' bots</span></div>';}).join("");
+      .map(function(x){return '<button type="button" class="rel" data-slug="'+esc(x.slug)+'"><b>'+esc(x.name)+'</b><span>'+x.members+' bots</span></button>';}).join("");
     sheet.innerHTML='<p class="crumb">Team library · '+esc(entry.category||"")+'</p>'
-      +'<div class="head">'+flower(null,64,slug)+'<div><h2>'+esc(t.team.name)+'</h2><div class="facts">'+((t.team.members||[]).length)+' bots'+setup+'</div></div>'
-      +'<button class="close" aria-label="Close">✕</button></div>'
+      +'<div class="head">'+avatar(64,t.team.name)+'<div><h2>'+esc(t.team.name)+'</h2><div class="facts">'+((t.team.members||[]).length)+' bots'+setup+'</div></div>'
+      +'<button type="button" class="close" aria-label="Close">✕</button></div>'
       +'<a class="install" href="/app">Hire this team in Muster →</a>'
       +'<div class="panel">'+esc(entry.summary||t.team.description||"")+(entry.outcome?'<br><strong style="color:var(--orange)">'+esc(entry.outcome)+'</strong>':"")+'</div>'
       +'<p class="sect">Works with</p><div class="chips">'+apps+'</div>'
       +'<p class="sect">Meet the team</p><div class="members">'+members+'</div>'
       +'<p class="sect">The playbook</p><div class="readme">'+md(d.readme||"")+'</div>'
       +(rel?'<p class="sect">Related teams</p><div class="related">'+rel+'</div>':"");
-    sheet.querySelector(".close").addEventListener("click",function(){dlg.close();});
+    sheet.querySelector(".close").addEventListener("click",closeTeam);
+    sheet.querySelector(".close").focus({preventScroll:true});
     Array.prototype.forEach.call(sheet.querySelectorAll(".rel"),function(el){el.addEventListener("click",function(){openTeam(el.getAttribute("data-slug"));});});
-  }).catch(function(){sheet.innerHTML='<p class="crumb">Team library</p><p class="panel">The catalog is warming up — check back shortly.</p><button class="close" aria-label="Close">✕</button>';sheet.querySelector(".close").addEventListener("click",function(){dlg.close();});});
+  }).catch(function(){if(request!==detailRequest||!dlg.open)return;sheet.innerHTML='<p class="crumb">Team library</p><p class="panel">The catalog is warming up — check back shortly.</p><button type="button" class="close" aria-label="Close">✕</button>';sheet.querySelector(".close").addEventListener("click",closeTeam);});
 }
 grid.addEventListener("click",function(e){var c=e.target.closest(".card");if(c)openTeam(c.getAttribute("data-slug"));});
 document.getElementById("q").addEventListener("input",render);
 document.getElementById("sort").addEventListener("change",render);
 document.getElementById("cat").addEventListener("change",render);
-dlg.addEventListener("click",function(e){if(e.target===dlg)dlg.close();});
+dlg.addEventListener("click",function(e){if(e.target===dlg)closeTeam();});
+dlg.addEventListener("cancel",function(){detailRequest++;});
 fetch("/api/directory/teams").then(function(r){if(!r.ok)throw new Error("http");return r.json();}).then(function(d){
   teams=d.teams||[];
   var cats=[];teams.forEach(function(t){if(t.category&&cats.indexOf(t.category)<0)cats.push(t.category);});

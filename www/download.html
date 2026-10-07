@@ -5,222 +5,82 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Download Muster — macOS, Windows, Ubuntu</title>
 <meta name="description" content="Download Muster for macOS, Windows, or Ubuntu. Your personal workspace, running on your devices." />
-<link rel="icon" type="image/svg+xml" href="/app-icon.svg" />
+<link rel="icon" type="image/svg+xml" href="/landing-workroom/v1/favicon.svg" />
+<link rel="stylesheet" href="/public-site/v1/site.css">
 <style>
-  :root {
-    --app: #0a0a0a;
-    --panel: #131314;
-    --inset: #18181a;
-    --card: #1e1e21;
-    --raised: #2a2a2e;
-    --raised-hover: #343438;
-    --ink: #f6f6f7;
-    --body: #d0d0d2;
-    --muted: rgba(246, 246, 247, 0.42);
-    --muted-2: rgba(246, 246, 247, 0.28);
-    --hairline-paint: rgba(74, 74, 78, 0.40);
-    --line: var(--hairline-paint);
-    --line-2: rgba(74, 74, 78, 0.62);
-    --accent: #c93a0b;
-    --accent-strong: #f0460e;
-    --accent-border: #ff7a45;
-    --accent-soft: #ff7a45;
-    --accent-line: rgba(240, 70, 14, 0.34);
-    --accent-wash: rgba(240, 70, 14, 0.09);
-    --accent-wash-2: rgba(240, 70, 14, 0.16);
-    --shadow-soft: 0 1px 1px rgba(255,255,255,0.05), 0 22px 60px rgba(0,0,0,0.10);
-    --radius-row: 8px;
-    --radius-card: 12px;
-    --radius-frame: 20px;
-    --radius-pill: 999px;
-    --ease: cubic-bezier(0.22,1,0.36,1);
-  }
-  @font-face { font-family: "Inter"; font-style: normal; font-weight: 400; font-display: swap; src: url("/fonts/inter-latin-400-normal.woff2") format("woff2"); }
-  @font-face { font-family: "Inter"; font-style: normal; font-weight: 500; font-display: swap; src: url("/fonts/inter-latin-500-normal.woff2") format("woff2"); }
-  @font-face { font-family: "Inter"; font-style: normal; font-weight: 600; font-display: swap; src: url("/fonts/inter-latin-600-normal.woff2") format("woff2"); }
-  @font-face { font-family: "Inter"; font-style: normal; font-weight: 700; font-display: swap; src: url("/fonts/inter-latin-700-normal.woff2") format("woff2"); }
 
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; min-width: 320px;
-    background: var(--app); color: var(--body);
-    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    font-size: 16px; line-height: 1.6;
-    letter-spacing: -0.012em;
-    text-rendering: optimizeLegibility;
-    -webkit-font-smoothing: antialiased;
-  }
-  ::selection { background: rgba(240, 70, 14, 0.24); color: var(--ink); }
-  a { color: inherit; text-decoration: none; }
+:root { --muted:var(--site-muted); --accent-soft:var(--site-moss); }
+.download-wrap { width:min(1140px,calc(100% - 96px)); margin-inline:auto; }
+.hero { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(230px,.6fr); align-items:end; gap:64px; padding:76px 0 52px; }
+.hero h1 { margin:18px 0 24px; max-width:770px; font:650 clamp(52px,7.4vw,96px)/.98 var(--site-display); letter-spacing:-.065em; }
+#dl-version { display:table; margin-top:22px; padding:5px 10px; border:1px solid var(--site-line); border-radius:6px; font:550 12px/1.5 var(--site-body); letter-spacing:0; color:var(--site-muted); }
+.lead { max-width:550px; color:var(--site-muted); font-size:17px; line-height:1.65; }
+.hero-note { border-top:1px solid var(--site-ink); padding-top:20px; margin-bottom:4px; }
+.hero-note .note-number { font:500 68px/.9 var(--site-display); letter-spacing:-.07em; }
+.hero-note h2 { margin:18px 0 10px; font:600 24px/1.15 var(--site-display); letter-spacing:-.04em; }
+.hero-note p { color:var(--site-muted); font-size:14px; margin:0; }
+.hero-note a { display:inline-block; margin-top:20px; text-underline-offset:5px; text-decoration:underline; font-size:14px; }
+.detected-badge { display:inline-flex; align-items:center; flex-wrap:wrap; gap:8px; padding:7px 10px; margin-top:12px; background:var(--site-lime); border-radius:5px; font-size:12px; }
+.detected-badge__dot { width:6px; height:6px; background:var(--site-moss); border-radius:50%; }
+.platform-heading { display:flex; align-items:baseline; justify-content:space-between; gap:16px; padding:20px 0; border-top:1px solid var(--site-line); }
+.platform-heading h2 { margin:0; font:600 27px/1.1 var(--site-display); letter-spacing:-.04em; }
+.platform-heading span { font-size:12px; color:var(--site-muted); }
+.cards { display:flex; flex-direction:column; gap:0; }
+.dl-card { display:flex; align-items:center; justify-content:space-between; gap:28px; padding:26px 24px; border-bottom:1px solid var(--site-line); }
+.dl-card--primary { background:var(--site-lime); border-radius:10px; border-color:transparent; }
+.dl-card__os { font:600 25px/1.2 var(--site-display); letter-spacing:-.035em; }
+.dl-card__meta { max-width:670px; margin-top:6px; font-size:13px; color:var(--site-muted); }
+.dl-card__meta code { overflow-wrap:anywhere; }
+.dl-card__btn { display:inline-flex; align-items:center; justify-content:center; flex:none; gap:9px; min-height:46px; padding:10px 18px; border:1px solid var(--site-moss); border-radius:7px; background:var(--site-moss); color:var(--site-white); font-size:13px; font-weight:600; text-decoration:none; }
+.dl-card__btn:hover { background:var(--site-ink); }
+.dl-card__btn--secondary { color:var(--site-ink); background:transparent; border-color:var(--site-line); }
+.dl-card__btn--secondary:hover { background:var(--site-white); border-color:var(--site-moss); }
+.dl-card__icon { width:17px; height:17px; flex:none; }
+.checksums { margin:20px 0 64px; font-size:12px; color:var(--site-muted); }
+.checksums__label { width:fit-content; cursor:pointer; padding:6px 0; }
+.checksums__list { margin:12px 0 0; padding:20px; border:1px solid var(--site-line); background:var(--site-white); border-radius:8px; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.8 ui-monospace,SFMono-Regular,monospace; }
+.other-ways { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+.docker-section { min-width:0; padding:30px; border:1px solid var(--site-line); border-radius:10px; }
+.docker-section h2 { margin:0 0 16px; font:600 29px/1.1 var(--site-display); letter-spacing:-.04em; }
+.docker-section p { color:var(--site-muted); font-size:14px; line-height:1.7; }
+.docker-section a { text-decoration:underline; text-underline-offset:4px; }
+.docker-section code { display:block; padding:16px; border-radius:6px; background:var(--site-paper); border:1px solid var(--site-line); overflow-x:auto; white-space:pre; font:12px/1.8 ui-monospace,SFMono-Regular,monospace; }
+#ios { grid-column:1/-1; background:var(--site-moss); color:var(--site-white); }
+#ios p,#ios a { color:#e1e6d7 !important; max-width:890px; }
+.note { margin:28px 0 86px; padding:20px 0; border-top:1px solid var(--site-line); color:var(--site-muted); font-size:12px; line-height:1.7; }
+@media(max-width:760px) { .download-wrap{width:calc(100% - 40px)} .hero{padding-top:44px;grid-template-columns:1fr;gap:22px} .hero-note{display:none} .hero h1{font-size:clamp(52px,11vw,76px)} .other-ways{grid-template-columns:1fr} .platform-heading{align-items:flex-start;flex-direction:column;gap:8px} }
+@media(max-width:520px) { .dl-card{align-items:flex-start;flex-direction:column;padding:24px 16px;gap:18px} .dl-card__btn{width:100%} .docker-section{padding:24px} }
 
-  .container { width: min(1100px, calc(100% - 48px)); margin: 0 auto; }
-
-  /* ---------- header ---------- */
-  .site-header {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 24px; padding: 22px 0;
-  }
-  .site-header__left { display: flex; align-items: center; gap: 40px; }
-  .brand-lockup { display: inline-flex; align-items: center; gap: 9px; }
-  .brand-lockup__mark { width: 30px; height: 30px; border-radius: 8px; }
-  .brand-lockup__word { color: var(--ink); font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
-  .site-nav { display: flex; align-items: center; gap: 26px; color: var(--muted); font-size: 15px; }
-  .site-nav a { transition: color 150ms ease; }
-  .site-nav a:hover, .site-nav a:focus-visible { color: var(--ink); }
-  @media (max-width: 760px) { .site-nav { display: none; } }
-
-  /* ---------- hero ---------- */
-  .hero { padding: 48px 0 0; text-align: center; }
-  .hero h1 {
-    color: var(--ink); font-weight: 600; letter-spacing: -0.025em;
-    font-size: clamp(2.5rem, 6vw, 52px); line-height: 1.1;
-  }
-  .lead {
-    max-width: 620px; margin: 16px auto 0;
-    color: var(--muted); font-size: 19px; line-height: 1.55; text-wrap: pretty;
-  }
-  .detected-badge {
-    display: inline-flex; align-items: center; gap: 8px;
-    margin-top: 20px; padding: 6px 14px;
-    border: 1px solid var(--accent-line); border-radius: 999px;
-    background: linear-gradient(to bottom, var(--accent-wash), var(--accent-wash-2));
-    color: var(--accent-soft); font-size: 13px; font-weight: 500;
-  }
-  .detected-badge__dot {
-    width: 7px; height: 7px; border-radius: 999%;
-    background: var(--accent); animation: pulse 2s infinite;
-  }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-
-  /* ---------- cards ---------- */
-  .cards { display: flex; flex-direction: column; gap: 16px; max-width: 720px; margin: 40px auto 0; }
-  .dl-card {
-    display: flex; align-items: center; justify-content: space-between; gap: 20px;
-    border: 1px solid var(--line); border-radius: var(--radius-card); padding: 24px 28px;
-    background: var(--card); transition: border-color 120ms var(--ease);
-  }
-  .dl-card:hover { border-color: var(--accent-line); }
-  .dl-card--primary {
-    border-color: rgba(240,70,14,0.3);
-    background: linear-gradient(135deg, rgba(240,70,14,0.06) 0%, var(--surface) 100%);
-  }
-  .dl-card--hidden { display: none; }
-  .dl-card__os { color: var(--ink); font-weight: 600; font-size: 18px; }
-  .dl-card__meta { margin-top: 3px; color: var(--muted); font-size: 14px; }
-  .dl-card__btn {
-    display: inline-flex; align-items: center; gap: 8px;
-    min-height: 48px; padding: 0 24px; border: none; border-radius: 8px;
-    font-size: 16px; font-weight: 600; color: #fff; cursor: pointer;
-    background: var(--accent-strong);
-    box-shadow: 0 4px 5px 0 rgba(240,70,14,0.2);
-    transition: transform 120ms var(--ease), box-shadow 120ms var(--ease);
-    text-decoration: none; white-space: nowrap;
-  }
-  .dl-card__btn:hover { box-shadow: 0 8px 18px rgba(240,70,14,0.28); }
-  .dl-card__btn--secondary {
-    color: var(--body); background: var(--raised);
-    border: 1px solid var(--line); box-shadow: var(--shadow-soft);
-  }
-  .dl-card__btn--secondary:hover { border-color: var(--line-2); color: var(--ink); }
-  .dl-card__icon { width: 20px; height: 20px; flex: none; }
-
-  /* ---------- checksums ---------- */
-  .checksums { max-width: 720px; margin: 28px auto 0; text-align: center; }
-  .checksums__label {
-    color: var(--muted-2); font-size: 13px; cursor: pointer;
-    background: none; border: none; font: inherit; padding: 0;
-  }
-  .checksums__label:hover { color: var(--muted); }
-  .checksums__list {
-    display: none; margin-top: 10px;
-    font: 500 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    color: var(--muted); word-break: break-all;
-  }
-  .checksums[open] .checksums__list { display: block; }
-
-  /* ---------- docker ---------- */
-  .docker-section {
-    max-width: 720px; margin: 56px auto 0;
-    border: 1px solid var(--line); border-radius: var(--radius-card);
-    padding: 28px 32px; background: var(--card);
-  }
-  .docker-section h2 {
-    color: var(--ink); font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin: 0;
-  }
-  .docker-section p {
-    margin-top: 10px; color: var(--muted); font-size: 15px; line-height: 1.55;
-  }
-  .docker-section code {
-    display: block; margin-top: 16px; padding: 14px 18px;
-    border-radius: 8px; background: var(--app);
-    border: 1px solid var(--line);
-    font: 500 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    color: var(--accent-soft); overflow-x: auto; white-space: pre;
-  }
-  .docker-section a {
-    color: var(--accent-soft); font-weight: 600;
-  }
-  .docker-section a:hover { text-decoration: underline; }
-
-  /* ---------- note ---------- */
-  .note {
-    max-width: 720px; margin: 24px auto 0;
-    padding: 16px 20px; border-radius: 14px;
-    background: rgba(255,255,255,0.03); border: 1px solid var(--line);
-    color: var(--muted); font-size: 14px; line-height: 1.55; text-align: center;
-  }
-  .note strong { color: var(--body); }
-
-  /* ---------- footer ---------- */
-  .site-footer {
-    margin-top: 80px; padding: 40px 0 50px;
-    border-top: 1px solid var(--line);
-    text-align: center; color: var(--muted-2); font-size: 14px;
-  }
-  .site-footer a { color: var(--muted); }
-  .site-footer a:hover { color: var(--ink); }
-
-  @media (max-width: 600px) {
-    .dl-card { flex-direction: column; align-items: flex-start; gap: 14px; }
-    .dl-card__btn { width: 100%; justify-content: center; }
-  }
 </style>
-<link rel="stylesheet" href="/landing-gaia.css?v=1" />
 </head>
 <body>
 
-<div class="container">
-  <header class="site-header">
-    <div class="site-header__left">
-      <a class="brand-lockup" href="/" aria-label="Muster home">
-        <img class="brand-lockup__mark" src="/app-icon.svg" width="30" height="30" alt="" aria-hidden="true" />
-        <span class="brand-lockup__word">Muster</span>
-      </a>
-    </div>
-    <nav class="site-nav" aria-label="Primary">
-      <a href="/">Home</a>
-      <a href="/#features">Product</a>
-      <a href="/teams.html">Teams</a>
-      <a href="/switch.html">Switch</a>
-    </nav>
-  </header>
-
-  <main>
+<a class="site-skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+  <nav class="site-nav" aria-label="Primary"><a href="/teams.html">Teams</a><a href="/templates.html">Templates</a><a href="/download.html" aria-current="page">Download</a><a href="/docs">Docs</a><a class="site-cta" href="/app">Open Muster <span aria-hidden="true">↗</span></a></nav>
+</header>
+<main id="main" class="download-wrap">
     <section class="hero">
-      <h1>Download Muster <span id="dl-version" style="font-weight:500;font-size:0.55em;vertical-align:middle;color:var(--muted);white-space:nowrap;">v1.23.3</span></h1>
+      <div><p class="site-eyebrow">THE WORKROOM / DOWNLOAD</p>
+      <h1>Download Muster <span id="dl-version">v1.23.3</span></h1>
       <p class="lead">Muster is free to use. Open the hosted workspace or install the desktop app, then connect your own AI provider key. Provider usage is billed separately.</p>
       <div class="detected-badge" id="detected-badge" style="display:none;">
         <span class="detected-badge__dot"></span>
         <span id="detected-label">Detected: macOS</span>
+        <a id="mobile-workspace" href="/app" hidden>Open Muster →</a>
       </div>
+      </div>
+      <aside class="hero-note"><span class="note-number" aria-hidden="true">↗</span><h2>Already in your browser.</h2><p>Start in the hosted workspace. Add the desktop app when your work needs tools on your computer.</p><a href="/app">Open Muster →</a></aside>
     </section>
 
+    <div class="platform-heading"><h2>Make room on your desktop.</h2><span>Choose your operating system</span></div>
     <div class="cards" id="download-cards">
       <!-- macOS arm64 (Apple Silicon) -->
       <div class="dl-card dl-card--primary" data-os="mac-arm64">
         <div>
           <div class="dl-card__os">macOS</div>
-          <div class="dl-card__meta">Apple Silicon (M1 / M2 / M3 / M4) &middot; .dmg &middot; signed &amp; notarized by Apple</div>
+          <div class="dl-card__meta">Apple Silicon (M1 / M2 / M3 / M4) &middot; .dmg</div>
         </div>
         <a class="dl-card__btn" id="dl-mac-arm64" href="https://muster.today/downloads/Muster.dmg">
           <svg class="dl-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -232,7 +92,7 @@
       <div class="dl-card" data-os="mac-x64">
         <div>
           <div class="dl-card__os">macOS Intel</div>
-          <div class="dl-card__meta">Intel Macs &middot; .dmg &middot; signed &amp; notarized by Apple</div>
+          <div class="dl-card__meta">Intel Macs &middot; .dmg</div>
         </div>
         <a class="dl-card__btn dl-card__btn--secondary" id="dl-mac-x64" href="https://muster.today/downloads/Muster-intel.dmg">
           <svg class="dl-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -282,7 +142,8 @@
       <div class="checksums__list" id="checksums-list">Loading…</div>
     </details>
 
-    <div class="docker-section" style="margin-top:2.5rem;" id="ios">
+    <div class="other-ways">
+    <section class="docker-section" id="ios">
       <h2>iPhone &amp; Apple Watch</h2>
       <p>
         The iOS companion carries the whole product in your pocket: the roster, full chats,
@@ -299,42 +160,40 @@
         In the meantime, the same chat, approvals and tasks work in the browser on any phone:
         <a href="/app" style="color:var(--accent-soft);">open muster.today/app</a> and add it to your home screen.
       </p>
-    </div>
+    </section>
 
-    <div class="docker-section" style="margin-top:2.5rem;">
+    <section class="docker-section">
       <h2>Muster CLI</h2>
       <p>No installer at all — the CLI is a single file with zero dependencies (<span id="cli-size">~51&nbsp;KB</span>, Node&nbsp;22+). It connects to an existing Muster workspace so you can check tasks and answer approvals from a terminal. The desktop app handles local setup.</p>
       <code>curl -fsSL https://muster.today/downloads/muster-cli.mjs -o muster && chmod +x muster && ./muster help</code>
-      <p style="margin-top:0.75rem;font-size:0.9em;color:var(--muted);">Command tour and real output: <a href="/#cli" style="color:var(--accent-soft);">the CLI section on the landing page</a>.</p>
-    </div>
+      <p style="margin-top:0.75rem;font-size:0.9em;color:var(--muted);">For installation and setup, read the <a href="/docs/install" style="color:var(--accent-soft);">installation guide</a>.</p>
+    </section>
 
-    <div id="setup" class="docker-section">
+    <section id="setup" class="docker-section">
       <h2>Start in your browser</h2>
       <p>We host Muster at muster.today. You do not need to deploy a server or manage a container. Use the desktop app when a task needs tools on your computer.</p>
       <p style="margin-top:16px;"><a href="/app">Open Muster →</a> &nbsp;·&nbsp; <a href="/docs/setup">Account, models and backup setup →</a></p>
+    </section>
     </div>
 
     <div class="note">
-      <strong>First launch on macOS?</strong> These builds are signed and notarized by Apple, so Gatekeeper opens them normally — no workaround needed. If a build is ever unsigned, macOS will say "unidentified developer": right-click the app → Open, then click Open again.
+      <strong>Before opening an installer:</strong> availability and signing status belong to the specific release artifact. Check its release details and published checksum, and follow your operating system’s trust checks. If a download is unavailable or your system blocks it, use the <a href="/app">hosted workspace</a> while you check the release.
     </div>
   </main>
 
   <footer class="site-footer">
-    <a href="/">muster.today</a> &nbsp;·&nbsp; <a href="/teams.html">Teams</a> &nbsp;·&nbsp; <a href="/switch.html">Switch</a>
-  </footer>
-</div>
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p>
+  <nav aria-label="Footer"><a href="/switch.html">Switch to Muster</a><a href="/docs">Docs</a><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a></nav>
+  <small>© 2026 Orazen</small>
+</footer>
 
 <script>
 (function() {
   var ua = navigator.userAgent;
   var plat = navigator.platform || '';
   var macLike = /Mac/i.test(plat) || /Mac OS X/i.test(ua);
-  var intel = /Intel Mac/i.test(plat) || /Intel/i.test(plat);
-  // Modern Macs on Apple Silicon report "arm" or "arm64" in navigator.platform
-  var arm = /arm/i.test(plat) || /Apple Silicon/i.test(ua) || /Macintosh.*ARM/i.test(ua);
-  // If mac but not definitively Intel → default to Apple Silicon (most common now)
-  var isMacArm = macLike && arm;
-  var isMacIntel = macLike && intel;
+  // A MacIntel browser platform does not identify the actual Mac processor.
+  var isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
   var isWindows = /Win/i.test(ua);
   var isLinux = /Linux/i.test(ua);
 
@@ -343,13 +202,12 @@
   var label = document.getElementById('detected-label');
   var detected = null;
 
-  if (isMacArm) {
-    detected = 'mac-arm64';
-    label.textContent = 'Detected: macOS (Apple Silicon)';
+  if (isMobile) {
+    label.textContent = 'Mobile device — use the browser workspace.';
+    document.getElementById('mobile-workspace').hidden = false;
     badge.style.display = '';
-  } else if (isMacIntel) {
-    detected = 'mac-x64';
-    label.textContent = 'Detected: macOS (Intel)';
+  } else if (macLike) {
+    label.textContent = 'Detected: macOS — choose Apple Silicon or Intel below.';
     badge.style.display = '';
   } else if (isWindows) {
     detected = 'windows';
@@ -361,7 +219,12 @@
     badge.style.display = '';
   }
 
-  // Move the detected platform card to the top
+  // Keep both Mac architectures and all desktop choices visible without a guess.
+  if (isMobile || macLike) {
+    cards.forEach(function(card) { card.classList.remove('dl-card--primary'); });
+  }
+
+  // Move a detected Windows or desktop Linux card to the top
   if (detected) {
     var target = document.querySelector('.dl-card[data-os="' + detected + '"]');
     if (target) {
@@ -379,26 +242,41 @@
     if (!r.ok) throw 0;
     return r.json();
   }).then(function(meta) {
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+      throw new Error('Invalid release metadata');
+    }
     var v = document.getElementById('dl-version');
-    if (v && meta.version) v.textContent = 'v' + meta.version;
+    if (v && typeof meta.version === 'string' && meta.version.trim()) {
+      v.textContent = 'v' + meta.version;
+    }
     // The CLI size was a hardcoded number that drifted from the artifact
     // (the page said ~40 KB while the published file was 52,144 bytes). Read
     // it from the same metadata the version and checksums come from, so a
     // release cannot leave another stale number on the page.
     var size = meta.files && meta.files['muster-cli.mjs'] && meta.files['muster-cli.mjs'].size;
     var sizeLabel = document.getElementById('cli-size');
-    if (sizeLabel && typeof size === 'number' && size > 0) {
+    if (sizeLabel && typeof size === 'number' && Number.isFinite(size) && size > 0) {
       sizeLabel.textContent = '~' + Math.round(size / 1024) + ' KB';
     }
     var list = document.getElementById('checksums-list');
-    if (!meta.checksums) return;
-    list.textContent = Object.keys(meta.checksums).map(function(f) {
-      return meta.checksums[f] + '  ' + f;
+    var checksums = meta.checksums;
+    if (!checksums || typeof checksums !== 'object' || Array.isArray(checksums)) {
+      throw new Error('Checksums unavailable');
+    }
+    var filenames = Object.keys(checksums);
+    if (!filenames.length || !filenames.every(function(filename) {
+      return filename.trim() && typeof checksums[filename] === 'string'
+        && /^[a-f0-9]{64}$/i.test(checksums[filename]);
+    })) {
+      throw new Error('Invalid checksums');
+    }
+    list.textContent = filenames.map(function(filename) {
+      return checksums[filename] + '  ' + filename;
     }).join('\n');
   }).catch(function() {
-    // latest.json not reachable — keep the static version, fall back for checksums
+    // Unavailable or invalid metadata never leaves a permanent loading state.
     var list = document.getElementById('checksums-list');
-    list.textContent = 'Checksums will be available after the next release.';
+    list.textContent = 'Checksums are unavailable right now.';
   });
 })();
 </script>

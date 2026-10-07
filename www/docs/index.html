@@ -5,28 +5,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Muster Docs — your AI workforce, documented</title>
 <meta name="description" content="Set up Muster on the web, connect provider keys and devices, and learn about models, goals, automation and approvals.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="/landing-workroom/v1/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/public-site/v1/site.css">
 <link rel="stylesheet" href="/docs/docs.css">
 </head>
-<body>
+<body class="docs-page">
+<a class="site-skip" href="#docs-content">Skip to content</a>
 
-<header class="docs-header">
-  <a class="brand-lockup" href="/">
-    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0460e"/><text x="16" y="22" font-family="ui-sans-serif,system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>
-    Muster
-  </a>
+<header class="site-header docs-header">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
   <span class="docs-tag">Docs</span>
   <div class="docs-header__spacer"></div>
-  <nav class="docs-header__links">
+  <nav class="site-nav docs-header__links" aria-label="Main navigation">
     <a href="/download.html">Download</a>
     <a href="/#features">Features</a>
-    <a class="button button--primary button--small" href="/app">Open app</a>
+    <a class="site-cta button button--primary button--small" href="/app">Open Muster</a>
   </nav>
 </header>
 
+<div class="docs-mobile-bar">
+  <span>Overview</span>
+  <button id="docs-menu-toggle" type="button" aria-expanded="false" aria-controls="docs-navigation" hidden>Browse docs <span aria-hidden="true">+</span></button>
+</div>
+
 <div class="docs-shell">
 
-  <aside class="docs-sidebar" aria-label="Docs navigation">
+  <aside id="docs-navigation" class="docs-sidebar" aria-label="Docs navigation">
     <div class="docs-sidebar__group">
       <p class="docs-sidebar__label">Start</p>
       <a href="/docs" aria-current="page">Overview</a>
@@ -48,14 +52,22 @@
     </div>
   </aside>
 
-  <main class="docs-content">
+  <main id="docs-content" class="docs-content" tabindex="-1">
 
-<p class="docs-hub-kicker">Docs · your workspace, models and connected devices</p>
+<p class="site-eyebrow docs-eyebrow">The Muster field guide</p>
     <h1>Muster documentation</h1>
     <p class="lead">Muster brings your AI teammates, conversations, tools and approvals into one workspace. Start in the managed web app, connect your own provider API key, and add supported device and companion connections as your work needs them.</p>
-    <figure class="docs-hub-shot">
-      <img src="/hero.png" alt="The Muster web console: a roster of named agents, each conversation a real worker" width="980" height="613" />
-      <figcaption>The web console — a roster of named agents on the left, each conversation a real worker with its own model, computer, and approval cards.</figcaption>
+    <figure class="docs-start-map" aria-labelledby="docs-start-caption">
+      <div class="docs-start-map__guide">
+        <p class="docs-start-map__label">A little company for the first step.</p>
+        <ol>
+          <li><span aria-hidden="true">01</span><div><strong>Open your workspace</strong><small>Start with a place for your work.</small></div></li>
+          <li><span aria-hidden="true">02</span><div><strong>Connect a model</strong><small>Bring your provider connection.</small></div></li>
+          <li><span aria-hidden="true">03</span><div><strong>Give it a small task</strong><small>Read the reply. Decide what comes next.</small></div></li>
+        </ol>
+      </div>
+      <div class="docs-start-map__companion" aria-hidden="true"><span>oh, hello.</span><img src="/landing-workroom/v1/mascot/fallback.png" alt="" width="331" height="639" /></div>
+      <figcaption id="docs-start-caption">Getting started, illustrated. Follow the guides below for the actual setup steps.</figcaption>
     </figure>
     <div class="docs-hub-stats" role="list" aria-label="Platform facts">
       <div class="docs-hub-stat" role="listitem"><strong>9</strong><span>guides</span></div>
@@ -69,7 +81,7 @@
       <span class="pill">Bring your own models</span>
     </div>
 
-    <h2>Your first five minutes</h2>
+    <h2 id="your-first-five-minutes">Your first five minutes</h2>
     <ol>
       <li><a href="/app">Open Muster</a> and follow the sign-in and setup steps.</li>
       <li>Connect your provider API key and select a model for your first bot.</li>
@@ -77,56 +89,56 @@
     </ol>
     <p>Muster is a free app. Provider usage and connected services can charge separately. Follow <a href="/docs/quick-start">Quick start</a> for the first conversation or <a href="/docs/setup">Account &amp; device setup</a> for connection and storage details.</p>
 
-    <h2>Start here</h2>
+    <h2 id="start-here">Start here</h2>
     <div class="card-grid section-cards">
       <a class="card" href="/docs/quick-start">
         <p class="card__kicker">Start</p>
-        <h3>Quick start</h3>
+        <h3 id="quick-start">Quick start</h3>
         <p>Open your workspace, connect a provider, and give your first bot a task.</p>
       </a>
       <a class="card" href="/docs/install">
         <p class="card__kicker">Start</p>
-        <h3>Install &amp; apps</h3>
+        <h3 id="install-apps">Install &amp; apps</h3>
         <p>Desktop downloads for macOS, Windows and Linux, auto-updates, and the mobile companions.</p>
       </a>
       <a class="card" href="/docs/setup">
         <p class="card__kicker">Start</p>
-        <h3>Account &amp; device setup</h3>
+        <h3 id="account-device-setup">Account &amp; device setup</h3>
         <p>Connect provider keys and devices, review Drive consent, and understand workspace storage.</p>
       </a>
       <a class="card" href="/docs/engines">
         <p class="card__kicker">Operate</p>
-        <h3>Engines &amp; models</h3>
+        <h3 id="engines-models">Engines &amp; models</h3>
         <p>Connect OpenAI-compatible or Anthropic-compatible providers, pick models per bot, watch health.</p>
       </a>
       <a class="card" href="/docs/goals">
         <p class="card__kicker">Operate</p>
-        <h3>Goals &amp; autonomy</h3>
+        <h3 id="goals-autonomy">Goals &amp; autonomy</h3>
         <p>Goal mode: give a bot an outcome and let it loop — with hard stops, budgets, and provenance chips.</p>
       </a>
       <a class="card" href="/docs/automation">
         <p class="card__kicker">Operate</p>
-        <h3>Automation</h3>
+        <h3 id="automation">Automation</h3>
         <p>Routines, sentries, routine scorecards and the why-journal: work that keeps happening without you.</p>
       </a>
       <a class="card" href="/docs/approvals">
         <p class="card__kicker">Operate</p>
-        <h3>Approvals &amp; privacy</h3>
+        <h3 id="approvals-privacy">Approvals &amp; privacy</h3>
         <p>Approval cards, standing grants, the evidence strip, and how workspace data is handled.</p>
       </a>
       <a class="card" href="/docs/agents">
         <p class="card__kicker">Reference</p>
-        <h3>For agents</h3>
+        <h3 id="for-agents">For agents</h3>
         <p>The skill file and llms.txt that let coding agents and AI tools operate Muster for you.</p>
       </a>
       <a class="card" href="/docs/security">
         <p class="card__kicker">Reference</p>
-        <h3>Security &amp; license</h3>
+        <h3 id="security-license">Security &amp; license</h3>
         <p>Data handling, control limitations, issue reporting and applicable licenses.</p>
       </a>
     </div>
 
-    <h2>What's new</h2>
+    <h2 id="whats-new">What's new</h2>
     <ul>
       <li><strong>Goal mode</strong> — set an outcome instead of managing turns. Bots loop plan → act → verify with a turn budget, pause/stop controls, and a banner that always shows what the goal is and what it's costing you.</li>
       <li><strong>Provenance chips</strong> — every bot reply is stamped with the engine instance and model that produced it. Hover the chip to see exactly who said what.</li>
@@ -134,19 +146,23 @@
     </ul>
     <p>See <a href="/docs/goals">Goals &amp; autonomy</a> for the full picture, or grab the latest build on the <a href="/download.html">download page</a>.</p>
 
-    <h2>Adding a device?</h2>
+    <h2 id="adding-a-device">Adding a device?</h2>
     <p>Use the <a href="/docs/setup">account and device guide</a> to review your execution target and permissions. Existing desktop data, hosted workspace data and backups have separate boundaries; signing in is not a complete migration or synchronization step.</p>
 
   </main>
 </div>
 
-<footer class="docs-footer">
-  <span>© 2026 Orazen · Muster</span>
-  <nav>
+<footer class="site-footer docs-footer">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+  <p>Your work. In good company.</p>
+  <nav aria-label="Footer">
     <a href="/">Home</a>
     <a href="/download.html">Download</a>
     <a href="/docs/security">Security</a>
+    <a href="/privacy-policy">Privacy</a>
+    <a href="/Terms-of-Service">Terms</a>
   </nav>
+  <small>© 2026 Orazen · Muster</small>
 </footer>
 
 <script src="/docs/docs.js"></script>

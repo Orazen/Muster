@@ -3,45 +3,80 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Switch to Muster — from Skales, OpenClaw, Hermes or Sintra</title>
 <meta name="description" content="Migrating your AI agents? Explore Muster's team rooms, source-available BSL 1.1 license, optional Vaultgram backups, and task receipts.">
+<link rel="icon" href="/landing-workroom/v1/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/public-site/v1/site.css">
 <style>
-:root{--ink:#e8e6e3;--bg:#0d0d10;--card:#17171c;--accent:#f0460e;--accent-strong:#f0460e;--accent-border:#ff7a45;--accent-soft:#ff7a45;--accent-line:rgba(240,70,14,.34);--accent-wash:rgba(240,70,14,.09);--accent-wash-2:rgba(240,70,14,.16);--panel:#131314;--inset:#101013;--body:#c9c7cf;--muted:#a5a3ad;--muted-2:#75757b;--hairline-paint:#26262e;--line:#26262e;--line-2:#3a3a44;--shadow-soft:0 2px 16px rgba(0,0,0,.35);--radius-card:12px;--radius-row:8px;--radius-frame:20px;--section-rhythm:96px;font-family:inherit}
-*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;letter-spacing:-.012em}
-.compare-wrap .section{padding-top:64px}.compare-wrap .eyebrow{color:var(--accent-soft);font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px}
-.compare-wrap .section-heading{font-size:32px;color:var(--ink);margin:0}
-.compare-wrap .section-copy{color:var(--muted);margin-top:12px;max-width:660px}
-.compare-wrap .muted-2{color:#75757b}
-header{padding:64px 24px 8px;text-align:center} h1{font-size:34px;margin:0 0 8px}
-header p{color:#a5a3ad;max-width:660px;margin:0 auto}
-main{max-width:900px;margin:0 auto;padding:24px}
-h2{font-size:22px;margin-top:48px;color:#fff}
-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
-th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
-th{color:#807e88;font-weight:600;text-transform:uppercase;font-size:11.5px;letter-spacing:.05em}
-td:first-child{color:#c9c7cf;width:30%}
-.yes{color:#5fd39a}.no{color:#e07a7a}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 24px;margin:20px 0}
-.card h3{margin:0 0 8px;color:var(--accent);font-size:17px}
-.card p,.card li{font-size:14.5px;color:#c9c7cf}
-code{background:#0f0f13;border:1px solid var(--line);border-radius:6px;padding:2px 6px;font-size:13px}
-.cta{display:inline-block;margin:24px 0;background:var(--accent);color:#0d0d10;font-weight:700;padding:12px 28px;border-radius:999px;text-decoration:none}
-footer{text-align:center;padding:40px;color:#6d6b75;font-size:13px} footer a{color:var(--accent)}
+
+:root { --ink:var(--site-ink); --bg:var(--site-paper); --card:var(--site-white); --body:var(--site-ink); --muted:var(--site-muted); --muted-2:var(--site-muted); --line:var(--site-line); --accent:var(--site-moss); --accent-border:var(--site-moss); --accent-line:var(--site-line); --accent-wash:var(--site-lime); --accent-wash-2:var(--site-lime); --shadow-soft:none; }
+.switch-wrap { width:min(1140px,calc(100% - 96px)); margin-inline:auto; }
+.switch-hero { display:grid; grid-template-columns:1.3fr .7fr; align-items:end; gap:64px; padding:72px 0 58px; }
+.switch-hero h1 { margin:18px 0 0; max-width:740px; font:650 clamp(53px,7.4vw,92px)/.98 var(--site-display); letter-spacing:-.065em; }
+.switch-hero .intro { margin:0 0 7px; color:var(--site-muted); font-size:17px; line-height:1.7; }
+.quick-section { border-top:1px solid var(--site-line); padding:30px 0 52px; }
+.switch-wrap h2 { margin:0 0 24px; font:600 clamp(30px,4.2vw,48px)/1.05 var(--site-display); letter-spacing:-.045em; }
+.quick-section h2 { font-size:30px; }
+table { width:100%; border-collapse:collapse; font-size:14px; line-height:1.65; }
+th,td { text-align:left; padding:17px 20px; border-bottom:1px solid var(--site-line); vertical-align:top; }
+th { color:var(--site-muted); font-weight:550; font-size:12px; }
+.quick-table td:first-child { font-weight:600; width:22%; }
+.quick-table td:last-child { background:#edf0d9; width:43%; }
+.quick-table thead th:last-child { background:var(--site-lime); color:var(--site-ink); }
+.table-scroll { overflow-x:auto; border:1px solid var(--site-line); border-radius:9px; background:var(--site-white); }
+.quick-table { min-width:590px; }
+.migration-paths { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:22px; padding:0 0 62px; }
+.migration-paths .card { min-width:0; padding:26px 0 0; border-top:1px solid var(--site-ink); }
+.card h3 { margin:0 0 18px; max-width:270px; font:600 29px/1.1 var(--site-display); letter-spacing:-.04em; }
+.card p,.card li { color:var(--site-muted); font-size:14px; line-height:1.75; }
+.card p { margin:0; }
+.card strong { font-weight:600; color:var(--site-ink); }
+code { padding:2px 5px; border:1px solid var(--site-line); border-radius:4px; background:var(--site-white); font:12px/1.6 ui-monospace,SFMono-Regular,monospace; overflow-wrap:anywhere; }
+#compare { padding:48px 0 58px; border-top:1px solid var(--site-line); }
+.eyebrow { margin-bottom:18px; color:var(--site-muted); font-size:11px; font-weight:600; letter-spacing:.13em; text-transform:uppercase; }
+.section-copy { max-width:660px; color:var(--site-muted); line-height:1.7; }
+.comparison-table { margin-top:32px; }
+.comparison-table table { min-width:950px; }
+.comparison-table th[scope="row"] { width:16%; }
+.comparison-note { margin:18px 0 0; max-width:790px; font-size:12px; color:var(--site-muted); }
+.switch-steps { display:grid; grid-template-columns:.8fr 1.2fr; gap:64px; margin-bottom:56px; padding:42px; border-radius:11px; background:var(--site-lime); }
+.switch-steps .site-eyebrow { color:var(--site-moss); }
+.switch-steps h2 { margin:18px 0 0; font-size:clamp(36px,4.5vw,56px); }
+.switch-steps ol { margin:0; padding-left:22px; }
+.switch-steps li { padding:0 0 20px 7px; color:var(--site-ink); font-size:14px; line-height:1.65; }
+.switch-steps .cta { display:inline-flex; margin-top:12px; padding:13px 21px; background:var(--site-moss); color:var(--site-white); border-radius:6px; font-size:14px; text-decoration:none; }
+@media(max-width:900px) { .migration-paths{grid-template-columns:1fr}.migration-paths .card{display:grid;grid-template-columns:1fr 1.7fr;gap:24px}.switch-hero{grid-template-columns:1fr;gap:28px}.switch-hero .intro{max-width:600px}.switch-steps{gap:32px;padding:32px} }
+@media(max-width:760px) { .switch-wrap{width:calc(100% - 40px)}.switch-hero{padding-top:44px}.switch-steps{grid-template-columns:1fr}.table-scroll{border-radius:7px}.migration-paths .card{grid-template-columns:1fr;gap:0}.card h3{max-width:none} }
+@media(max-width:420px) { .switch-steps{padding:25px}.switch-hero h1{font-size:52px} }
+
 </style></head><body>
-<header>
-<h1>Switching to Muster</h1>
-<p>You already know what agents can do. Here's what changes when they get real teammates, real computers, and receipts.</p>
+<a class="site-skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+  <nav class="site-nav" aria-label="Primary"><a href="/teams.html">Teams</a><a href="/templates.html">Templates</a><a href="/download.html">Download</a><a href="/docs">Docs</a><a class="site-cta" href="/app">Open Muster <span aria-hidden="true">↗</span></a></nav>
 </header>
-<main>
+<main id="main" class="switch-wrap">
+<section class="switch-hero">
+  <div><p class="site-eyebrow">THE WORKROOM / MAKING THE MOVE</p><h1>Bring the work.<br>Make room for a team.</h1></div>
+  <p class="intro">Switching to Muster starts with one familiar task. Bring your context, meet your teammates, and review the result together.</p>
+</section>
+<section class="quick-section">
+
 
 <h2>The short version</h2>
-<table>
-<tr><th></th><th>Other tools</th><th>Muster</th></tr>
+<div class="table-scroll" role="region" aria-label="Muster overview comparison" tabindex="0">
+<table class="quick-table">
+<thead><tr><th scope="col">Your workspace</th><th scope="col">Other tools</th><th scope="col">Muster</th></tr></thead>
+<tbody>
 <tr><td>Team model</td><td>Varies by product</td><td class="yes">Rooms of specialist bots</td></tr>
 <tr><td>Source</td><td>Varies by product</td><td class="yes">Source-available · BSL 1.1</td></tr>
 <tr><td>Backups</td><td>Varies by product</td><td class="yes">Encrypted desktop backup and restore; Drive setup is separate</td></tr>
 <tr><td>Proof of work</td><td>History and exports vary</td><td class="yes">Job receipts per task</td></tr>
 <tr><td>Pricing</td><td>Check the current plan</td><td class="yes">Free app · bring your own AI key; provider usage costs apply</td></tr>
+</tbody>
 </table>
+</div>
+</section>
 
+<div class="migration-paths">
 <div class="card">
 <h3>Coming from Skales</h3>
 <p>Bring your <strong>Agent Skills (SKILL.md)</strong> — Muster reads the same format. Set up scheduled work as <strong>routines</strong> and find your bots in the roster + Automations. Muster gives each bot its own identity, with a shared Brain and optional Vaultgram backups for the files you choose.</p>
@@ -57,6 +92,7 @@ footer{text-align:center;padding:40px;color:#6d6b75;font-size:13px} footer a{col
 <p>Start with one recurring job and create the specialist bots it needs. Add them to a shared room, supply your team context, and review their output and task receipts. Try the workflow in the workspace Muster hosts, using your own model provider.</p>
 </div>
 
+</div>
 <section id="compare" class="section">
   <div class="section-intro">
     <div class="eyebrow">Compare</div>
@@ -67,13 +103,13 @@ footer{text-align:center;padding:40px;color:#6d6b75;font-size:13px} footer a{col
     </p>
   </div>
 
-  <div style="margin-top:40px;overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--card);box-shadow:var(--shadow-soft);">
+  <div class="table-scroll comparison-table" role="region" aria-label="Documented features comparison, August 2026" tabindex="0">
     <table style="min-width:900px;width:100%;border-collapse:collapse;font-size:14.5px;line-height:1.5;text-align:left;">
       <thead>
         <tr>
           <!-- Column label cell -->
           <th scope="col" aria-label="Feature" style="padding:16px 18px;border-bottom:1px solid var(--line);"></th>
-          <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--accent-line);background:linear-gradient(to bottom, var(--accent-wash), var(--accent-wash-2));color:var(--accent-border);font-weight:600;font-size:15px;letter-spacing:-0.01em;">Muster</th>
+          <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--accent-line);background:var(--site-lime);color:var(--accent-border);font-weight:600;font-size:15px;letter-spacing:-0.01em;">Muster</th>
           <!-- Source: rival-osaurus/README.md L5 (<h1>Osaurus</h1>) -->
           <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--line);color:var(--ink);font-weight:600;font-size:15px;letter-spacing:-0.01em;">Osaurus</th>
           <!-- Source: rival-rakazo/README.md L1 (# Rakazo) -->
@@ -86,7 +122,7 @@ footer{text-align:center;padding:40px;color:#6d6b75;font-size:13px} footer a{col
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Platforms</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">macOS · Windows · Ubuntu · hosted web</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">macOS · Windows · Ubuntu · hosted web</td>
           <!-- Source: rival-osaurus/README.md L24 (badge “Platform macOS (Apple Silicon)”), L49, L69 (requires macOS 15.5+ Apple Silicon) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">macOS (Apple Silicon)</td>
           <!-- Source: rival-rakazo/README.md L8-L10 (“available on the web, as an Electron desktop app, and through an Expo mobile app”) -->
@@ -97,7 +133,7 @@ footer{text-align:center;padding:40px;color:#6d6b75;font-size:13px} footer a{col
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">License</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">BSL 1.1 (source-available)</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">BSL 1.1 (source-available)</td>
           <!-- Source: rival-osaurus/README.md L53 (“MIT licensed”), L359-L361 (License: MIT) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">MIT</td>
           <!-- Source: rival-rakazo/README.md L145 (“licensed under the Apache License 2.0”) -->
@@ -110,7 +146,7 @@ footer{text-align:center;padding:40px;color:#6d6b75;font-size:13px} footer a{col
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Hosted workspace</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Yes — Muster Cloud</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">Yes — Muster Cloud</td>
           <!-- Source: rival-osaurus/README.md L151 (“Osaurus Router is the hosted path — pay-as-you-go with credits”; hosted model routing, not a hosted app) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Model routing only (Router, pay-as-you-go)</td>
           <!-- Not stated: rival-rakazo/README.md links rakazo.com (L12) but describes no hosted tier or plans -->
@@ -121,7 +157,7 @@ footer{text-align:center;padding:40px;color:#6d6b75;font-size:13px} footer a{col
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Price</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Free Muster app; AI provider usage billed separately</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">Free Muster app; AI provider usage billed separately</td>
           <!-- Source: rival-osaurus/README.md L53 (MIT, free app), L151 (Router: “pay-as-you-go with credits”) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Free app; Router pay-as-you-go credits</td>
           <!-- Not stated: rival-rakazo/README.md contains no pricing; self-host is free under Apache-2.0 (L145) -->
@@ -133,7 +169,7 @@ footer{text-align:center;padding:40px;color:#6d6b75;font-size:13px} footer a{col
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Privacy tech</th>
           <!-- Source: muster-audit/www/index.html L531-L553 (Privacy Shield: on-device scrubbing of emails/phones/secrets before cloud models, deterministic masking, counts-only receipt per turn) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">On-device Privacy Shield — scrubs emails, phones, secrets before any cloud model sees them; counts-only receipts per turn</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">Optional on-device Privacy Shield with counts-only receipts per turn; supported flows depend on setup</td>
           <!-- Source: rival-osaurus/README.md L107 (on-device privacy filter: classifier + regex scrubbing, fail-closed send block, wire-level verification in Insights panel) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">On-device privacy filter (classifier + regex), fail-closed scrubbing, wire-level verification</td>
           <!-- Source: rival-rakazo/README.md L52 (ENCRYPTION_KEY), L58-L59 (“Connector credentials are encrypted on the server and are never returned by the API”) -->
@@ -144,7 +180,7 @@ footer{text-align:center;padding:40px;color:#6d6b75;font-size:13px} footer a{col
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Computer providers</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Cloud Linux desktop per bot (Box) or your own machine</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">Cloud Linux desktop per bot (Box) or your own machine</td>
           <!-- Source: rival-osaurus/README.md L83-L99 (local sandbox Linux VM via Apple Containerization), L127 (per-agent WebKit browser session) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Local sandbox VM (Apple Containerization) + per-agent browser</td>
           <!-- Source: rival-rakazo/README.md L23 (“Docker, E2B, Daytona, and trusted local-computer support”) -->
@@ -155,7 +191,7 @@ footer{text-align:center;padding:40px;color:#6d6b75;font-size:13px} footer a{col
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Voice mode</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Spoken replies + bot calls (free built-in voice; ElevenLabs optional); on-device dictation</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">Spoken replies + bot calls (free built-in voice; ElevenLabs optional); on-device dictation</td>
           <!-- Source: rival-osaurus/README.md L205 (on-device transcription via FluidAudio, voice input, VAD wake-word, global hotkey; “No audio leaves your Mac”) -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">On-device voice input — transcription, wake word, global hotkey</td>
           <!-- Source: rival-rakazo/README.md L17 (“Voice mode: speak replies, dictate, and call a bot. Bring your own ElevenLabs, OpenAI, or Cartesia key”) -->
@@ -166,7 +202,7 @@ footer{text-align:center;padding:40px;color:#6d6b75;font-size:13px} footer a{col
 
         <tr>
           <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Mobile apps</th>
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Built — store listings pending</td>
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:#edf0d9;color:var(--body);vertical-align:top;">Built — store listings pending</td>
           <!-- Not mentioned: rival-osaurus/README.md covers macOS only; no mobile app referenced -->
           <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
           <!-- Source: rival-rakazo/README.md L9 (“through an Expo mobile app”), L80-L90 (Desktop and mobile section, docs/mobile-release.md) -->
@@ -180,21 +216,27 @@ footer{text-align:center;padding:40px;color:#6d6b75;font-size:13px} footer a{col
   </div>
 
   <!-- Required footnote -->
-  <p style="margin-top:16px;color:var(--muted-2);font-size:13px;">README comparison, August 2026. Features and availability may have changed; this is not a runtime benchmark.</p>
-  <p style="margin-top:10px;color:var(--muted-2);font-size:13px;">Start with the workflows you need: setting up a bot, reviewing an approval, and checking the result. The <a href="/docs" style="color:var(--accent-border);">Muster guides</a> explain how to try them.</p>
+  <p class="comparison-note">README comparison, August 2026. Features and availability may have changed; this is not a runtime benchmark.</p>
+  <p class="comparison-note">Start with the workflows you need: setting up a bot, reviewing an approval, and checking the result. The <a href="/docs" style="color:var(--accent-border);">Muster guides</a> explain how to try them.</p>
 </section>
 
-<h2>How to switch</h2>
-<div class="card">
-<ol style="padding-left:18px;margin:0">
-<li style="margin-bottom:8px"><strong>Download Muster</strong> — one installer, no Docker, no terminal.</li>
-<li style="margin-bottom:8px"><strong>Add your first teammate</strong> — or hit Quick start and get working in under a minute.</li>
-<li style="margin-bottom:8px"><strong>Hire a finished team</strong> — 15 packs in the library replace weeks of prompt-tuning.</li>
-<li><strong>Set up Vaultgram</strong> — pair your Telegram channel, then back up files, sync Google Drive, or import an extracted Google Takeout archive.</li>
-</ol>
-<a class="cta" href="/#download">Download Muster — free</a>
-</div>
+<section class="switch-steps">
+  <div><p class="site-eyebrow">ONE TASK TO BEGIN WITH</p><h2>Make the first move a small one.</h2></div>
+  <div>
+    <ol>
+      <li><strong>Choose your workspace.</strong> Open Muster in your browser, or download the desktop app for work on your computer.</li>
+      <li><strong>Add your first teammate.</strong> Connect your model provider, give the bot context, and choose a task you can check.</li>
+      <li><strong>Build out the team.</strong> Browse the <a href="/teams.html">team library</a> and review the members, tools and routines before importing a pack.</li>
+      <li><strong>Bring over the files you need.</strong> Follow the <a href="/docs/setup">setup guide</a> for backup and Drive connections.</li>
+    </ol>
+    <a class="cta" href="/download.html">Download Muster →</a>
+  </div>
+</section>
 
 </main>
-<footer><a href="/">← muster.today</a> · <a href="/teams.html">Team Library</a></footer>
+<footer class="site-footer">
+  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p>
+  <nav aria-label="Footer"><a href="/switch.html">Switch to Muster</a><a href="/docs">Docs</a><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a></nav>
+  <small>© 2026 Orazen</small>
+</footer>
 </body></html>
