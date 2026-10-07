@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-harness.ts";
+import { writeFileAtomic } from "./atomic.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
@@ -63,7 +64,8 @@ describe.skipIf(process.platform === "win32")("a configured mail provider's refu
   let output = "";
 
   const mailbox = (label: string) => `${label}-${randomBytes(6).toString("hex")}@example.test`;
-  const setMode = (mode: Mode, hold = false) => writeFileSync(controlPath, JSON.stringify({ mode, hold }));
+  // Publish complete JSON before the independent child can read the pathname.
+  const setMode = (mode: Mode, hold = false) => writeFileAtomic(controlPath, JSON.stringify({ mode, hold }));
 
   // The per-IP send window is real and deliberately small (8 per 60s, priced
   // in seconds on every rejection). Every case here shares one loopback
@@ -84,7 +86,7 @@ describe.skipIf(process.platform === "win32")("a configured mail provider's refu
 
   const forMailbox = (email: string) => transported().filter((record) => record.to === email.trim().toLowerCase());
   const release = (callId: string, mode: Mode = "accept") =>
-    writeFileSync(join(releaseDirectory, `${callId}.json`), JSON.stringify({ mode }));
+    writeFileAtomic(join(releaseDirectory, `${callId}.json`), JSON.stringify({ mode }));
   const releaseMailbox = (email: string) => {
     for (const record of forMailbox(email)) release(record.callId);
   };
