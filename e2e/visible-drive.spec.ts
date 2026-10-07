@@ -11,7 +11,7 @@ const test = base.extend<{ harness: Harness }>({
   browser: async ({ browserName }, use) => {
     if (browserName !== "chromium") throw new Error("Owned fixture requires Chromium");
     // A fresh Playwright-owned profile; never attach to the user's Chrome.
-    const browser = await chromium.launch({ executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true,
+    const browser = await chromium.launch({ headless: true,
       args: ["--disable-background-networking", "--disable-component-update", "--no-first-run"] });
     try { await use(browser); } finally { await browser.close(); }
   },

@@ -116,13 +116,12 @@ jobs:
           realpath_of() { python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$1"; }
 
           expect_refusal() { # label, expected diagnostic, OUT_DIR, override(1|0)
-            local label="$1" diag="$2" out="$3" override="${4:-1}" log; log="$(mktemp)"
-            if [ "$override" = "1" ]; then
-              OUT_DIR="$out" ALLOW_OUTSIDE_WORKSPACE=1 "$script" >"$log" 2>&1
+            local label="$1" diag="$2" out="$3" override="${4:-1}" log rc; log="$(mktemp)"
+            if OUT_DIR="$out" ALLOW_OUTSIDE_WORKSPACE="$override" "$script" >"$log" 2>&1; then
+              rc=0
             else
-              OUT_DIR="$out" ALLOW_OUTSIDE_WORKSPACE=0 "$script" >"$log" 2>&1
+              rc=$?
             fi
-            local rc=$?
             if [ "$rc" -ne 0 ] && grep -q "$diag" "$log"; then
               echo "  PASS  $label"; pass=$((pass + 1))
             else

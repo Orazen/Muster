@@ -48,6 +48,21 @@ private actor RoomConversationTransport: NativeSessionTransport {
 
 @MainActor
 final class RoomConversationAcceptanceUITests: XCTestCase {
+    private struct RenderEvidence: Encodable {
+        let rootFrame: String
+        let rootBounds: String
+        let windowFrame: String?
+        let windowVisible: Bool
+        let appearance: String
+        let pixelWidth: Int
+        let pixelHeight: Int
+        let recognized: [String]
+        let pngBytes: Int
+        let pngBase64: String?
+    }
+
+    private var latestRenderEvidence = ""
+
     private func fleet(roomMessages: Bool = true, bots: Bool = true) throws -> Fleet {
         var sample = FixtureFleet.standard().fleet
         let message = try JSONDecoder().decode(Message.self, from: Data(#"{"id":"room-message","role":"bot","kind":"text","at":1,"text":"Room transcript from its own thread"}"#.utf8))
@@ -90,7 +105,15 @@ final class RoomConversationAcceptanceUITests: XCTestCase {
     }
 
     private func host(_ live: LiveSessionModel) async throws -> NSHostingView<AnyView> {
-        let hosting = NSHostingView(rootView: AnyView(LiveConversationView().environmentObject(live)))
+        try await hostView(LiveConversationView().environmentObject(live))
+    }
+
+    private func hostView(_ content: some View) async throws -> NSHostingView<AnyView> {
+        // Pin the SwiftUI proposal as well as AppKit's frame. The unshown
+        // window is a fixed render canvas, not an intrinsic-size app window.
+        let hosting = NSHostingView(rootView: AnyView(content
+            .frame(width: 850, height: 650)
+            .background(MusterAppearance.canvas)))
         hosting.frame = NSRect(x: 0, y: 0, width: 850, height: 650)
         let window = NSWindow(contentRect: hosting.frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.contentView = hosting
@@ -99,8 +122,11 @@ final class RoomConversationAcceptanceUITests: XCTestCase {
             // Existing headless harness measured close() crashing; detach only.
             window.contentView = NSView(frame: .zero)
             Self.pump()
+            XCTAssertNil(hosting.window, "Owned render view must be detached")
         }
         try await drain()
+        XCTAssertEqual(hosting.bounds.size, NSSize(width: 850, height: 650))
+        XCTAssertFalse(window.isVisible, "Owned bitmap tests must never show a window")
         return hosting
     }
 
@@ -119,8 +145,27 @@ final class RoomConversationAcceptanceUITests: XCTestCase {
         request.recognitionLanguages = ["en-US"]
         try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
         let recognized = try XCTUnwrap(request.results).compactMap { $0.topCandidates(1).first?.string }
-        XCTAssertFalse(recognized.isEmpty, "An empty rendering cannot satisfy acceptance")
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let evidence = RenderEvidence(
+            rootFrame: NSStringFromRect(root.frame), rootBounds: NSStringFromRect(root.bounds),
+            windowFrame: root.window.map { NSStringFromRect($0.frame) },
+            windowVisible: root.window?.isVisible ?? false,
+            appearance: root.effectiveAppearance.name.rawValue,
+            pixelWidth: image.width, pixelHeight: image.height,
+            recognized: Array(recognized.prefix(32)).map { String($0.prefix(256)) },
+            pngBytes: png.count, pngBase64: png.count <= 256 * 1024 ? png.base64EncodedString() : nil)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        latestRenderEvidence = String(decoding: try encoder.encode(evidence), as: UTF8.self)
+        XCTAssertFalse(recognized.isEmpty, "An empty rendering cannot satisfy acceptance\nROOM_RENDER_DIAGNOSTIC \(latestRenderEvidence)")
         return recognized + textFields(root).flatMap { [$0.stringValue, $0.placeholderString ?? ""] }
+    }
+
+    private func unavailableFailure(_ text: String) -> String {
+        // Only assertion diagnostics contain the bounded owned bitmap. They
+        // never enter labels(), the positive predicate, or a fallback oracle.
+        text.contains("No conversation selected") ? text
+            : "\(text)\nROOM_RENDER_DIAGNOSTIC \(latestRenderEvidence)"
     }
 
     private func textFields(_ root: NSView) -> [NSTextField] {
@@ -174,7 +219,7 @@ final class RoomConversationAcceptanceUITests: XCTestCase {
         try await drain()
         let text = try labels(view).joined(separator: "\n")
         XCTAssertTrue(live.fleet.groups.isEmpty)
-        XCTAssertTrue(text.contains("No conversation selected"), text)
+        XCTAssertTrue(text.contains("No conversation selected"), unavailableFailure(text))
         XCTAssertFalse(text.contains("Room transcript from its own thread"), text)
         XCTAssertFalse(text.contains("Launch prep"), text)
     }
@@ -206,8 +251,36 @@ final class RoomConversationAcceptanceUITests: XCTestCase {
         let (live, _) = try await scope(fleet())
         live.selectedThreadId = "unknown-thread"
         let text = try labels(try await host(live)).joined(separator: "\n")
-        XCTAssertTrue(text.contains("No conversation selected"), text)
+        XCTAssertTrue(text.contains("No conversation selected"), unavailableFailure(text))
         XCTAssertFalse(text.contains("Room transcript from its own thread"), text)
         XCTAssertFalse(text.contains("Bot transcript stays separate"), text)
+    }
+
+    func testUnavailableCanvasRequiresActualRenderedLabel() async throws {
+        let unavailable = try await hostView(VStack(spacing: 0) {
+            Text("Muster").font(.caption2)
+            Divider()
+            ContentUnavailableView("No conversation selected", systemImage: "bubble.left.and.text.bubble.right")
+        })
+        let positive = try labels(unavailable).joined(separator: "\n")
+        XCTAssertTrue(positive.contains("No conversation selected"), unavailableFailure(positive))
+
+        let different = try await hostView(VStack(spacing: 0) {
+            Text("Muster").font(.caption2)
+            Divider()
+            ContentUnavailableView("Different unavailable state", systemImage: "bubble.left.and.text.bubble.right")
+        })
+        let differentText = try labels(different).joined(separator: "\n")
+        XCTAssertTrue(differentText.contains("Different unavailable state"), differentText)
+        XCTAssertFalse(differentText.contains("No conversation selected"), differentText)
+
+        let headerOnly = try await hostView(VStack {
+            Text("Muster").font(.caption2)
+            Text("Owned canvas control").font(.headline)
+            Spacer()
+        })
+        let headerText = try labels(headerOnly).joined(separator: "\n")
+        XCTAssertTrue(headerText.contains("Owned canvas control"), headerText)
+        XCTAssertFalse(headerText.contains("No conversation selected"), headerText)
     }
 }
