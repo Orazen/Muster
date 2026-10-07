@@ -46,9 +46,15 @@ const policy = [
   {
     package: "node-forge", version: "1.4.0", file: "lib/rsa.js",
     originalSha256: "fd4740238145ec26470eb3f06a627c72039538ce1307dbdce40521f94dfd0a50",
-    patchedSha256: "c9b1e3799e230528b6d6815c1f6cd3c6058b9d45975264b55d995abb976589af",
+    previousPatchedSha256: "c9b1e3799e230528b6d6815c1f6cd3c6058b9d45975264b55d995abb976589af",
+    patchedSha256: "ff1d46675dbf07c80b438381c0a41b9b16ae3d4c84d103b1e9f067ad4a9c00fe",
     // The nested arity check is the upstream PR1152 fix at ceba34402e329f0365134f23fe19898756527d65.
-    replacements: [["            obj.value.length !== 2) {", "            obj.value.length !== 2 ||\n            obj.value[0].value.length !==\n              (('parameters' in capture) ? 2 : 1)) {", 1]],
+    // The empty NULL check supplements it with PR1157 at 683ab3344899cc08a581e4d5675a33e87aff7b04.
+    // Both remain local source backports; no upstream patched version is claimed.
+    replacements: [
+      ["            obj.value.length !== 2) {", "            obj.value.length !== 2 ||\n            obj.value[0].value.length !==\n              (('parameters' in capture) ? 2 : 1)) {", 1],
+      ["              (('parameters' in capture) ? 2 : 1)) {", "              (('parameters' in capture) ? 2 : 1) ||\n            ('parameters' in capture && capture.parameters !== '')) {", 1],
+    ],
   },
   {
     package: "js-yaml", version: "3.15.2", file: "bin/js-yaml.js",
@@ -144,10 +150,16 @@ export function planDependencySecurityPatches(root) {
         const target = resolve(root, path, descriptor.file);
         const current = readRegularFile(root, target);
         const currentHash = sha256(current.bytes);
-        assert([descriptor.originalSha256, descriptor.patchedSha256].includes(currentHash), `Unknown ${name} source: ${path}/${descriptor.file}; refusing to patch`);
+        assert([descriptor.originalSha256, descriptor.previousPatchedSha256, descriptor.patchedSha256].filter(Boolean).includes(currentHash), `Unknown ${name} source: ${path}/${descriptor.file}; refusing to patch`);
         let bytes = current.bytes;
         if (currentHash !== descriptor.patchedSha256) {
           let source = bytes.toString("utf8");
+          if (currentHash === descriptor.previousPatchedSha256) {
+            // Only a pinned prior image may be reconstructed for this upgrade.
+            // Re-prove the original before applying the current transaction.
+            for (const [before, after] of [...descriptor.replacements].reverse()) source = source.split(after).join(before);
+            assert.equal(sha256(Buffer.from(source)), descriptor.originalSha256, `Unexpected prior mitigation input in ${descriptor.file}`);
+          }
           for (const [before, after, count] of descriptor.replacements) {
             assert.equal(source.split(before).length - 1, count, `Unexpected mitigation input in ${descriptor.file}`);
             source = source.split(before).join(after);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { constants, createHash, generateKeyPairSync, privateEncrypt } from "node:crypto";
+import { constants, createHash, generateKeyPairSync, privateEncrypt, sign as nodeSign } from "node:crypto";
 import { cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -100,14 +100,15 @@ function rsaFixture(forge) {
     asn1.create(asn1.Class.UNIVERSAL, asn1.Type.OCTETSTRING, false, digest.digest().getBytes()),
   ])).getBytes();
   const oid = () => asn1.create(asn1.Class.UNIVERSAL, asn1.Type.OID, false, asn1.oidToDer(forge.pki.oids.sha256).getBytes());
-  const nil = () => asn1.create(asn1.Class.UNIVERSAL, asn1.Type.NULL, false, "");
+  const nil = (value = "") => asn1.create(asn1.Class.UNIVERSAL, asn1.Type.NULL, false, value);
   const garbage = () => asn1.create(asn1.Class.UNIVERSAL, asn1.Type.OCTETSTRING, false, "nested garbage");
   const signDer = (value) => {
     const body = Buffer.from(value, "binary");
     const encoded = Buffer.concat([Buffer.from([0, 1]), Buffer.alloc(128 - body.length - 3, 0xff), Buffer.from([0]), body]);
     return privateEncrypt({ key: key.privateKey, padding: constants.RSA_NO_PADDING }, encoded).toString("binary");
   };
-  return { privateKey, publicKey, digest, der, oid, nil, garbage, signDer };
+  const nativeSign = () => nodeSign("sha256", Buffer.from("owned RSA regression"), key.privateKey).toString("binary");
+  return { privateKey, publicKey, digest, der, oid, nil, garbage, signDer, nativeSign };
 }
 
 test("all installed consumers/copies have reviewed mitigated bytes", () => {
@@ -140,6 +141,54 @@ test("mitigated RSA rejects nested garbage with and without NULL and preserves n
   const certificate = certificates.generateSelfSignedCodeSigningCertificate({ keyPair: f, validityNotBefore: new Date(now - 60000), validityNotAfter: new Date(now + 60000), commonName: "owned fixture" });
   certificates.validateSelfSignedCertificate(certificate, f);
   assert.equal(typeof certificates.signBufferRSASHA256AndVerify(f.privateKey, certificate, Buffer.from("owned manifest")), "string");
+});
+
+test("prior arity-only RSA image accepts malformed nonempty NULL encodings", () => {
+  const root = fixture("rsa-prior-null");
+  const patch = DEPENDENCY_SECURITY_PATCHES.find((entry) => entry.package === "node-forge");
+  const target = join(root, "node_modules/node-forge/lib/rsa.js");
+  const [before, after, count] = patch.replacements[0];
+  const source = readFileSync(target, "utf8");
+  assert.equal(source.split(before).length - 1, count);
+  const prior = source.split(before).join(after);
+  assert.equal(sha256(prior), patch.previousPatchedSha256);
+  writeFileSync(target, prior);
+  const forge = createRequire(join(root, "package.json"))("node-forge");
+  const f = rsaFixture(forge);
+  // The fixture owns the private key: this proves malformed-encoding
+  // acceptance by the prior image, not forgery without a private key.
+  for (const length of [1, 8, 32]) {
+    assert.equal(f.publicKey.verify(f.digest.digest().getBytes(), f.signDer(f.der([f.oid(), f.nil("x".repeat(length))]))), true);
+  }
+});
+
+test("strict RSA NULL backport rejects nonempty parameters and preserves other verification modes", () => {
+  const forge = require("node-forge");
+  const f = rsaFixture(forge);
+  const digest = f.digest.digest().getBytes();
+  const absent = f.signDer(f.der([f.oid()]));
+  const empty = f.signDer(f.der([f.oid(), f.nil()]));
+  assert.equal(f.publicKey.verify(digest, absent), true);
+  assert.equal(f.publicKey.verify(digest, empty), true);
+  for (const length of [1, 8, 32]) {
+    assert.throws(() => f.publicKey.verify(digest, f.signDer(f.der([f.oid(), f.nil("x".repeat(length))]))), /valid RSASSA-PKCS1-v1_5 DigestInfo/);
+  }
+  const wrongDigest = forge.md.sha256.create().update("different").digest().getBytes();
+  assert.equal(f.publicKey.verify(wrongDigest, empty), false);
+  const der = f.der([f.oid(), f.nil()]);
+  assert.equal(der.charCodeAt(0), 0x30);
+  assert(der.charCodeAt(1) < 0x80);
+  assert.equal(f.publicKey.verify(digest, f.signDer("\x30\x80" + der.slice(2) + "\x00\x00")), true);
+  const pss = forge.pss.create({ md: forge.md.sha256.create(), mgf: forge.mgf.mgf1.create(forge.md.sha256.create()), saltLength: 20 });
+  const pssSignature = f.privateKey.sign(f.digest, pss);
+  assert.equal(f.publicKey.verify(digest, pssSignature, pss), true);
+  assert.equal(f.publicKey.verify(wrongDigest, pssSignature, pss), false);
+  const noneSignature = f.privateKey.sign(digest, "NONE");
+  assert.equal(f.publicKey.verify(digest, noneSignature, "NONE"), true);
+  assert.equal(f.publicKey.verify(wrongDigest, noneSignature, "NONE"), false);
+  const nativeSignature = f.nativeSign();
+  assert.equal(f.publicKey.verify(digest, nativeSignature), true);
+  assert.equal(f.publicKey.verify(wrongDigest, nativeSignature), false);
 });
 
 test("original braces walker reproduces stack exhaustion in a bounded child", () => {
@@ -195,6 +244,30 @@ test("preparation patches both reviewed CLI copies and existing guards after pre
     const after = statSync(file.target);
     assert.equal(after.ino, before[index].ino);
     assert.equal(after.mtimeMs, before[index].mtimeMs);
+  }
+});
+
+test("preparation upgrades the pinned prior RSA image without replacing unchanged sources", () => {
+  const root = fixture("upgrade-prior-rsa");
+  prepareToolchain(root);
+  const patch = DEPENDENCY_SECURITY_PATCHES.find((entry) => entry.package === "node-forge");
+  const target = join(root, "node_modules/node-forge/lib/rsa.js");
+  const [before, after] = patch.replacements[1];
+  const prior = readFileSync(target, "utf8").replace(after, before);
+  assert.equal(sha256(prior), patch.previousPatchedSha256);
+  writeFileSync(target, prior);
+  const unchanged = planDependencySecurityPatches(root).files.filter((file) => file.target !== target)
+    .map((file) => ({ target: file.target, stat: statSync(file.target), hash: sha256(readFileSync(file.target)) }));
+  assert.throws(() => verifyDependencySecurityPatches(root), /mitigations are missing/);
+  const result = prepareToolchain(root);
+  assert.deepEqual(result.files.filter((file) => file.changed).map((file) => file.name), ["node_modules/node-forge/lib/rsa.js"]);
+  assert.equal(sha256(readFileSync(target)), patch.patchedSha256);
+  assert.equal(verifyDependencySecurityPatches(root).files, 7);
+  assert.equal(prepareToolchain(root).status, "unchanged");
+  for (const file of unchanged) {
+    assert.equal(sha256(readFileSync(file.target)), file.hash);
+    assert.equal(statSync(file.target).ino, file.stat.ino);
+    assert.equal(statSync(file.target).mtimeMs, file.stat.mtimeMs);
   }
 });
 
