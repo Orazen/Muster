@@ -218,6 +218,10 @@ export async function mcpIntegration(
       OMB_COMMS_TOKEN: context.commsToken,
       OMB_BOT_ID: context.botId,
       OMB_THREAD_ID: context.threadId,
+      // connector approval gate (CONNECTOR-APPROVAL-GATE/v1): the flag and
+      // its test clock ride to the bridge; only an explicit "off" disables
+      MUSTER_CONNECTOR_APPROVAL: process.env.MUSTER_CONNECTOR_APPROVAL ?? "",
+      OMB_CONNECTOR_APPROVAL_TIMEOUT_MS: process.env.OMB_CONNECTOR_APPROVAL_TIMEOUT_MS ?? "",
     },
   };
 }

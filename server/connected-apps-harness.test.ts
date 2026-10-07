@@ -56,7 +56,7 @@ beforeAll(async () => {
   dump = join(directory, "engine.json");
   writeFileSync(join(data, "config.json"), JSON.stringify({
     openConnector: { url: runtimeUrl, token: runtimeToken },
-    instances: Object.fromEntries(["fake", "optout", "room"].map((id) => [id, { driver: "grokAgent", config: { cli: join(root, "server/testing/fake-acp-cli.ts"), fullAuto: true, workspace: home }, environment: { FAKE_ACP_MODE: "echo-gated", FAKE_ACP_GATE_FILE: join(directory, id === "room" ? "release-room" : "release-turn"), FAKE_ACP_DUMP: id === "fake" ? dump : `${dump}.${id}` } }])),
+    instances: Object.fromEntries(["fake", "optout", "room", "gatey"].map((id) => [id, { driver: "grokAgent", config: { cli: join(root, "server/testing/fake-acp-cli.ts"), fullAuto: true, workspace: home }, environment: { FAKE_ACP_MODE: "echo-gated", FAKE_ACP_GATE_FILE: join(directory, id === "room" ? "release-room" : id === "gatey" ? "release-gate" : "release-turn"), FAKE_ACP_DUMP: id === "fake" ? dump : `${dump}.${id}` } }])),
   }));
   // Only this owned runtime is reachable from the server; no provider account.
   const guard = join(directory, "network.mjs");
@@ -163,6 +163,62 @@ it("mounts the configured runtime and connects a calendar card without any Compo
   }, { timeout: 10_000 }).toContain("Connected-app tools are available");
   const mounted = echo.parse(await (await api("/api/bots")).json());
   expect(mounted.bots.find((entry) => entry.id === bot.id)?.messages.map((m) => m.text ?? "").join("\n")).not.toContain("not reachable from this engine");
+}, 30_000);
+
+it("holds write connector actions on approval cards until a human answers", async () => {
+  const created = await api("/api/bots", "POST", {});
+  const bot = z.object({ bot: botWire }).parse(await created.json()).bot;
+  expect((await api(`/api/bots/${bot.id}`, "PATCH", { composio: true, modelSelection: { instanceId: "gatey", model: "fake-acp-model" }, computer: "off" })).status).toBe(200);
+  expect((await api(`/api/bots/${bot.id}/messages`, "POST", { text: "run a connector action for me" })).status).toBe(202);
+  await expect.poll(() => existsSync(`${dump}.gatey.mcp.json`), { timeout: 10_000 }).toBe(true);
+  const entries = serversWire.parse(JSON.parse(readFileSync(`${dump}.gatey.mcp.json`, "utf8")));
+  const token = entries.find((entry) => entry.name === "composio")?.env.find((entry) => entry.name === "OMB_COMMS_TOKEN")?.value;
+  expect(token).toBeTruthy();
+
+  const cardRoster = () => z.object({ bots: z.array(botWire.extend({
+    messages: z.array(z.object({
+      card: z.object({
+        requestId: z.string().optional(),
+        tool: z.string().optional(),
+        answered: z.string().optional(),
+        dismissed: z.boolean().optional(),
+        subtitle: z.string().optional(),
+        allowKey: z.string().optional(),
+      }).optional(),
+    })),
+  })) });
+  const openGateCard = async () => {
+    const roster = cardRoster().parse(await (await api("/api/bots")).json());
+    return roster.bots.find((entry) => entry.id === bot.id)?.messages
+      .filter((m) => m.card?.tool === "connector_call" && !m.card.answered && !m.card.dismissed)
+      .at(-1)?.card ?? null;
+  };
+
+  // a foreign credential may not ask on someone else's conversation
+  expect((await api("/api/internal/connectors/approve", "POST", { botId: "any", threadId: bot.threadId, actions: ["SLACK_POST_MESSAGE"] }, token ?? "")).status).toBe(403);
+
+  // a write holds: the HTTP response lands only when the human answers
+  const held = api("/api/internal/connectors/approve", "POST", { botId: bot.id, threadId: bot.threadId, toolkits: ["slack"], actions: ["SLACK_POST_MESSAGE"], argsSummary: "channel" }, token ?? "");
+  await expect.poll(async () => (await openGateCard())?.requestId ?? "", { timeout: 10_000 }).toBeTruthy();
+  const open = (await openGateCard())!;
+  // the card names the action, args stay redacted (names only), and
+  // v1 offers no always-allow
+  expect(open.subtitle).toContain("SLACK_POST_MESSAGE");
+  expect(open.subtitle).not.toContain("#");
+  expect(open.allowKey).toBeUndefined();
+  expect((await api(`/api/bots/${bot.id}/respond`, "POST", { requestId: open.requestId ?? "", behavior: "deny" })).status).toBe(200);
+  expect(await (await held).json()).toMatchObject({ approved: false });
+
+  // v1 has no always-allow: the identical re-ask is carded again, and the
+  // human's approval resolves the hold approved
+  const heldAgain = api("/api/internal/connectors/approve", "POST", { botId: bot.id, threadId: bot.threadId, toolkits: ["slack"], actions: ["SLACK_POST_MESSAGE"], argsSummary: "channel" }, token ?? "");
+  await expect.poll(async () => (await openGateCard())?.requestId ?? "", { timeout: 10_000 }).toBeTruthy();
+  const reopened = (await openGateCard())!;
+  expect(reopened.requestId).not.toBe(open.requestId);
+  expect((await api(`/api/bots/${bot.id}/respond`, "POST", { requestId: reopened.requestId ?? "", behavior: "allow" })).status).toBe(200);
+  expect(await (await heldAgain).json()).toMatchObject({ approved: true });
+  // release the fake engine's held turn so the child exits cleanly
+  writeFileSync(join(directory, "release-gate"), "release");
 }, 30_000);
 
 it("keeps connected apps unavailable to a bot whose owner switched them off", async () => {

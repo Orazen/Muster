@@ -178,6 +178,14 @@ import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry, ProviderRetirementError } from "./harness/registry.ts";
 import { cancelPeerApprovalsFor, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import {
+  cancelConnectorApprovalsFor,
+  CONNECTOR_CARD_TOOL,
+  dismissStaleConnectorCards,
+  requestConnectorCard,
+  resolveConnectorAction,
+  type ConnectorGateBus,
+} from "./connector-gate.ts";
+import {
   AGENT_CHARACTERS,
   mentionedBots,
   roomResponders,
@@ -866,6 +874,7 @@ function stopPeerDispatch(botId: string) {
   connectorCapabilities.revokeBot(botId);
   cancelConnectorResumes(botId);
   cancelPeerApprovalsFor(botId);
+  cancelConnectorApprovalsFor(connectorGateBus, botId);
   let queuedCanceled = true;
   const failedQueues: DelegationSnapshot[] = [];
   // Initial Stop applies to all original tasks. Cleanup retries retain exact
@@ -4045,6 +4054,17 @@ const approvalBus: ApprovalBus = {
   if (stale) console.log(`peer approvals: dismissed ${stale} card(s) left by a previous run`);
 }
 
+// Connector approval gate (CONNECTOR-APPROVAL-GATE/v1): same lifecycle rules
+// as peer approvals — memory only, with boot-time settling of orphaned cards.
+const connectorGateBus: ConnectorGateBus = {
+  store,
+  recordDecision: (entry) => decisions.record(entry.botId, entry),
+};
+{
+  const stale = dismissStaleConnectorCards(connectorGateBus);
+  if (stale) console.log(`connector gate: dismissed ${stale} card(s) left by a previous run`);
+}
+
 // Handoffs a previous process queued but never ran: the source turn is
 // dead (no turn survives a restart) so they would otherwise wait forever.
 // Run them now, through the same drain — target and approvePeerComms are
@@ -6780,6 +6800,47 @@ let requestUserEmail = "";
         maybeResumeConnectors(botId, threadId, resumeKey);
         return json(res, 200, { messageIds });
       }
+      // Connected-app approval gate (CONNECTOR-APPROVAL-GATE/v1, audit S3):
+      // a write-classified connector call asks here. Mirrors /request — the
+      // same lease, ownership and enablement checks — but HOLDS the response
+      // until the approval card settles (human answer) or the 10-minute
+      // timeout denies; the proxy relays only on `approved`. Fail-closed.
+      if (method === "POST" && path === "/api/internal/connectors/approve") {
+        const body = await readBody(req);
+        const botId = String(body.botId ?? "");
+        const threadId = String(body.threadId ?? "");
+        if (botId !== connectorLease.botId || threadId !== connectorLease.threadId) return json(res, 403, { error: "conversation does not belong to this credential" });
+        if (!connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
+        // every action is validated like a connector slug — the card and its
+        // identity are built from validated data only
+        const actions: string[] = (Array.isArray(body.actions) ? body.actions : [])
+          .map((action: string) => String(action).trim())
+          .filter((action: string) => /^[a-z0-9][a-z0-9_.-]{0,99}$/i.test(action))
+          .slice(0, 12);
+        if (!actions.length) return json(res, 400, { error: "at least one valid action is required" });
+        const owner = connectorThread(botId, threadId);
+        if (!owner) return json(res, 403, { error: "conversation does not belong to this bot" });
+        if (!botAppsAllowed(owner.bot)) return json(res, 409, { error: "connected apps are not enabled for this bot" });
+        // v1: flag off disables the gate for local dev and tests; the proxy
+        // skips the ask, so this only guards a misrouted request.
+        if (process.env.MUSTER_CONNECTOR_APPROVAL === "off") return json(res, 200, { approved: true });
+        const toolkits: string[] = Array.isArray(body.toolkits)
+          ? [...new Set<string>(body.toolkits.map((slug: string) => String(slug).toLowerCase().replace(/[^a-z0-9_-]/g, "")).filter(Boolean))].slice(0, 12)
+          : [];
+        // the args summary is untrusted model data, like a command summary on
+        // a claude card — the proxy already strips values (names only), and
+        // this bounds the text a second time
+        const argsSummary = isText(body.argsSummary) ? body.argsSummary.slice(0, 240) : "";
+        const decision = requestConnectorCard(
+          connectorGateBus,
+          owner.bot,
+          { actions, toolkits, argsSummary },
+          approvalHistory(decisions, owner.bot.id, CONNECTOR_CARD_TOOL),
+        );
+        const approved = (await decision.decision) === "allow";
+        if (!connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
+        return json(res, 200, { approved });
+      }
       return json(res, 404, { error: "unknown internal endpoint" });
     }
 
@@ -8783,6 +8844,7 @@ let requestUserEmail = "";
       // a peer approval naming this bot can never be meaningfully answered
       // now, and its caller would otherwise wait out the 15-minute timeout
       cancelPeerApprovalsFor(bot.id);
+      cancelConnectorApprovalsFor(connectorGateBus, bot.id);
       discardDelegations(commsBus, bot.threadId);
       // a concurrent delete between the lookup above and here (the await
       // points leave a window) must surface as 404, not a fake success
@@ -9301,6 +9363,11 @@ let requestUserEmail = "";
       if (resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
+      // connector approval gate: a write held by connector-proxy for a human
+      // answer (same card flow, no provider adapter behind it)
+      if (resolveConnectorAction(connectorGateBus, String(body.requestId), behavior)) {
+        return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
+      }
       if (behavior === "allow" || behavior === "deny") recordHumanAnswer(bot.id, bot.threadId, String(body.requestId), behavior);
       const outcome = await answerRequest(bot.threadId, turnProvenance.get(bot.threadId)?.instanceId ?? bot.modelSelection.instanceId, String(body.requestId), behavior, body.message);
       return json(res, 200, { ok: true, outcome });
@@ -9319,6 +9386,10 @@ let requestUserEmail = "";
       if (!owner) return json(res, 404, { error: "nothing is waiting on an answer in this conversation" });
       // peer-approval intercept (see /api/bots/:id/respond above).
       if (resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
+        return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
+      }
+      // connector approval gate (see /api/bots/:id/respond above).
+      if (resolveConnectorAction(connectorGateBus, String(body.requestId), behavior)) {
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
       if (behavior === "allow" || behavior === "deny") recordHumanAnswer(owner.id, threadId, String(body.requestId), behavior);

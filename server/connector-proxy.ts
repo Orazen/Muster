@@ -8,6 +8,7 @@
 // stdout is the MCP transport. Never log there.
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
+import { connectorGateIntent, type ConnectorGateIntent } from "./connector-gate.ts";
 
 type JsonPrimitive = string | number | boolean | null;
 interface JsonRecord {
@@ -124,6 +125,64 @@ function connectorAdds(args: JsonValue): string[] {
   }))];
 }
 
+// The connector gate flag (CONNECTOR-APPROVAL-GATE/v1): default ON. Only
+// the explicit value "off" disables it, for local dev and tests.
+const CONNECTOR_APPROVAL_OFF = process.env.MUSTER_CONNECTOR_APPROVAL === "off";
+// The hold's own clock: 10 minutes by default (the harness denies at the
+// same beat); tests shorten it via this knob instead of sleeping.
+const APPROVAL_FETCH_TIMEOUT_MS = (() => {
+  const override = Number(process.env.OMB_CONNECTOR_APPROVAL_TIMEOUT_MS ?? "");
+  return Number.isFinite(override) && override > 0 && override < 10 * 60_000
+    ? override
+    : (10 * 60_000 + 30_000);
+})();
+
+/** Hold a write-classified connector call on an approval card. Mints the
+ * card via the harness and blocks this call's own HTTP wait until it is
+ * approved (the bridge relays only then), or denies — declined, timed out
+ * or unreachable harness — fail-closed. */
+async function requestConnectorApproval(intent: ConnectorGateIntent & { kind: "write" }): Promise<"allow" | "deny"> {
+  if (!BOT_ID || !THREAD_ID) {
+    process.stderr.write("connector gate: no conversation context — denying the call\n");
+    return "deny";
+  }
+  try {
+    const response = await fetch(`${HARNESS}/api/internal/connectors/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({
+        botId: BOT_ID,
+        threadId: THREAD_ID,
+        toolkits: intent.toolkits,
+        actions: intent.actions,
+        argsSummary: intent.argsSummary,
+      }),
+      // the harness answers when the card settles or denies at its own
+      // 10-minute beat; this bound covers that with margin
+      signal: AbortSignal.timeout(APPROVAL_FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      // SAFETY: harness error frames are JSON objects; only the error field is read.
+      const body = (await response.json().catch(() => ({}))) as { error?: unknown };
+      process.stderr.write(`connector gate: HTTP ${response.status} ${String(body.error ?? "")}\n`);
+      return "deny";
+    }
+    // SAFETY: a settled hold replies with the approved flag only.
+    const answer = (await response.json().catch(() => ({}))) as { approved?: unknown };
+    return answer.approved === true ? "allow" : "deny";
+  } catch (error) {
+    process.stderr.write(`connector gate: ${error instanceof Error ? error.message : String(error)}\n`);
+    return "deny";
+  }
+}
+
+/** The tool result a declined (or timed-out) connector call gets back. The
+ * agent must not retry it — the human saw the card and said no. */
+function declinedResult(actions: string[]): string {
+  const named = actions.length ? actions.join(", ") : "this action";
+  return `The user declined ${named} — do not retry it.`;
+}
+
 async function showConnectorCards(slugs: string[]): Promise<void> {
   const response = await fetch(`${HARNESS}/api/internal/connectors/request`, {
     method: "POST",
@@ -156,6 +215,18 @@ async function handle(message: Json): Promise<void> {
     if (/WAIT_FOR_CONNECTIONS$/i.test(name)) {
       send(textResult(id, "Muster is handling connection completion and will continue the task automatically."));
       return;
+    }
+    // Connected-app gate (CONNECTOR-APPROVAL-GATE/v1): pass/read relays;
+    // a write holds on an approval card, and a declined or timed-out hold
+    // answers the engine with an isError and must never be retried.
+    if (!CONNECTOR_APPROVAL_OFF) {
+      const intent = connectorGateIntent(name, params.arguments);
+      if (intent.kind === "write") {
+        if ((await requestConnectorApproval(intent)) !== "allow") {
+          send(textResult(id, declinedResult(intent.actions), true));
+          return;
+        }
+      }
     }
   }
   const response = await relay(message);
