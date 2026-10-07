@@ -10,23 +10,27 @@
     },
     {
       "type": "assertion",
-      "description": "The hero heading reads A personal AI team for your everyday work."
+      "description": "The hero heading reads Your next idea has company."
     },
     {
       "type": "assertion",
-      "description": "An Open Muster link points to /app and the desktop download guide points to /download.html."
+      "description": "An Open Muster link points to /app and the Get the desktop app link points to /download.html."
     },
     {
       "type": "assertion",
-      "description": "The pricing section reads Free to use. Your AI, your choice. and the Muster beta card says Free app."
+      "description": "The model cost note reads Free app. Your AI usage is separate. and explains that provider subscriptions, API usage, and connected services may have their own costs."
     },
     {
       "type": "assertion",
-      "description": "The page explains that users bring their own AI provider and pay that provider for usage, and offers a model setup link to /docs/engines."
+      "description": "The page explains that users choose a supported model for each teammate and bring their provider connection. The Explore models & setup link points to /docs/engines, and the FAQ explains that a supported connection may use a provider login, subscription, API key, or configured local model."
+    },
+    {
+      "type": "action",
+      "description": "Open the Get the desktop app link to /download.html as a documentation page. Do not click a release download button or start a download."
     },
     {
       "type": "assertion",
-      "description": "The desktop section includes Mac, Windows and Linux guidance; it does not promise that a browser test installed or verified a release artifact."
+      "description": "The download guide includes macOS, Windows and Linux guidance; record this as page content only, not proof that a browser installed a release artifact or verified its signing, notarization, launch, or upgrade."
     }
   ]
 }
