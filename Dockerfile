@@ -28,6 +28,8 @@ RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 # invalidate this whole stage (including better-sqlite3's node-gyp path) —
 # now pnpm install only re-runs when a manifest or the lockfile changes.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# patchedDependencies are install inputs, not later application source.
+COPY patches ./patches
 RUN pnpm install --frozen-lockfile
 
 # tray.html is the second rollup input in vite.config.ts — without it the
