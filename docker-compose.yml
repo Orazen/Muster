@@ -26,6 +26,15 @@ services:
       # it to the muster-data volume, so hosting panels that cannot inject
       # runtime env vars still come up.
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-}"
+      # Outbound email. `isEmailConfigured()` (server/email.ts) is exactly
+      # `Boolean(RESEND_API_KEY)` and the auth capability route advertises
+      # `emailOtp` from it, so without these the sign-in screen simply hides
+      # email codes. Compose forwards only the names written in this block, so a
+      # value placed in `.env` does NOT reach the container unless it is named
+      # here. Leaving both empty keeps the previous behaviour exactly: no
+      # mailer, no email codes, nothing half-enabled.
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      EMAIL_FROM: "${EMAIL_FROM:-Muster <noreply@localhost>}"
       # Optional: provide credentials via env instead of the in-app settings.
       # XAI_API_KEY: ""
       # COMPOSIO_API_KEY: ""

@@ -11,6 +11,12 @@ services:
       - NODE_ENV=staging
       - OMB_HOST=0.0.0.0
       - OMB_PORT=8799
+      # Same mailer passthrough as production (docker-compose.prod.yml): compose
+      # forwards only the names listed here, so an env value set in the hosting
+      # panel never reaches the container otherwise. Keep both files in step —
+      # scripts/deployment-env-policy.test.ts fails if they drift.
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - EMAIL_FROM=${EMAIL_FROM:-Muster <noreply@localhost>}
     volumes:
       - muster-data:/data
     restart: unless-stopped
