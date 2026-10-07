@@ -230,7 +230,7 @@ test("the current server docs404 retains shared readable styling and recovery li
   await expectFits(page, 320);
   expect(await appearance(page)).toEqual(await appearance(normal));
   await expect(page.locator('a[href="/"]').first()).toBeVisible();
-  await page.locator('a[href="/docs"]').click();
+  await page.getByRole("link", { name: "Documentation", exact: true }).click();
   await expect(page.locator('#docs-navigation a[aria-current="page"]')).toHaveAttribute("href", "/docs");
 });
 for (const width of [320, 1440]) {
@@ -320,5 +320,36 @@ for (const mode of ["success", "failure", "missing"] as const) {
     const prompt = 'Hire the "Ship Room" team template in Muster. Follow https://muster.today/docs/quick-start if Muster is not running yet.';
     if (mode === "success") { expect(await page.evaluate(() => window.__publicClipboard)).toEqual([prompt]); await expect(page.locator("#copy-status")).toContainText(/prompt copied/i); }
     else { expect(await page.evaluate(() => window.__publicClipboard)).toEqual([]); await expect(page.locator("#copy-fallback")).toBeVisible(); await expect(page.locator("#copy-prompt")).toHaveValue(prompt); await expect(page.locator("#copy-status")).not.toContainText(/prompt copied/i); }
+  });
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`orange public controls preserve readable labels and locked typography in ${theme} mode`, async ({ openPublic }, info) => {
+    const page = await openPublic('/docs', { width: 390, theme, seedState: true });
+    await page.evaluate(() => document.fonts.ready);
+    await expect(page.locator('.site-brand svg')).toHaveCount(0);
+    const appearance = await page.locator('.site-cta').evaluate((action) => {
+      const style = getComputedStyle(action);
+      const luminance = (color: string) => {
+        const rgb = color.match(/[\d.]+/g)!.slice(0, 3).map(Number).map(v => {
+          const s = v / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4;
+        });
+        return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+      };
+      const fg = luminance(style.color), bg = luminance(style.backgroundColor);
+      return { background: style.backgroundColor, contrast: (Math.max(fg, bg) + .05) / (Math.min(fg, bg) + .05),
+        body: getComputedStyle(document.body).fontFamily, heading: getComputedStyle(document.querySelector('h1')!).fontFamily };
+    });
+    expect(appearance.background).toBe(theme === 'light' ? 'rgb(198, 66, 21)' : 'rgb(255, 173, 118)');
+    expect(appearance.contrast).toBeGreaterThanOrEqual(4.5);
+    expect(appearance.body).toMatch(/^Instrument,/);
+    expect(appearance.heading).toMatch(/^Bricolage,/);
+    expect(await page.evaluate(() => Array.from(document.fonts)
+      .filter(face => ['Instrument', 'Bricolage'].includes(face.family.replaceAll('"', '')))
+      .map(face => ({ family: face.family.replaceAll('"', ''), status: face.status })).sort((a, b) => a.family.localeCompare(b.family))))
+      .toEqual(expect.arrayContaining([{ family: 'Bricolage', status: 'loaded' }, { family: 'Instrument', status: 'loaded' }]));
+    await expectFits(page, 390);
+    await expectState(page, theme);
+    await reviewImage(page, `docs-${theme}-orange-mobile`, info);
   });
 }

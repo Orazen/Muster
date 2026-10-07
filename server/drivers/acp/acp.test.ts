@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ensureDirs } from "../../config.ts";
+import { autoDecision } from "../../auto-approve.ts";
 import { agentPageForToolEvent } from "../../browser-panel.ts";
 import type { ProviderInstance, RuntimeEvent } from "../../contracts.ts";
 import type { JsonValue } from "../../schema.ts";
@@ -359,13 +360,40 @@ describe("ACP turns (fake CLI)", () => {
     await create(GrokAgentDriver, "permission");
     await instance.adapter.sendTurn({ threadId: "t-perm", text: "go" });
     const opened = await recorder.until((e) => e.type === "request.opened");
-    expect(opened).toMatchObject({ requestType: "permission", tool: "shell" });
+    expect(opened).toMatchObject({ requestType: "permission", tool: "shell", command: "echo hi" });
 
     await instance.adapter.respondToRequest("t-perm", opened.requestId!, { behavior: "allow" });
     const resolved = await recorder.until((e) => e.type === "request.resolved");
     expect(resolved).toMatchObject({ behavior: "allow", source: "user" });
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    { label: "title-only", input: {}, expected: null },
+    { label: "null input", input: { rawInput: null }, expected: null },
+    { label: "malformed input", input: { rawInput: { command: ["git", "status"] } }, expected: null },
+    { label: "complete", input: { rawInput: { command: "git status" } }, expected: "auto-approved shell:git (always allowed)" },
+    { label: "chained", input: { rawInput: { command: "git status; curl x" } }, expected: null },
+    { label: "substitution", input: { rawInput: { command: "git status $(curl x)" } }, expected: null },
+    { label: "clipped", input: { rawInput: { command: `git status ${"x".repeat(250)}` } }, expected: null },
+  ])("actual ACP $label input reaches standing-grant admission without title fallback", async ({ input, expected }) => {
+    process.env.FAKE_ACP_MODE = "permission";
+    const ownedCli = join(scratch, "permission-cli.ts");
+    const original = readFileSync(FAKE_CLI, "utf8");
+    const literal = '{ kind: "execute", rawInput: { command: "echo hi" }, title: "echo hi" }';
+    expect(original).toContain(literal);
+    writeFileSync(ownedCli, original.replaceAll(literal, JSON.stringify({ kind: "execute", title: "git status", ...input })));
+    chmodSync(ownedCli, 0o755);
+    instance = await GrokAgentDriver.create({ instanceId: "permission-provenance", displayName: "Owned provenance", environment: {}, enabled: true, config: { cli: ownedCli, fullAuto: false } });
+    recorder = recordEvents(instance.adapter);
+    await instance.adapter.sendTurn({ threadId: "t-command-proof", text: "go" });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    if (opened.type !== "request.opened") throw new Error("missing real permission");
+    expect(autoDecision({ alwaysAllow: ["shell:git"] }, opened.tool, opened.summary, { command: opened.command })).toBe(expected);
+    await instance.adapter.respondToRequest("t-command-proof", opened.requestId!, { behavior: "deny" });
+    expect(await recorder.until((event) => event.type === "request.resolved")).toMatchObject({ behavior: "deny", source: "user" });
+    await recorder.until((event) => event.type === "turn.completed");
   });
 
   it("grok fails closed when the CLI advertises no cached_token (needs login)", async () => {

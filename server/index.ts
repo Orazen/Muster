@@ -59,6 +59,7 @@ import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, da
 import { scanBotSecurity } from "./security-scan.ts";
 import { PeerCapabilities, type PeerLease } from "./peer-capabilities.ts";
 import { ConnectorCapabilities, installationAppsAllowed, type ConnectorLease } from "./connector-capabilities.ts";
+import { connectorGateIntent, requestConnectorCard, resolveConnectorAction, dismissStaleConnectorCards, cancelConnectorApprovalsFor, type ConnectorGateBus } from "./connector-gate.ts";
 import { StopCleanupRegistry, STOP_CLEANUP_PENDING, STOP_CLEANUP_STALE, STOP_CLEANUP_PENDING_MESSAGE, STOP_CLEANUP_STALE_MESSAGE, STOP_CLEANUP_RESTART_SETTLED_MESSAGE, STOP_CLEANUP_RESTART_UNRESOLVED_MESSAGE, settleInterruptedStopCleanups } from "./stop-cleanup.ts";
 import { installObscuraLocal, resolveObscuraMount, OBSCURA_TOOLS } from "./obscura.ts";
 import { legalPageFor, withVerificationMeta } from "./legal-pages.ts";
@@ -241,6 +242,12 @@ import {
   PUBLIC_BASE_URL,
   primaryUserId,
   findUserById,
+  mailboxProofForPairing,
+  PAIRING_MAILBOX_PROOF_HEADER,
+  encodePairingMailboxProof,
+  decodePairingMailboxProof,
+  pairedIdentitySchema,
+  PairingIdentityConflict,
   pairCloudUrl,
   createBridgedUser,
   mintSession,
@@ -671,6 +678,7 @@ const settledPeerEvents = new WeakSet<RuntimeEvent>();
 bus.subscribe((event) => {
   foregroundCallDispatch.onEvent(event);
   connectorCapabilities.onEvent(event);
+  cancelStaleConnectorHolds();
   if (peerCapabilities.onEvent(event)) settledPeerEvents.add(event);
 });
 
@@ -723,6 +731,79 @@ function connectorLeaseValid(lease: ConnectorLease): boolean {
     botAppsAllowed(owner.bot) && peerOwnerOf(owner.bot) === lease.ownerId;
   if (!valid) connectorCapabilities.revoke(lease);
   return valid;
+}
+
+// Exact-frame execution permits are process-owned, short-lived and single-use.
+// Neither argument values nor permits enter cards, persistent state or logs.
+const connectorRpcFrame = z.object({ jsonrpc: z.literal("2.0"), id: z.union([z.string(), z.number().finite()]).optional(),
+  method: z.string(), params: z.json().optional() }).catchall(z.json());
+const connectorCallParams = z.object({ name: z.string(), arguments: z.json().optional() }).passthrough();
+const connectorPermitHeader = "x-muster-connector-permit";
+const connectorPermitSchema = z.string().regex(/^[a-f0-9]{64}$/);
+interface ConnectorExecutionPermit { lease: ConnectorLease; digest: string; current: () => boolean; expiresAt: number; timer: ReturnType<typeof setTimeout> }
+const CONNECTOR_MAX_OUTSTANDING_APPROVALS = 128;
+const CONNECTOR_MAX_LEASE_APPROVALS = 8;
+const connectorExecutionPermits = new Map<string, ConnectorExecutionPermit>();
+const connectorHolds = new Map<AbortController, { lease: ConnectorLease; current: () => boolean }>();
+const connectorApprovalRequests = new Map<string, ConnectorLease>();
+function connectorFrameDigest(frame: JsonValue): string { return createHash("sha256").update(JSON.stringify(frame)).digest("hex"); }
+function connectorCardOwnerOf(bot: { ownerId?: string }): string { return bot.ownerId || peerOwnerOf(bot); }
+function connectorAuthority(lease: ConnectorLease, preparingSession = false): () => boolean {
+  const ownerId = connectorCardOwnerOf(store.bot(lease.botId) ?? {});
+  const operatorId = primaryUserId();
+  const account = operatorId ? findUserById(operatorId) : null;
+  const configuration = cfg.composio;
+  // Approval pins the whole config. During execution, only this relay's checked
+  // lazy session identifiers may change; the consumer separately pins their state.
+  const backend = () => JSON.stringify([cfg.openConnector, preparingSession ? cfg.composio?.apiKey : cfg.composio,
+    process.env.OMB_COMPOSIO_API, process.env.OMB_COMPOSIO_TOOLKITS_API,
+    process.env.OMB_COMPOSIO_BROKER_URL, process.env.OMB_COMPOSIO_BROKER_TOKEN,
+    process.env.OMB_OPENCONNECTOR_URL, process.env.OMB_OPENCONNECTOR_TOKEN]);
+  const fingerprint = backend();
+  return () => {
+    const current = operatorId ? findUserById(operatorId) : null;
+    const conversation = connectorThread(lease.botId, lease.threadId);
+    return !!conversation && connectorCardOwnerOf(conversation.bot) === ownerId &&
+      (!conversation.group || (conversation.group.busyBotId === lease.botId && connectorCardOwnerOf(conversation.group) === ownerId)) && connectorLeaseValid(lease) && primaryUserId() === operatorId &&
+      current?.id === account?.id && current?.email === account?.email && backend() === fingerprint &&
+      (!preparingSession || cfg.composio === configuration);
+  };
+}
+function discardConnectorPermit(token: string): void {
+  const permit = connectorExecutionPermits.get(token);
+  if (!permit) return;
+  connectorExecutionPermits.delete(token);
+  clearTimeout(permit.timer);
+}
+function connectorApprovalCapacity(lease: ConnectorLease): boolean {
+  const pending = [...connectorHolds.values(), ...connectorExecutionPermits.values()];
+  return pending.length < CONNECTOR_MAX_OUTSTANDING_APPROVALS &&
+    pending.filter(item => item.lease === lease).length < CONNECTOR_MAX_LEASE_APPROVALS;
+}
+function cancelStaleConnectorHolds(): void {
+  for (const [controller, held] of connectorHolds) if (!held.current()) controller.abort();
+  for (const [token, permit] of connectorExecutionPermits) {
+    if (Date.now() >= permit.expiresAt || !permit.current()) discardConnectorPermit(token);
+  }
+}
+function consumeConnectorPermit(token: string | string[] | undefined, lease: ConnectorLease, frame: JsonValue): boolean {
+  const parsed = connectorPermitSchema.safeParse(token);
+  if (!parsed.success) return false;
+  const permit = connectorExecutionPermits.get(parsed.data);
+  if (!permit) return false;
+  // Burn even a mismatched attempt; a mutation cannot leave usable consent.
+  discardConnectorPermit(parsed.data);
+  return permit.lease === lease && Date.now() < permit.expiresAt && permit.current() && permit.digest === connectorFrameDigest(frame);
+}
+function connectorAnswerCard(threadId: string, requestId: string) {
+  return store.messagesFor(threadId).find(message => message.card?.tool === "connector_call" && message.card.requestId === requestId)?.card;
+}
+async function connectorAnswerOwner(req: IncomingMessage, expectedUserId: string | undefined): Promise<string | null> {
+  if (!SELF_HOSTED) return "local";
+  const headers = new Headers();
+  if (req.headers.cookie) headers.set("cookie", req.headers.cookie);
+  const current = await auth.api.getSession({ headers, query: { disableCookieCache: true, disableRefresh: true } }).catch(() => null);
+  return current && expectedUserId && current.user.id === expectedUserId && current.session.userId === expectedUserId ? expectedUserId : null;
 }
 
 async function connectedAppsIntegration(botId: string, threadId: string, instanceId: string) {
@@ -864,6 +945,8 @@ function stopPeerDispatch(botId: string) {
   const lease = peerCapabilities.forBot(botId);
   peerCapabilities.revokeBot(botId);
   connectorCapabilities.revokeBot(botId);
+  cancelStaleConnectorHolds();
+  cancelConnectorApprovalsFor(connectorApprovalBus, botId);
   cancelConnectorResumes(botId);
   cancelPeerApprovalsFor(botId);
   let queuedCanceled = true;
@@ -1093,6 +1176,7 @@ const publicBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => ({
 // endpoints whose callers need the transcript (task create/switch, imports)
 // still send their richer payload on top.
 store.onChange((change) => {
+  cancelStaleConnectorHolds();
   switch (change.type) {
     case "message":
       broadcast({ kind: "message", threadId: change.threadId, message: change.message });
@@ -1959,6 +2043,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const autoApproved = permission && asker && event.requestId
         ? autoDecision(asker, event.tool, event.summary, {
             unattended: isUnattended(asker.id),
+            command: event.command,
           })
         : null;
       // Turn-scoped screen-action budget (study slice 3): once the turn has
@@ -2925,28 +3010,6 @@ async function startTurn(
     releaseSlot(bot.id, threadId);
     throw err;
   };
-  // Multi-tenant engine guard: a turn may only run on credentials that
-  // belong to the bot's owner. Two legitimate shapes: the operator's own
-  // engines on the primary account, and per-user vault engines — instance
-  // ids of the form `providerApi:<userId>`, created by adding a key under
-  // Settings → Providers. The old blanket refusal predated the vault and
-  // dead-ended users who had already brought their own keys; now only a
-  // genuinely foreign engine (the operator's fleet, or another user's
-  // vault) refuses — and it says exactly how to fix it, never a dead end.
-  if (SELF_HOSTED && bot.ownerId && primaryUserId() && bot.ownerId !== primaryUserId()) {
-    const instanceId = bot.modelSelection?.instanceId ?? "";
-    const engineOwner = userInstanceOwner(instanceId);
-    if (engineOwner !== bot.ownerId) {
-      fail(Object.assign(
-        new Error(
-          engineOwner
-            ? "This bot points at another user's engine — choose one of your own under Settings → Providers, then send again."
-            : "This bot has no model key of your own to run on — add one under Settings → Providers (Anthropic, OpenAI, DeepSeek, OpenRouter, …), then send again.",
-        ),
-        { status: 403 },
-      ));
-    }
-  }
   // a webhook turn, or one inherited from a bot already running unattended
   if (opts?.automationSource === "webhook" || opts?.unattended) markUnattended(bot.id);
   // a person typing into this bot ends the unattended window immediately
@@ -2956,7 +3019,19 @@ async function startTurn(
   const commsDepth = opts?.commsDepth ?? 0;
   const lease = peerCapabilities.begin({ botId: bot.id, threadId, taskId: task.threadId, ownerId: peerOwnerOf(bot), depth: commsDepth });
   dispatchLease = lease;
+  let admittedInstanceId: string | undefined;
   const requireDispatch = () => {
+    if (admittedInstanceId !== undefined && SELF_HOSTED) {
+      const current = store.bot(bot.id);
+      const operator = primaryUserId();
+      // Existing legacy records use the same effective owner as their peer
+      // lease. That fallback grants no foreign account's vault engine.
+      const ownerId = current && (current.ownerId || operator);
+      const engineOwner = userInstanceOwner(admittedInstanceId);
+      if (!ownerId || (engineOwner !== null ? engineOwner !== ownerId : !operator || ownerId !== operator)) {
+        throw Object.assign(new Error("This bot needs a model key owned by its account — choose one under Settings → Providers, then send again."), { status: 403 });
+      }
+    }
     if (!peerLeaseValid(lease) || (opts?.peerGuard && !opts.peerGuard())) {
       throw Object.assign(new Error("dispatch is no longer authorized"), { status: 403 });
     }
@@ -3029,6 +3104,19 @@ async function startTurn(
     : opts?.fallbackSelection ? registry.get(opts.fallbackSelection.instanceId) : await resolveInstanceForBot(bot);
   requireDispatch();
   if (!instance) {
+    // Resolve/heal the owner's actual engine first. An absent foreign or
+    // deployment selection still needs an ownership refusal, while an
+    // unavailable owner-scoped engine keeps its truthful setup error.
+    const current = store.bot(bot.id);
+    const operator = primaryUserId();
+    const ownerId = current && (current.ownerId || operator);
+    const selectedOwner = userInstanceOwner(opts?.fallbackSelection?.instanceId ?? current?.modelSelection.instanceId ?? "");
+    if (SELF_HOSTED && opts?.runOn !== "cloud" &&
+        (!ownerId || (selectedOwner !== null ? selectedOwner !== ownerId : !operator || ownerId !== operator))) {
+      failVisible(Object.assign(new Error(selectedOwner
+        ? "This bot points at another user's engine. Pick one of your own models under Settings → Providers."
+        : "This bot has no model key of your own to run on — add one under Settings → Providers (Anthropic, OpenAI, DeepSeek, OpenRouter, …), then send again."), { status: 403 }));
+    }
     failVisible(Object.assign(
       new Error(
         opts?.runOn === "cloud"
@@ -3039,6 +3127,11 @@ async function startTurn(
     ));
   }
   const instanceId = instance.instanceId;
+  // Check the actual resolved engine, including healed selections and cloud
+  // runners. An unresolved operator never grants deployment credentials.
+  // Re-run this same ownership check after later awaits before dispatch.
+  admittedInstanceId = instanceId;
+  requireDispatch();
   const model = opts?.runOn === "cloud" ? instance.models.default : bot.modelSelection.model;
   // a cloud routine borrows the instance default model, so it borrows no
   // per-bot effort either
@@ -4036,12 +4129,17 @@ const approvalBus: ApprovalBus = {
   broadcast,
   recordDecision: (entry) => decisions.record(entry.botId, entry),
 };
+const connectorApprovalBus: ConnectorGateBus = {
+  store,
+  recordDecision: entry => { decisions.record(entry.botId, entry); },
+};
 
 // Approvals live only in memory, so any peer card still open on disk is one
 // whose resolver died with the previous process. Left alone it can never be
 // answered, and the composer stays disabled behind it — settle them at boot.
 {
   const stale = dismissStalePeerCards(approvalBus);
+  dismissStaleConnectorCards(connectorApprovalBus);
   if (stale) console.log(`peer approvals: dismissed ${stale} card(s) left by a previous run`);
 }
 
@@ -5009,9 +5107,9 @@ function html(res: ServerResponse, status: number, body: string) {
 }
 
 // ── public viral pages ─────────────────────────────────────────────────
-// Shared pages are self-contained HTML with inline styles: they must look
-// right pasted into any chat with zero external requests. All dynamic
-// values are HTML-escaped — bot names are user input.
+// Public pages retain inline reading and navigation styles without an app runtime.
+// Same-origin site assets enhance the shared typography and presentation.
+// All dynamic values are HTML-escaped — bot names are user input.
 
 function escapeHtml(value: string): string {
   return value
@@ -5027,27 +5125,42 @@ function pageShell(title: string, body: string, headExtra = ""): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 ${headExtra}
+<meta name="theme-color" content="#f4f2e9">
+<link rel="icon" href="/landing-workroom/v1/favicon.svg" type="image/svg+xml">
 <style>
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#f5f5f5;
-       display:flex;align-items:center;justify-content:center;min-height:100vh}
-  .card{max-width:420px;width:calc(100% - 2rem);padding:2.5rem;border-radius:20px;background:#141419;
-        border:1px solid #26262e;text-align:center}
-  .kicker{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#8a8a93;margin-bottom:1rem}
-  h1{font-size:2rem;margin:.2em 0;font-weight:800;background:linear-gradient(90deg,#ff7a45,#ffb27d);
-     -webkit-background-clip:text;background-clip:text;color:transparent}
-  .stat{font-size:2.6rem;font-weight:800;margin:.6rem 0 .1rem}
-  .stat-label{font-size:12px;color:#8a8a93;text-transform:uppercase;letter-spacing:.12em}
-  .row{display:flex;gap:1.5rem;justify-content:center;margin:1.5rem 0;flex-wrap:wrap}
-  .muted{color:#a1a1a6;font-size:.95rem;line-height:1.5}
-  pre{text-align:left;background:#0a0a0f;border:1px solid #26262e;border-radius:12px;padding:1rem;
-      font-size:12px;overflow-x:auto;color:#d4d4d8}
-  a.btn{display:inline-block;margin-top:1.25rem;padding:.75rem 1.6rem;border-radius:10px;background:#ff7a45;
-        color:#0a0a0f;font-weight:700;text-decoration:none}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin-top:1.5rem;text-align:left}
-  .item{border:1px solid #26262e;border-radius:14px;padding:1rem;background:#141419}
-  .item h3{margin:.1rem 0 .3rem;font-size:1rem}
-  .item p{margin:0;color:#a1a1a6;font-size:.85rem;line-height:1.45}
-</style></head><body>${body}</body></html>`;
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.6 Arial,sans-serif;background:#f4f2e9;color:#252e26;overflow-wrap:anywhere}
+  a{color:inherit;text-underline-offset:3px}a:focus-visible{outline:2px solid #252e26;outline-offset:5px}
+  .site-skip{position:fixed;top:12px;left:16px;z-index:100;transform:translateY(-180%);padding:10px 18px;background:#252e26;color:#f4f2e9;border-radius:6px}.site-skip:focus{transform:translateY(0)}
+  .site-header,.site-footer{width:min(1320px,calc(100% - 48px));margin-inline:auto;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+  .site-header{padding-block:24px;border-bottom:1px solid #d5d8ca}
+  .site-brand{display:inline-flex;align-items:center;gap:5px;font-size:28px;font-weight:700;line-height:1;text-decoration:none}.site-brand__star{font-size:23px}
+  .site-nav{display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-left:auto;font-size:14px}.site-cta{display:inline-flex;align-items:center;gap:24px;padding:12px 20px;border:1px solid #c64215;border-radius:6px;background:#c64215;color:#fffef7;font-weight:600;text-decoration:none}
+  .site-footer{margin-top:48px;padding-block:30px;border-top:1px solid #d5d8ca;color:#59644e;font-size:13px}.site-footer p{margin:0}.site-footer nav{display:flex;gap:22px;flex-wrap:wrap;margin-left:auto}.site-footer small{width:100%;font-size:11px}
+  @media(max-width:600px){.site-header,.site-footer{width:calc(100% - 40px);gap:18px}.site-nav{width:100%;margin:0;justify-content:space-between;gap:12px;font-size:12px}.site-cta{padding:10px 13px;gap:12px}.site-footer nav{margin-left:0;width:100%}}
+  .public-main{display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;min-height:55vh;padding:64px 24px}
+  .public-main>.card{min-width:0;max-width:720px;width:100%;padding:44px;border:1px solid #d5d8ca;border-radius:8px;background:#fffef7;text-align:center}
+  .public-main .kicker{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:#59644e;margin-bottom:1rem}
+  .public-main h1{font-size:clamp(32px,5vw,52px);line-height:1.1;margin:.2em 0;font-weight:650;letter-spacing:-.035em}
+  .public-main .stat{font-size:2.6rem;font-weight:700;margin:.6rem 0 .1rem;font-family:var(--site-display,Georgia,serif)}
+  .public-main .stat-label{font-size:11px;color:#59644e;text-transform:uppercase;letter-spacing:.1em}
+  .public-main .row{display:flex;gap:1.5rem;justify-content:center;margin:1.5rem 0;flex-wrap:wrap}
+  .public-main .muted{color:#59644e;font-size:.95rem;line-height:1.6}
+  .public-main a.muted{color:#59644e!important}
+  .public-main pre{max-width:100%;text-align:left;background:#f4f2e9;border:1px solid #d5d8ca;border-radius:6px;padding:1rem;font-size:12px;overflow-x:auto;color:#252e26}
+  .public-main .btn{display:inline-block;margin-top:1.25rem;padding:.85rem 1.5rem;border:1px solid #c64215;border-radius:6px;background:#c64215;color:#fffef7;font:600 14px/1.5 var(--site-body,Arial,sans-serif);text-decoration:none}
+  .public-main .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));gap:1rem;margin-top:1.5rem;text-align:left}
+  .public-main .item{border:1px solid #d5d8ca;border-radius:6px;padding:24px;background:#fffef7}
+  .public-main .item h3{margin:0 0 10px;font-size:22px;line-height:1.15}
+  .public-main .item p{margin:0;color:#59644e;font-size:.95rem;line-height:1.55}
+  @media(max-width:600px){.public-main{padding:36px 20px}.public-main>.card{padding:26px 20px}.public-main .row{gap:1rem}}
+</style>
+<link rel="stylesheet" href="/public-site/v1/site.css"></head><body>
+<a class="site-skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a><nav class="site-nav" aria-label="Main navigation"><a href="/docs">Documentation</a><a href="/download.html">Download</a><a class="site-cta" href="/app">Open Muster <span aria-hidden="true">↗</span></a></nav></header>
+<main class="public-main" id="main">${body}</main>
+<footer class="site-footer"><a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p><nav aria-label="Footer"><a href="/docs">Documentation</a><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a></nav><small>© 2026 Muster · BSL 1.1</small></footer>
+</body></html>`;
 }
 
 function wrappedSharePage(card: { weekOf: string; headline: string; totalTurns: number; totalTokens: number; costUsd: number | null; topBot: string | null; activeBots: number }, text: string): string {
@@ -5935,6 +6048,10 @@ let requestUserEmail = "";
       // decoder that reads this response first.
       res.setHeader("x-muster-exchange-version", String(result.version));
       res.setHeader("cache-control", "no-store");
+      const proof = mailboxProofForPairing(result.identity.userId);
+      if (proof && proof.email.toLowerCase() === result.identity.email.trim().toLowerCase()) {
+        res.setHeader(PAIRING_MAILBOX_PROOF_HEADER, encodePairingMailboxProof(proof));
+      }
       return json(res, 200, { email: result.identity.email, name: result.identity.name });
     }
 
@@ -6006,16 +6123,24 @@ let requestUserEmail = "";
       } catch {
         return json(res, 502, { error: `could not reach ${cloudUrl} — check your connection` });
       }
-      // SAFETY: exchange success is JSON {email,name}; failure {error};
-      // non-JSON bodies resolve null through the catch.
-      const errBody = (await upstream.json().catch(() => null)) as
-        { email?: string; name?: string; error?: string } | null;
-      if (!upstream.ok || !errBody?.email) {
+      const upstreamBody: unknown = await upstream.json().catch(() => null);
+      const identity = pairedIdentitySchema.pick({ email: true, name: true }).strict().safeParse(upstreamBody);
+      if (!upstream.ok || !identity.success) {
+        const failure = z.object({ error: z.string() }).safeParse(upstreamBody);
         return json(res, upstream.status === 200 ? 502 : upstream.status, {
-          error: errBody?.error ?? "the cloud rejected that sign-in",
+          error: failure.success ? failure.data.error : "the cloud rejected that sign-in",
         });
       }
-      const userId = createBridgedUser(errBody.email, errBody.name ?? "");
+      // Provenance is read only from the same configured upstream response,
+      // never from the renderer's exchange body. Older sources without it can
+      // provision an unverified first account but cannot collide with one.
+      const mailboxProof = decodePairingMailboxProof(upstream.headers.get(PAIRING_MAILBOX_PROOF_HEADER), identity.data.email);
+      let userId: string;
+      try { userId = createBridgedUser(identity.data.email, identity.data.name ?? "", mailboxProof); }
+      catch (error) {
+        if (error instanceof PairingIdentityConflict) return json(res, 409, { error: error.message });
+        throw error;
+      }
       const { token, expiresAt } = mintSession(userId, {
         ip: req.socket.remoteAddress ?? undefined,
         userAgent: req.headers["user-agent"],
@@ -6024,7 +6149,7 @@ let requestUserEmail = "";
         "Set-Cookie",
         bridgedSessionCookie(req, token, expiresAt),
       );
-      return json(res, 200, { ok: true, email: errBody.email });
+      return json(res, 200, { ok: true, email: identity.data.email });
     }
     if (method === "POST" && path === "/oauth/attempt/begin") {
       // The renderer asks its OWN local server to mint the attempt: state +
@@ -6082,7 +6207,7 @@ let requestUserEmail = "";
         const userId = consumeCode(verifyCode, clientIpForLimiting(req));
         const user = findUserById(userId);
         if (!user) return json(res, 404, { error: "pairing account no longer exists" });
-        return json(res, 200, { email: user.email, name: user.name });
+        return json(res, 200, { email: user.email, name: user.name, mailboxProof: mailboxProofForPairing(userId) });
       } catch (e) {
         if (e instanceof VerifyError) return json(res, e.status, { error: e.message });
         throw e;
@@ -6098,7 +6223,7 @@ let requestUserEmail = "";
       }
       const body = await readBody(req);
       const code = isText(body.code) ? body.code : "";
-      let identity: { email?: string; name?: string };
+      let identity: z.infer<typeof pairedIdentitySchema>;
       try {
         const upstream = await fetch(
           `${cloudUrl.replace(/\/$/, "")}/api/pair/verify`,
@@ -6122,14 +6247,21 @@ let requestUserEmail = "";
             error: err?.error ?? "the cloud rejected that pairing code",
           });
         }
-        // SAFETY: a 200 from the cloud's pair/verify is JSON carrying the
-        // account identity fields; both are optional in the contract.
-        identity = (await upstream.json()) as { email?: string; name?: string };
+        // Parse the configured source's account and optional mailbox proof
+        // separately; a valid remote account alone conveys no operator role.
+        const parsed = pairedIdentitySchema.safeParse(await upstream.json());
+        if (!parsed.success) return json(res, 502, { error: "the cloud returned an invalid pairing identity" });
+        identity = parsed.data;
       } catch {
         return json(res, 502, { error: `could not reach ${cloudUrl} — check your connection` });
       }
       if (!identity.email) return json(res, 400, { error: "the cloud returned no identity for that code" });
-      const userId = createBridgedUser(identity.email, identity.name ?? "");
+      let userId: string;
+      try { userId = createBridgedUser(identity.email, identity.name ?? "", identity.mailboxProof); }
+      catch (error) {
+        if (error instanceof PairingIdentityConflict) return json(res, 409, { error: error.message });
+        throw error;
+      }
       const { token, expiresAt } = mintSession(userId, {
         ip: req.socket.remoteAddress ?? undefined,
         userAgent: req.headers["user-agent"],
@@ -6182,7 +6314,13 @@ let requestUserEmail = "";
       // install may have none — provision one so the scan always lands
       // somewhere, exactly like pairing redeem provisions a bridged user.
       let ownerId = primaryUserId();
-      if (!ownerId) ownerId = createBridgedUser("owner@muster.local", "Owner");
+      if (!ownerId) {
+        try { ownerId = createBridgedUser("owner@muster.local", "Owner"); }
+        catch (error) {
+          if (error instanceof PairingIdentityConflict) return json(res, 409, { error: error.message });
+          throw error;
+        }
+      }
       const owner = findUserById(ownerId);
       if (!owner) return json(res, 500, { error: "owner account missing — check server logs" });
       const { token, expiresAt } = mintSession(ownerId, {
@@ -6678,27 +6816,125 @@ let requestUserEmail = "";
       // Connector credentials deliberately have no peer authority.
       const connectorLease = connectorCapabilities.resolve(req.headers.authorization);
       if (!connectorLease || !connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
+      if (method === "POST" && path === "/api/internal/connectors/approve") {
+        const body = await readBody(req);
+        if (body.botId !== connectorLease.botId || body.threadId !== connectorLease.threadId) return json(res, 403, { error: "conversation does not belong to this credential" });
+        const frame = connectorRpcFrame.safeParse(body.frame);
+        const params = frame.success && frame.data.method === "tools/call" ? connectorCallParams.safeParse(frame.data.params) : null;
+        if (!frame.success || frame.data.id === undefined || !params?.success) return json(res, 400, { error: "a complete executable JSON-RPC request is required" });
+        const intent = connectorGateIntent(params.data.name, params.data.arguments);
+        if (intent.kind !== "write") return json(res, 400, { error: "this frame does not require executable approval" });
+        const current = connectorAuthority(connectorLease);
+        cancelStaleConnectorHolds();
+        if (!current()) return json(res, 401, { error: "unauthorized" });
+        if (!connectorApprovalCapacity(connectorLease)) return json(res, 409, { approved: false, error: "connector approval capacity is occupied" });
+        const owner = connectorThread(connectorLease.botId, connectorLease.threadId)!;
+        const controller = new AbortController();
+        let permitToken: string | undefined;
+        let requestId: string | undefined;
+        const cleanup = () => {
+          connectorHolds.delete(controller);
+          req.removeListener("aborted", abort);
+          res.removeListener("close", closed);
+          res.removeListener("finish", cleanup);
+        };
+        const abort = () => {
+          controller.abort();
+          if (permitToken) discardConnectorPermit(permitToken);
+        };
+        const closed = () => { if (!res.writableFinished) abort(); cleanup(); };
+        req.once("aborted", abort);
+        res.once("close", closed);
+        res.once("finish", cleanup);
+        connectorHolds.set(controller, { lease: connectorLease, current });
+        try {
+          if (req.aborted || res.destroyed) abort();
+          const held = requestConnectorCard(connectorApprovalBus,
+            { id: connectorLease.botId, threadId: connectorLease.threadId },
+            { actions: intent.actions, toolkits: intent.toolkits, argsSummary: intent.argsSummary }, undefined,
+            { botId: connectorLease.botId, threadId: connectorLease.threadId, ownerId: connectorCardOwnerOf(owner.bot), current, signal: controller.signal });
+          requestId = held.card.requestId;
+          connectorApprovalRequests.set(requestId, connectorLease);
+          const decision = await held.decision;
+          connectorHolds.delete(controller);
+          if (res.destroyed) return;
+          if (controller.signal.aborted || decision !== "allow" || !current() || !connectorApprovalCapacity(connectorLease)) return json(res, 200, { approved: false });
+          permitToken = randomBytes(32).toString("hex");
+          const token = permitToken;
+          const expiresAt = Math.min(connectorLease.expiresAt, Date.now() + 30_000);
+          const permit: ConnectorExecutionPermit = { lease: connectorLease, digest: connectorFrameDigest(body.frame), current, expiresAt,
+            timer: setTimeout(() => { if (connectorExecutionPermits.get(token) === permit) discardConnectorPermit(token); }, Math.max(1, expiresAt - Date.now())) };
+          permit.timer.unref();
+          connectorExecutionPermits.set(token, permit);
+          return json(res, 200, { approved: true, permit: permitToken });
+        } catch {
+          if (!res.destroyed) return json(res, 409, { approved: false, error: "connector approval is no longer current" });
+        } finally {
+          connectorHolds.delete(controller);
+          if (requestId) connectorApprovalRequests.delete(requestId);
+          if (res.destroyed || res.writableFinished) cleanup();
+        }
+        return;
+      }
       if (method === "POST" && path === "/api/internal/connectors/mcp") {
         const body = await readBody(req);
         if (!connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
+        const token = req.headers[connectorPermitHeader];
+        const approved = token !== undefined && consumeConnectorPermit(token, connectorLease, body);
+        if (token !== undefined && !approved) return json(res, 403, { error: "current approval for this exact connector frame is required" });
+        const frame = connectorRpcFrame.safeParse(body);
+        if (!frame.success) return json(res, 400, { error: "a complete JSON-RPC frame is required" });
+        if (frame.data.method === "tools/call") {
+          const params = connectorCallParams.safeParse(frame.data.params);
+          if (!params.success || frame.data.id === undefined) return json(res, 400, { error: "an executable request identity is required" });
+          const intent = connectorGateIntent(params.data.name, params.data.arguments);
+          if (intent.kind === "refuse") return json(res, 400, { error: intent.reason });
+          if (intent.kind === "write" && process.env.MUSTER_CONNECTOR_APPROVAL !== "off" && !approved) {
+            return json(res, 403, { error: "current approval for this exact connector frame is required" });
+          }
+        }
+        if (res.destroyed || !connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
         const sessionId = Array.isArray(req.headers["mcp-session-id"])
           ? req.headers["mcp-session-id"][0]
           : req.headers["mcp-session-id"];
-        // Same priority as the browser routes: the Muster Connector runtime
-        // when configured, the Composio session/broker otherwise.
-        const upstream = openconnector.configured(cfg)
-          ? await openconnector.relayMcp(cfg, body, sessionId)
-          : await composio.relayMcp(cfg, body, sessionId);
-        if (!connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
-        const headers = upstream.transportSessionId
-          ? {
-              "content-type": upstream.contentType,
-              "cache-control": "no-store",
-              "mcp-session-id": upstream.transportSessionId,
-            }
-          : { "content-type": upstream.contentType, "cache-control": "no-store" };
-        res.writeHead(upstream.status, headers);
-        return res.end(Buffer.from(upstream.bytes));
+        const current = connectorAuthority(connectorLease, true);
+        cancelStaleConnectorHolds();
+        if (!current()) return json(res, 401, { error: "unauthorized" });
+        if (!connectorApprovalCapacity(connectorLease)) return json(res, 409, { error: "connector execution capacity is occupied" });
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        const closed = () => { if (!res.writableFinished) abort(); };
+        req.once("aborted", abort);
+        res.once("close", closed);
+        connectorHolds.set(controller, { lease: connectorLease, current });
+        try {
+          if (req.aborted || res.destroyed) abort();
+          // Same backend priority as the browser routes. Authority follows the
+          // request through setup to the actual upstream executable fetch.
+          const authority = { current, signal: controller.signal };
+          const upstream = openconnector.configured(cfg)
+            ? await openconnector.relayMcp(cfg, body, sessionId, authority)
+            : await composio.relayMcp(cfg, body, sessionId, authority);
+          if (res.destroyed) return;
+          if (controller.signal.aborted || !current()) return json(res, 401, { error: "unauthorized" });
+          const headers = upstream.transportSessionId
+            ? {
+                "content-type": upstream.contentType,
+                "cache-control": "no-store",
+                "mcp-session-id": upstream.transportSessionId,
+              }
+            : { "content-type": upstream.contentType, "cache-control": "no-store" };
+          res.writeHead(upstream.status, headers);
+          return res.end(Buffer.from(upstream.bytes));
+        } catch (error) {
+          if (res.destroyed) return;
+          if (controller.signal.aborted || !current()) return json(res, 401, { error: "unauthorized" });
+          throw error;
+        } finally {
+          connectorHolds.delete(controller);
+          req.removeListener("aborted", abort);
+          res.removeListener("close", closed);
+        }
       }
       if (method === "POST" && path === "/api/internal/connectors/request") {
         const body = await readBody(req);
@@ -9295,6 +9531,16 @@ let requestUserEmail = "";
       const body = await readBody(req);
       const behavior = requestBehavior(body.behavior);
       if (!behavior) return json(res, 400, { error: "behavior must be allow, deny, or answer" });
+      const connectorOwnerId = await connectorAnswerOwner(req, requestUserId);
+      const currentBot = store.bot(m[1]);
+      if (!connectorOwnerId || !currentBot || !ownsRecord(currentBot)) return json(res, 404, { error: "no such bot" });
+      if (resolveConnectorAction(connectorApprovalBus, String(body.requestId), behavior,
+          { botId: currentBot.id, threadId: currentBot.threadId, ownerId: SELF_HOSTED ? connectorOwnerId : connectorCardOwnerOf(currentBot) })) {
+        return json(res, 200, { ok: true, outcome: connectorAnswerCard(currentBot.threadId, String(body.requestId))?.answered === "allow" ? "allowed-once" : "rejected" });
+      }
+      if (connectorApprovalRequests.has(String(body.requestId)) || connectorAnswerCard(currentBot.threadId, String(body.requestId))) {
+        return json(res, 409, { error: "no current connector approval belongs to this conversation" });
+      }
       // peer-approval intercept: harness-native cards carry a requestId
       // that lives in peer-approval's pending map. Resolve them here so
       // the provider adapter never sees a request it didn't raise.
@@ -9317,6 +9563,19 @@ let requestUserEmail = "";
       const group = store.groupByThread(threadId);
       const owner = group ? (group.busyBotId ? store.bot(group.busyBotId) : undefined) : store.botByThread(threadId);
       if (!owner) return json(res, 404, { error: "nothing is waiting on an answer in this conversation" });
+      const connectorOwnerId = await connectorAnswerOwner(req, requestUserId);
+      const currentGroup = store.groupByThread(threadId);
+      const currentOwner = currentGroup ? (currentGroup.busyBotId ? store.bot(currentGroup.busyBotId) : undefined) : store.botByThread(threadId);
+      if (!connectorOwnerId || !currentOwner || !ownsRecord(currentOwner) || (currentGroup && !ownsRecord(currentGroup))) {
+        return json(res, 404, { error: "nothing is waiting on an answer in this conversation" });
+      }
+      if (resolveConnectorAction(connectorApprovalBus, String(body.requestId), behavior,
+          { botId: currentOwner.id, threadId, ownerId: SELF_HOSTED ? connectorOwnerId : connectorCardOwnerOf(currentOwner) })) {
+        return json(res, 200, { ok: true, outcome: connectorAnswerCard(threadId, String(body.requestId))?.answered === "allow" ? "allowed-once" : "rejected" });
+      }
+      if (connectorApprovalRequests.has(String(body.requestId)) || connectorAnswerCard(threadId, String(body.requestId))) {
+        return json(res, 409, { error: "no current connector approval belongs to this conversation" });
+      }
       // peer-approval intercept (see /api/bots/:id/respond above).
       if (resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
@@ -11338,11 +11597,14 @@ let requestUserEmail = "";
       return res.end(
         `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
         `<meta name="viewport" content="width=device-width, initial-scale=1">` +
-        `<title>Page not found — Muster Docs</title><link rel="stylesheet" href="/docs/docs.css">` +
-        `</head><body><header class="docs-header"><a class="brand-lockup" href="/">Muster</a>` +
-        `<span class="docs-tag">Docs</span></header>` +
+        `<title>Page not found — Muster Docs</title><meta name="theme-color" content="#f4f2e9">` +
+        `<link rel="icon" href="/landing-workroom/v1/favicon.svg" type="image/svg+xml">` +
+        `<link rel="stylesheet" href="/public-site/v1/site.css"><link rel="stylesheet" href="/docs/docs.css">` +
+        `</head><body class="docs-page"><a class="site-skip" href="#main">Skip to content</a>` +
+        `<header class="site-header docs-header"><a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a>` +
+        `<span class="docs-tag">Docs</span><nav class="site-nav" aria-label="Main navigation"><a href="/docs">Documentation</a><a class="site-cta" href="/app">Open Muster ↗</a></nav></header>` +
         `<div class="docs-shell" style="grid-template-columns:1fr">` +
-        `<main class="docs-content"><h1>Page not found</h1>` +
+        `<main class="docs-content" id="main"><p class="site-eyebrow">A little detour</p><h1>Page not found</h1>` +
         `<p class="lead">That docs page doesn't exist. Head back to the ` +
         `<a href="/docs">documentation overview</a> or the <a href="/">home page</a>.</p>` +
         `</main></div></body></html>`

@@ -10,6 +10,7 @@
 //     — screenshot/exec/open_url, the CUA-on-the-box bridge
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
+import { z } from "zod";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -551,6 +552,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               requestType: ask.kind,
               tool: ask.tool,
               summary: askSummary(ask),
+              command: z.string().max(60000).optional().catch(undefined).parse(ask.input?.command),
               choices: Array.isArray(ask.input.choices) ? ask.input.choices.slice(0, 5) : undefined,
             });
           },

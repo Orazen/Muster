@@ -19,13 +19,13 @@
 .template-intro h1 { margin:18px 0 0; max-width:720px; font:650 clamp(52px,7.2vw,90px)/.98 var(--site-display); letter-spacing:-.065em; }
 .template-intro .sub { max-width:390px; margin:0 0 6px; color:var(--site-muted); font-size:16px; line-height:1.7; }
 .template-intro .sub strong { color:var(--site-ink); font-weight:550; }
-.library-note { padding:22px 26px; margin:0 0 32px; display:flex; justify-content:space-between; align-items:center; gap:24px; background:var(--site-moss); color:var(--site-white); border-radius:8px; font-size:14px; }
+.library-note { padding:22px 26px; margin:0 0 32px; display:flex; justify-content:space-between; align-items:center; gap:24px; background:var(--site-accent); color:var(--site-on-accent); border-radius:8px; font-size:14px; }
 .library-note p { margin:0; max-width:710px; }
-.library-note a { flex:none; color:var(--site-lime); text-decoration:underline; text-underline-offset:4px; }
+.library-note a { flex:none; color:var(--site-on-accent); text-decoration:underline; text-underline-offset:4px; }
 .filters { display:flex; flex-wrap:wrap; gap:8px; padding:0 0 28px; }
 .chip { min-height:39px; border:1px solid var(--site-line); border-radius:6px; padding:8px 13px; background:transparent; font:13px var(--site-body); color:var(--site-muted); cursor:pointer; }
-.chip:hover { border-color:var(--site-moss); }
-.chip[aria-pressed="true"] { background:var(--site-lime); border-color:var(--site-lime); color:var(--site-ink); }
+.chip:hover { border-color:var(--site-accent-text); }
+.chip[aria-pressed="true"] { background:var(--site-accent-soft); border-color:var(--site-accent-soft); color:var(--site-ink); }
 .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; margin:0 0 36px; }
 .card { position:relative; display:flex; flex-direction:column; min-width:0; min-height:292px; padding:28px; border:1px solid var(--site-line); border-radius:9px; background:var(--site-white); }
 .badge { color:var(--site-muted); font-size:10px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; }
@@ -33,12 +33,12 @@
 .card p { flex:1; margin:0 0 28px; color:var(--site-muted); font-size:14px; line-height:1.65; }
 .install { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; padding:14px 0 0; border:0; border-top:1px solid var(--site-line); color:var(--site-ink); font:550 13px var(--site-body); background:transparent; text-align:left; cursor:pointer; }
 .install::after { content:"↗"; font-size:19px; }
-.install:hover { color:var(--site-moss); }
+.install:hover { color:var(--site-accent-text); }
 .install:disabled { cursor:wait; opacity:.65; }
-.copy-status { min-height:26px; margin:0; color:var(--site-moss); font-size:14px; }
-.copy-fallback { margin:12px 0 36px; padding:22px; border:1px solid var(--site-line); border-radius:8px; background:var(--site-lime); }
+.copy-status { min-height:26px; margin:0; color:var(--site-accent-text); font-size:14px; }
+.copy-fallback { margin:12px 0 36px; padding:22px; border:1px solid var(--site-line); border-radius:8px; background:var(--site-accent-soft); }
 .copy-fallback label { display:block; font-weight:600; margin-bottom:10px; }
-.copy-fallback textarea { width:100%; min-height:120px; padding:12px; border:1px solid var(--site-moss); border-radius:5px; background:var(--site-white); color:var(--site-ink); font:14px/1.6 var(--site-body); resize:vertical; }
+.copy-fallback textarea { width:100%; min-height:120px; padding:12px; border:1px solid var(--site-accent-text); border-radius:5px; background:var(--site-white); color:var(--site-ink); font:14px/1.6 var(--site-body); resize:vertical; }
 .template-tail { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:32px 0 68px; color:var(--site-muted); font-size:13px; }
 .template-tail a { color:var(--site-ink); text-decoration:underline; text-underline-offset:4px; }
 .empty { grid-column:1/-1; padding:36px 0; color:var(--site-muted); }
@@ -51,7 +51,7 @@
 <body>
 <a class="site-skip" href="#main">Skip to content</a>
 <header class="site-header">
-  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
+  <a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a>
   <nav class="site-nav" aria-label="Primary"><a href="/teams.html">Teams</a><a href="/templates.html" aria-current="page">Templates</a><a href="/download.html">Download</a><a href="/docs">Docs</a><a class="site-cta" href="/app">Open Muster <span aria-hidden="true">↗</span></a></nav>
 </header>
 <main id="main" class="template-wrap">
@@ -67,7 +67,7 @@
   <div class="template-tail"><span>These are starting ideas. Available actions depend on your connected tools and permissions.</span><a href="mailto:ramagiritharun@gmail.com?subject=Team%20template%20submission">Suggest a team →</a></div>
 </main>
 <footer class="site-footer">
-  <a class="site-brand" href="/" aria-label="Muster home"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 26V6l12 13L28 6v20"/></svg>muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p>
+  <a class="site-brand" href="/" aria-label="Muster home">muster<span class="site-brand__star" aria-hidden="true">✳</span></a><p>Your work. In good company.</p>
   <nav aria-label="Footer"><a href="/switch.html">Switch to Muster</a><a href="/docs">Docs</a><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a></nav>
   <small>© 2026 Orazen</small>
 </footer>

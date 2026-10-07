@@ -385,6 +385,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       requestType: "permission",
       tool: "Bash",
       summary: "rm -rf scratch",
+      command: "rm -rf scratch",
       requestId: "ask-1",
     });
 

@@ -192,7 +192,9 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
     // error, NOT the operator-policy refusal.
     await request(hosted, `/api/bots/${bot.id}`, "PATCH", { modelSelection: { instanceId: `deepseekApi:${alice.id}`, model: "x" } }, alice);
     const past = await request(hosted, `/api/bots/${bot.id}/messages`, "POST", { text: "hello" }, alice);
+    expect(past.status).toBe(409);
     const body = z.object({ error: z.string().optional() }).parse(await past.json());
+    expect(body.error).toContain(`provider instance "deepseekApi:${alice.id}" is unavailable`);
     expect(body.error ?? "").not.toContain("your own model key");
     expect(body.error ?? "").not.toContain("another user's engine");
   });

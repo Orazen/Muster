@@ -5,7 +5,9 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { pairingServerEnvironment, startPairingHarness, waitForOwnedServer } from "../e2e/pairing-harness.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
@@ -128,6 +130,24 @@ posixOnly("real cloud to desktop pairing fixture", () => {
     const response = await request(harness.cloudUrl, "/api/pair/create", {});
     expect(response.status).toBe(401);
     expect(response.headers.getSetCookie()).toHaveLength(0);
+  });
+
+  it("boots with real local mailbox proof, consumed challenges and working replacement password custody", async () => {
+    const db = new DatabaseSync(join(harness.rootDirectory, "cloud", "data", "auth.db"));
+    try {
+      const user = z.object({ id: z.string().min(1), emailVerified: z.literal(1) }).parse(db.prepare('SELECT "id", "emailVerified" FROM "user" WHERE "email" = ?').get(harness.email));
+      expect(user.emailVerified).toBe(1);
+      expect(db.prepare('SELECT "email", "source" FROM "operator_mailbox_proof" WHERE "userId" = ?').get(user.id))
+        .toEqual(expect.objectContaining({ email: harness.email, source: "local-email" }));
+      expect(db.prepare('SELECT count(*) AS n FROM "operator_mailbox_quarantine" WHERE "userId" = ?').get(user.id)?.n).toBe(0);
+      expect(db.prepare('SELECT count(*) AS n FROM "verification" WHERE "identifier" = ? OR ("identifier" LIKE ? AND "value" = ?)')
+        .get(`email-verification-otp-${harness.email}`, "reset-password:%", user.id)?.n).toBe(0);
+      expect(db.prepare('SELECT count(*) AS n FROM "account" WHERE "userId" = ? AND "providerId" = ?').get(user.id, "credential")?.n).toBe(1);
+    } finally { db.close(); }
+    // beforeAll obtained this cookie through actual password sign-in, after
+    // mailbox verification revoked the initial credential and session.
+    const session = await request(harness.cloudUrl, "/api/auth/get-session", undefined, cloudCookie);
+    expect(await session.json()).toMatchObject({ user: { email: harness.email, emailVerified: true } });
   });
 
   it("redeems a cloud code into a working desktop session for the exact synthetic owner", async () => {

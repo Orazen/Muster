@@ -33,6 +33,8 @@ describe.skipIf(process.platform === "win32")("onboarding server ownership and a
   let rpcLog = "";
   let byokRpcLog = "";
   let byokInstance = "";
+  let operatorByokRpcLog = "";
+  let operatorByokInstance = "";
   let preload = "";
   let env: NodeJS.ProcessEnv;
   const children: ChildProcess[] = [];
@@ -85,6 +87,7 @@ describe.skipIf(process.platform === "win32")("onboarding server ownership and a
     for (const path of [data, home, companion, ui]) mkdirSync(path, { recursive: true, mode: 0o700 });
     rpcLog = join(directory, "fake-rpc.json");
     byokRpcLog = join(directory, "fake-byok-rpc.json");
+    operatorByokRpcLog = join(directory, "fake-operator-byok-rpc.json");
     networkLog = join(directory, "outbound.log");
     preload = join(directory, "block-outbound.mjs");
     writeFileSync(preload, `import { Socket } from "node:net";\nimport { appendFileSync } from "node:fs";\nconst blocked = () => { appendFileSync(${JSON.stringify(networkLog)}, "blocked\\n"); throw new Error("Owned boundary fixture refuses outbound traffic"); };\nglobalThis.fetch = blocked; Socket.prototype.connect = blocked;\n`);
@@ -140,12 +143,14 @@ describe.skipIf(process.platform === "win32")("onboarding server ownership and a
     const month = new Date().toISOString().slice(0, 7);
     writeFileSync(join(data, "usage-allowance-ledger.json"), JSON.stringify({ version: 1, months: { [month]: { local: { used: 10 }, [bob.id]: { used: 10 } } } }));
     byokInstance = `fixtureApi:${bob.id}`;
+    operatorByokInstance = `fixtureApi:${alice.id}`;
     // Exercise the actual account-scoped instance namespace with an offline
     // adapter. No key is saved and no paid provider API is called.
     writeFileSync(join(data, "config.json"), JSON.stringify({
       instances: {
         fixture: { driver: "grokAgent", config: { cli: fake, fullAuto: true }, environment: { FAKE_ACP_MODE: "happy", FAKE_ACP_RPC_DUMP: rpcLog } },
         [byokInstance]: { driver: "grokAgent", config: { cli: fake, fullAuto: true }, environment: { FAKE_ACP_MODE: "happy", FAKE_ACP_RPC_DUMP: byokRpcLog } },
+        [operatorByokInstance]: { driver: "grokAgent", config: { cli: fake, fullAuto: true }, environment: { FAKE_ACP_MODE: "happy", FAKE_ACP_RPC_DUMP: operatorByokRpcLog } },
         cloudFixture: { driver: "boxAgent" }, // No token: cannot provision or call Box.
       },
       usage: { allowance: { monthlyUsd: 10, turnReserveUsd: 1 } },
@@ -228,9 +233,54 @@ describe.skipIf(process.platform === "win32")("onboarding server ownership and a
   });
 
   it("meters the resolved cloud engine even when the bot's saved selection is BYOK", async () => {
-    const selected = await request(`/api/bots/${bob.botId}`, "PATCH", { computer: "off", modelSelection: { instanceId: byokInstance, model: "fake-acp-model" } }, bob);
-    expect(selected.status).toBe(200);
-    const created = await request("/api/routines", "POST", { botId: bob.botId, name: "Owned cloud override", prompt: "Refuse before cloud work", runOn: "cloud", enabled: false, schedule: { type: "once", at: Date.now() + 86_400_000 } }, bob);
+    try {
+      // Only the actual operator may use the deployment's cloud runner. First
+      // prove this saved account-owned engine really dispatches without quota.
+      const selected = await request(`/api/bots/${alice.botId}`, "PATCH", { computer: "off", modelSelection: { instanceId: operatorByokInstance, model: "fake-acp-model" } }, alice);
+      expect(selected.status).toBe(200);
+      const ledgerBefore = readFileSync(join(data, "usage-allowance-ledger.json"), "utf8");
+      const sent = await request(`/api/bots/${alice.botId}/messages`, "POST", { text: "Operator owned BYOK control" }, alice);
+      expect(sent.status).toBe(202);
+      const promptDeadline = Date.now() + 20_000;
+      for (;;) {
+        const response = await request("/api/bots", "GET", undefined, alice);
+        const bots = z.object({ bots: z.array(z.object({ id: z.string(), busy: z.boolean() })) }).parse(await response.json()).bots;
+        const methods = existsSync(operatorByokRpcLog) ? z.array(z.string()).parse(JSON.parse(readFileSync(operatorByokRpcLog, "utf8"))) : [];
+        if (methods.includes("session/prompt") && bots.find((bot) => bot.id === alice.botId)?.busy === false) break;
+        if (Date.now() > promptDeadline) throw new Error("The operator-owned fake engine did not finish its prompt");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(readFileSync(join(data, "usage-allowance-ledger.json"), "utf8")).toBe(ledgerBefore);
+      const created = await request("/api/routines", "POST", { botId: alice.botId, name: "Owned cloud override", prompt: "Refuse before cloud work", runOn: "cloud", enabled: false, schedule: { type: "once", at: Date.now() + 86_400_000 } }, alice);
+      expect(created.status).toBe(201);
+      const routine = z.object({ routine: z.object({ id: z.string() }) }).parse(await created.json()).routine;
+      const queued = await request(`/api/routines/${routine.id}/run`, "POST", {}, alice);
+      expect(queued.status).toBe(201);
+      const runId = z.object({ run: z.object({ id: z.string() }) }).parse(await queued.json()).run.id;
+      const deadline = Date.now() + 10_000;
+      for (;;) {
+        const response = await request("/api/routines", "GET", undefined, alice);
+        expect(response.status).toBe(200);
+        const runs = z.object({ runs: z.array(z.object({ id: z.string(), status: z.string(), error: z.string().optional() })) }).parse(await response.json()).runs;
+        const run = runs.find((candidate) => candidate.id === runId);
+        if (run?.status === "failed") {
+          expect(run.error).toContain("Monthly usage allowance reached");
+          break;
+        }
+        if (Date.now() > deadline) throw new Error("Cloud override did not fail at the allowance gate");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(readFileSync(join(data, "usage-allowance-ledger.json"), "utf8")).toBe(ledgerBefore);
+      expect(existsSync(networkLog)).toBe(false);
+    } finally {
+      const restored = await request(`/api/bots/${alice.botId}`, "PATCH", { modelSelection: { instanceId: "fixture", model: "fake-acp-model" } }, alice);
+      expect(restored.status).toBe(200);
+    }
+  });
+
+  it("refuses a non-operator cloud override before allowance charging or provider work", async () => {
+    const ledgerBefore = readFileSync(join(data, "usage-allowance-ledger.json"), "utf8");
+    const created = await request("/api/routines", "POST", { botId: bob.botId, name: "Foreign cloud override", prompt: "No deployment credentials", runOn: "cloud", enabled: false, schedule: { type: "once", at: Date.now() + 86_400_000 } }, bob);
     expect(created.status).toBe(201);
     const routine = z.object({ routine: z.object({ id: z.string() }) }).parse(await created.json()).routine;
     const queued = await request(`/api/routines/${routine.id}/run`, "POST", {}, bob);
@@ -241,14 +291,16 @@ describe.skipIf(process.platform === "win32")("onboarding server ownership and a
       const response = await request("/api/routines", "GET", undefined, bob);
       expect(response.status).toBe(200);
       const runs = z.object({ runs: z.array(z.object({ id: z.string(), status: z.string(), error: z.string().optional() })) }).parse(await response.json()).runs;
-      const run = runs.find((candidate) => candidate.id === runId);
+      const run = runs.find(candidate => candidate.id === runId);
       if (run?.status === "failed") {
-        expect(run.error).toContain("Monthly usage allowance reached");
+        expect(run.error).toContain("model key owned by its account");
+        expect(run.error).not.toContain("Monthly usage allowance reached");
         break;
       }
-      if (Date.now() > deadline) throw new Error("Cloud override did not fail at the allowance gate");
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (Date.now() > deadline) throw new Error("Foreign cloud override did not fail at the ownership gate");
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
+    expect(readFileSync(join(data, "usage-allowance-ledger.json"), "utf8")).toBe(ledgerBefore);
     expect(existsSync(networkLog)).toBe(false);
   });
 

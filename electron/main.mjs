@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { initializeCua, getCuaConnection, stopCua, registerCuaIpc } from "./cua.mjs";
 import { isComputerAccessSender } from "./computer-access-sender.mjs";
+import { isTrustedAppSender, installNavigationGuard, safeExternalUrl } from "./navigation-guard.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
@@ -23,6 +24,45 @@ const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 const DEFAULT_COMPOSIO_BROKER_URL = "https://muster-composio.orazen.workers.dev";
 let SERVER_PORT = 8799;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
+
+// The origins the desktop bridge belongs to: the embedded server, plus the
+// Vite dev server in development. Read at call time — SERVER_PORT can move.
+function appOrigins() {
+  const origins = [`http://127.0.0.1:${SERVER_PORT}`];
+  if (!app.isPackaged) origins.push(DEV_URL);
+  return origins;
+}
+
+// SAFETY: every invoke handler — here and in cua.mjs/updater.mjs, which share
+// this ipcMain — answers only the top-level frame of an app-origin page. A
+// window that navigated to another site (an OAuth page, a link in model
+// output) or an embedded subframe must not inherit companion pairing, screen
+// capture, credential storage or update install through the preload bridge.
+// Installed before any handler registers, so none can slip past it.
+{
+  const registerHandler = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, listener) =>
+    registerHandler(channel, (event, ...args) => {
+      if (!isTrustedAppSender(event, appOrigins())) {
+        slog(`ipc refused: ${channel} from ${event?.senderFrame?.url ?? "unknown frame"}`);
+        throw new Error("This action is only available inside the Muster app");
+      }
+      return listener(event, ...args);
+    });
+}
+
+/** Open a popup/navigation target in the OS only when it is a web or mail
+ * link; file:, smb:, custom schemes and the like are dropped. */
+function openExternalSafely(target) {
+  const url = safeExternalUrl(target);
+  if (url) void shell.openExternal(url).catch(() => {});
+  else slog(`external open refused: ${String(target).slice(0, 80)}`);
+}
+
+/** Pin a bridge-carrying window's top-level navigations (see navigationDecision). */
+function guardNavigation(contents, options) {
+  installNavigationGuard(contents, appOrigins, openExternalSafely, options);
+}
 
 // The tray companion (the mascot's desktop home): a small always-on-top
 // window rendering the same flower character from the built tray.html.
@@ -59,6 +99,10 @@ function toggleTrayWindow() {
     fullscreenable: false,
     webPreferences: {
       contextIsolation: true,
+      // Explicit, not inherited from Electron's defaults: the preload only
+      // needs contextBridge/ipcRenderer/webUtils, all sandbox-safe.
+      nodeIntegration: false,
+      sandbox: true,
       preload: path.join(__dirname, "preload.cjs"),
     },
   });
@@ -67,9 +111,10 @@ function toggleTrayWindow() {
   // leave nothing at all in the log.
   reportRendererHealth(trayWindow, "tray");
   trayWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openExternalSafely(url);
     return { action: "deny" };
   });
+  guardNavigation(trayWindow.webContents, { strict: true });
   trayWindow.once("ready-to-show", () => trayWindow?.show());
   trayWindow.on("closed", () => {
     trayWindow = null;
@@ -589,6 +634,10 @@ function createWindow() {
         : {}),
     webPreferences: {
       contextIsolation: true,
+      // Explicit, not inherited from Electron's defaults: the preload only
+      // needs contextBridge/ipcRenderer/webUtils, all sandbox-safe.
+      nodeIntegration: false,
+      sandbox: true,
       preload: path.join(__dirname, "preload.cjs"),
     },
   });
@@ -619,9 +668,10 @@ function createWindow() {
   }
   contents.once("destroyed", () => appContents.delete(contents));
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openExternalSafely(url);
     return { action: "deny" };
   });
+  guardNavigation(win.webContents);
 
   // Packaged CI smoke hook. It validates the real renderer/preload bridge and
   // same-origin embedded server, then follows the normal window-close path.

@@ -15,8 +15,11 @@
   --ink:#252e26;
   --muted:#677064;
   --line:#d5d8ca;
-  --acid:#e7ee78;
-  --moss:#394733;
+  --accent-soft:#ffdbb7;
+  --accent:#c64215;
+  --accent-hover:#a73610;
+  --on-accent:#fffef7;
+  --accent-stage:#c64215;
   --white:#fffef7;
   --display:Bricolage,Georgia,serif;
   --body:Instrument,Arial,sans-serif;
@@ -57,8 +60,12 @@ a:focus-visible,
 button:focus-visible,
 summary:focus-visible,
 canvas:focus-visible {
-  outline: 3px solid #9a551a;
+  outline: 3px solid var(--ink);
   outline-offset: 5px;
+}
+/* Neutral light focus remains visible on the orange and dark stages. */
+:is(.arch, .model-section) :is(a, button, canvas):focus-visible {
+  outline-color: var(--white);
 }
 button:disabled {
   cursor: wait;
@@ -92,14 +99,6 @@ button:disabled {
   font-weight: 750;
   letter-spacing: -2px;
 }
-.wordmark svg {
-  width: 24px;
-  height: 26px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 3.7;
-  stroke-linejoin: round;
-}
 .wordmark-dot {
   font: 10px var(--body);
   letter-spacing: 0;
@@ -131,7 +130,9 @@ button:disabled {
   right: 0;
 }
 .nav-cta {
-  border: 1px solid #bdc3b2;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
   padding: 11px 18px;
   border-radius: 6px;
   display: flex;
@@ -145,7 +146,7 @@ button:disabled {
   left: 20px;
   top: -100px;
   z-index: 10;
-  background: var(--acid);
+  background: var(--accent-soft);
   padding: 12px;
 }
 .skip:focus {
@@ -200,7 +201,7 @@ h1 svg {
   width: 100%;
   height: 24px;
   z-index: -1;
-  stroke: #dbe86c;
+  stroke: var(--accent-soft);
   stroke-width: 14;
   fill: none;
   stroke-linecap: round;
@@ -233,11 +234,11 @@ h1 svg {
   transform: translateY(-3px);
 }
 .button.dark {
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 .button.dark:hover {
-  background: #475640;
+  background: var(--accent-hover);
 }
 .button span,
 .text-link span {
@@ -265,7 +266,7 @@ h1 svg {
 .arch {
   position: relative;
   isolation: isolate;
-  background: var(--moss);
+  background: var(--accent-stage);
   border-radius: 250px 250px 13px 13px;
   height: 590px;
   overflow: hidden;
@@ -274,7 +275,7 @@ h1 svg {
   content: "";
   position: absolute;
   inset: 9px;
-  border: 1px solid #69725b;
+  border: 1px solid #ffba92;
   border-radius: inherit;
   opacity: .45;
   pointer-events: none;
@@ -284,10 +285,10 @@ h1 svg {
   width: 110%;
   height: 180px;
   border-radius: 50%;
-  border: 1px solid #677153;
+  border: 1px solid #ffba92;
   bottom: -85px;
   left: -5%;
-  box-shadow: 0 -28px 0 -1px var(--moss), 0 -29px 0 #677153;
+  box-shadow: 0 -28px 0 -1px var(--accent-stage), 0 -29px 0 #ffba92;
   opacity: .5;
 }
 .arch-lines:after {
@@ -296,7 +297,7 @@ h1 svg {
   width: 100%;
   height: 100%;
   inset: -60px 0;
-  border: 1px solid #677153;
+  border: 1px solid #ffba92;
   border-radius: 50%;
 }
 .stage-meta {
@@ -310,7 +311,7 @@ h1 svg {
   align-items: center;
   font-size: 9px;
   letter-spacing: .1em;
-  color: #c3cead;
+  color: #fff1e6;
   z-index: 2;
 }
 .stage-meta > span:last-child {
@@ -323,7 +324,7 @@ h1 svg {
   display: inline-block;
   width: 6px;
   height: 6px;
-  background: #b8d38f;
+  background: #ffdbb7;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -353,13 +354,13 @@ h1 svg {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  color: #d7ddc5;
+  color: #fff1e6;
   font-size: 11px;
 }
 .arch-bottom button {
   color: inherit;
   background: transparent;
-  border: 1px solid #71815e;
+  border: 1px solid #ffc7a5;
   border-radius: 50%;
   height: 28px;
   width: 28px;
@@ -389,7 +390,7 @@ h1 svg {
   stroke-linecap: round;
 }
 .paper-note {
-  background: #e9edb5;
+  background: #ffdbb7;
   border: 0;
   text-align: left;
   border-radius: 3px;
@@ -427,7 +428,7 @@ h1 svg {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-top: 1px solid #bdc68c;
+  border-top: 1px solid #e0ad87;
   padding-top: 9px;
   font-size: 10px;
 }
@@ -480,7 +481,7 @@ h1 svg {
   margin-bottom: 0;
 }
 .workbench-section {
-  background: #e8ecdf;
+  background: #f1eee8;
   padding: 95px 0 37px;
 }
 .section-heading {
@@ -537,9 +538,9 @@ h1 svg {
   font-size: 13px;
 }
 .example-tabs button[aria-selected=true] {
-  background: #f5f5eb;
+  background: #fff8f0;
   color: var(--ink);
-  border-color: var(--ink);
+  border-color: var(--accent);
   border-radius: 9px 9px 0 0;
 }
 .workbench {
@@ -554,7 +555,7 @@ h1 svg {
   overflow: hidden;
 }
 .desk-sidebar {
-  background: #f0f2e7;
+  background: #f8f2eb;
   border-right: 1px solid #d9decd;
   padding: 24px 24px 0;
   position: relative;
@@ -581,7 +582,7 @@ h1 svg {
 .avatar {
   width: 32px;
   height: 32px;
-  background: #dce7b9;
+  background: #ffdbb7;
   border-radius: 10px;
   display: grid;
   place-items: center;
@@ -599,7 +600,7 @@ h1 svg {
 }
 .teammate > .live-dot {
   margin-left: auto;
-  background: #7d9a61;
+  background: #c64215;
 }
 .step-list {
   list-style: none;
@@ -713,7 +714,7 @@ h1 svg {
 }
 .brief-box {
   border: 1px solid #dee3d1;
-  background: #f7f8ee;
+  background: #fff8f0;
   padding: 17px 20px;
   border-radius: 8px;
   margin: 20px 0 22px;
@@ -770,7 +771,7 @@ h1 svg {
   color: #59644e;
 }
 .review-draft {
-  background: #f8f8f0;
+  background: #fff8f0;
   border: 1px solid #dee3d3;
   border-radius: 6px;
   padding: 18px 20px;
@@ -827,8 +828,8 @@ h1 svg {
 .receipt-mark {
   width: 44px;
   height: 44px;
-  border: 1px solid #aabc87;
-  background: #e8efcf;
+  border: 1px solid #e1ad86;
+  background: #ffdbb7;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -836,8 +837,8 @@ h1 svg {
   margin: 3px 0 20px;
 }
 .receipt-box {
-  border-left: 2px solid #93a969;
-  background: #f0f4e4;
+  border-left: 2px solid #c64215;
+  background: #fff0e2;
   padding: 14px 18px;
   margin: 22px 0;
   font-size: 12px;
@@ -936,8 +937,8 @@ h1 svg {
 }
 .role-row[open] .role-symbol {
   transform: rotate(90deg);
-  background: var(--acid);
-  border-color: var(--acid);
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
 }
 .role-body {
   padding: 0 0 26px 38px;
@@ -998,7 +999,7 @@ h1 svg {
   margin-bottom: 24px;
 }
 .light {
-  color: var(--acid);
+  color: var(--accent-soft);
 }
 .model-type {
   padding: 5px 0;
@@ -1046,7 +1047,7 @@ h1 svg {
 }
 .cost-icon {
   font: 38px var(--display);
-  color: var(--acid);
+  color: var(--accent-soft);
 }
 .cost-note p {
   font-size: 12px;
@@ -1112,7 +1113,7 @@ h1 svg {
   text-underline-offset: 3px;
 }
 .closing {
-  background: var(--acid);
+  background: var(--accent-soft);
   padding: 47px 0 55px;
 }
 .closing-top {
