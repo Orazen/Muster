@@ -22,6 +22,8 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# Keep the exact local dependency patches available to the frozen install.
+COPY patches ./patches
 # tray.html is the second rollup input in vite.config.ts — without it the
 # in-image vite build dies on "Could not resolve entry module tray.html".
 COPY tsconfig.json tsconfig.server.json tsconfig.server.build.json vite.config.ts index.html tray.html ./
@@ -55,8 +57,11 @@ RUN apt-get update \
        chromium unzip fonts-liberation fonts-noto-color-emoji ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-# The cloud image never touches docker sockets or the host user.
-RUN addgroup -S muster && adduser -S muster -G muster
+# Debian's account tools match the node:24-slim base. Fresh named volumes
+# inherit /data ownership; existing host mounts still need operator ownership.
+RUN useradd --system --uid 10001 --create-home muster \
+  && mkdir -p /data \
+  && chown -R muster:muster /data
 
 ENV NODE_ENV=production \
     OMB_HOST=0.0.0.0 \
@@ -73,7 +78,7 @@ COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Per-tenant data volume. When mounting a host directory, chown it to the
-# container's `muster` user (uid of the alpine-created account) so the
+# container's `muster` user (uid 10001) so the
 # entrypoint can persist the generated BETTER_AUTH_SECRET there.
 VOLUME ["/data"]
 
