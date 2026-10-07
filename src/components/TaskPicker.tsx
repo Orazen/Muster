@@ -5,7 +5,7 @@
 // own transcript and its own provider session — so sensitive work, a
 // long job and a quick question can sit side by side under one agent.
 import { useEffect, useId, useRef, useState } from "react";
-import { Check, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Pencil, Plus, Trash2 } from "lucide-react";
 import { useStore, formatTime, type Bot, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { formatTokens } from "@/lib/format-tokens";
@@ -29,6 +29,7 @@ export function TaskPicker({ bot }: { bot: Bot }) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const renameTarget = useRef<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const menuId = useId();
 
@@ -66,6 +67,10 @@ export function TaskPicker({ bot }: { bot: Bot }) {
   }
 
   const commitRename = (threadId: string) => {
+    // Enter removes the input and may also blur it. Only the owned edit can
+    // commit, once; Escape retires it before that blur can write the draft.
+    if (renameTarget.current !== threadId) return;
+    renameTarget.current = null;
     const title = draft.trim();
     setRenaming(null);
     if (title) dispatch({ type: "renameTask", botId: bot.id, threadId, title });
@@ -114,8 +119,14 @@ export function TaskPicker({ bot }: { bot: Bot }) {
                       onChange={(e) => setDraft(e.target.value)}
                       onBlur={() => commitRename(task.threadId)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") commitRename(task.threadId);
-                        if (e.key === "Escape") setRenaming(null);
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitRename(task.threadId);
+                        }
+                        if (e.key === "Escape") {
+                          renameTarget.current = null;
+                          setRenaming(null);
+                        }
                       }}
                       className="min-w-0 flex-1 rounded bg-inset px-1.5 py-0.5 text-[13px] text-ink focus:outline-none"
                     />
@@ -125,18 +136,29 @@ export function TaskPicker({ bot }: { bot: Bot }) {
                         if (!active) dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId });
                         setOpen(false);
                       }}
-                      onDoubleClick={() => {
-                        setDraft(task.title);
-                        setRenaming(task.threadId);
-                      }}
                       className="min-w-0 flex-1 text-left"
-                      title="Click to switch · double-click to rename"
+                      title="Switch to this task"
                     >
                       <div className="truncate text-[13px] text-ink">{task.title}</div>
                       <div className="text-[11px] text-ink-secondary">
                         {formatTime(task.createdAt)}
                         <TaskUsage usage={task.usage} />
                       </div>
+                    </button>
+                  )}
+                  {renaming !== task.threadId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        renameTarget.current = task.threadId;
+                        setDraft(task.title);
+                        setRenaming(task.threadId);
+                      }}
+                      aria-label={`Rename task ${task.title}`}
+                      title="Rename this task"
+                      className="rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:opacity-100 focus-visible:opacity-100"
+                    >
+                      <Pencil size={13} />
                     </button>
                   )}
                   <button

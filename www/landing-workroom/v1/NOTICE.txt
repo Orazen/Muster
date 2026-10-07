@@ -1,0 +1,11 @@
+Muster Workroom landing — approved design revision 1, 7 October 2026
+
+Muster application and character code are subject to the repository's BSL 1.1 license.
+
+Third-party components included with their own licenses:
+- Three.js 0.180.0, MIT. See mascot/vendor/THREE-LICENSE.txt.
+- Bricolage Grotesque, SIL Open Font License 1.1. See fonts/display-OFL.txt.
+- Instrument Sans, SIL Open Font License 1.1. See fonts/body-OFL.txt.
+
+The task examples use fictional sample data. They do not contact AI providers,
+connect accounts, send messages, create calendar events or make bookings.
