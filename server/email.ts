@@ -24,7 +24,7 @@
  * server/otp-delivery.ts for why better-auth cannot answer that itself).
  */
 
-import { recordDelivery, recordDeliveryFor, shouldRecordDelivery, type DeliveryOutcome, type OtpCodeType } from "./otp-delivery.ts";
+import { recordDelivery, recordDeliveryFor, recordDeliveryIfPending, shouldRecordDelivery, type DeliveryOutcome, type OtpCodeType } from "./otp-delivery.ts";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY?.trim();
 const EMAIL_FROM = process.env.EMAIL_FROM?.trim() || "Muster <noreply@localhost>";
@@ -176,29 +176,11 @@ export async function sendVerificationEmail(to: string, url: string): Promise<vo
  * The code itself is never persisted anywhere but the auth database's
  * verification table (stored hashed by Better Auth).
  *
- * Whatever happens to the message is RECORDED against the mailbox, because
- * the caller cannot observe it: better-auth swallows this callback's rejection
- * and still answers the send route with success. See server/otp-delivery.ts.
- * With no mailer configured nothing is recorded, and that is deliberate: the
- * code DID reach its recipient, through the console channel documented above,
- * and the send policy must keep treating that as the success it is. A
- * deployment with no mailer never offers the flow anyway — `emailOtp` is
- * advertised from isEmailConfigured(), so the UI hides email codes entirely.
- *
- * `type` gates the recording, and it has to. The plugin invokes this callback
- * for `email-verification`, `forget-password` and `change-email` codes as
- * well, and several of those routes sit OUTSIDE the send policy —
- * `/email-otp/request-password-reset` is one, and it needs no configuration.
- * A record written for them has no reader, so without this gate the map would
- * gain an entry per address ever mailed a reset or change code, on a server
- * that runs for weeks. Only the sign-in type is recorded, because only the
- * sign-in type has a reader. The union mirrors the plugin's own
- * `sendVerificationOTP` payload.
- *
- * Note what this does NOT rely on: a leaked record cannot be misread as some
- * later send's verdict, because the send policy reads only after delegating,
- * and delegating always calls this sender first — so the verdict it reads is
- * its own. The gate is about retention, not about correctness of attribution.
+ * The awaited send wrapper captures the actual verdict in its own async
+ * context. Non-sign-in routes outside that context retain no mailbox slot;
+ * standalone sign-in sends retain the existing bounded delivery bookkeeping.
+ * With no mailer, the local console channel reports success to a waiting
+ * wrapper but is never evidence of real inbox delivery.
  */
 export async function sendLoginCodeEmail(
   to: string,
@@ -210,6 +192,12 @@ export async function sendLoginCodeEmail(
     console.warn(
       `[otp] sign-in code for ${to}: ${code} — RESEND_API_KEY is not set, so this was not emailed; it is only printed here for local development.`,
     );
+    // The console channel IS this code's delivery, and a delivered code is a
+    // success wherever the verdict is read back — see the `DeliveryFailure`
+    // comment in server/otp-delivery.ts for why this is deliberately not the
+    // `unconfigured` failure the transport-less reset mail reports. The
+    // request-scoped write keeps the non-reading routes out of the map.
+    recordDeliveryIfPending(to, { ok: true });
     return;
   }
   const minutes = Math.max(1, Math.round(expiresInSeconds / 60));
@@ -226,8 +214,13 @@ export async function sendLoginCodeEmail(
       `Enter this code on the sign-in screen to finish signing in. It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.<br><br><span style="display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:26px;letter-spacing:0.3em;font-weight:600;color:#f6f6f7;background:#1c1c1f;border:1px dashed #3a3a3f;border-radius:10px;padding:10px 14px;">${code}</span>`,
     ),
   });
-  // The one and only write, gated to the type the send policy can read.
+  // The type the send policy reconciles keeps its unconditional write. Every
+  // other kind records only when a request is waiting for the verdict — the
+  // routes outside the send policy have no reader, so giving them an
+  // unconditional write would grow the map one entry per address ever mailed
+  // such a code, on a server that runs for weeks (server/otp-delivery.ts).
   if (shouldRecordDelivery(type)) recordDelivery(to, outcome);
+  else recordDeliveryIfPending(to, outcome);
 }
 
 /**

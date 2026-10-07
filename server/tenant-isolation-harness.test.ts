@@ -318,3 +318,234 @@ describe("tenant isolation on a self-hosted deployment", () => {
     expect(own.status, "alice must still be able to mark her own run seen").toBe(200);
   }, 90_000);
 });
+
+// ── the two ownership guards, on the SAME record, side by side ────────────
+// S3-0 fixed the first-run seed that PRODUCED ownerless records, and this
+// fixture's seed path is now closed — which is exactly why the ownerless case
+// stopped being reachable and could quietly rot. It had rotted in two places
+// at once, because there are two guards and they had drifted apart:
+//
+//   the API choke point (`ownsRecord`) reads "no owner" as OPERATOR-ONLY;
+//   the stream filter (`visibleToClient`) read it as SHARED.
+//
+// A second signed-in account was therefore refused by
+// GET /api/threads/<ownerless>/messages with 404 and still received that
+// thread's live frames — the same record, the same deployment, two answers.
+// The whole-payload owner scan could not cover for it either: `frameOwnerIds`
+// only recorded an owner when one was truthy, so an ownerless record
+// contributed nothing and the strict branch never fired for its frames.
+//
+// A SEPARATE fixture, deliberately. Planting the record in the fixture above
+// would put it in the primary's `GET /api/bots` (that route filters by
+// `ownsRecord`, and the primary may read ownerless records), and S3-0 asserts
+// an exact bot count — the coverage would have come at the cost of weakening
+// a passing regression test. Both deployments are real two-account self-hosted
+// servers; they differ only in whether an account existed when the store was
+// first read from disk.
+describe("an ownerless record is the operator's, on the API and on the stream", () => {
+  let child: ChildProcess | undefined;
+  let home = "";
+  let dataDir = "";
+  let base = "";
+  let operator: Account;
+  let member: Account;
+
+  /** A record that predates per-user ownership, planted in bots.json before
+   * the server starts. `ownerId` is absent on purpose — that is the whole
+   * state under test. Ids match the URL guards' `[\w-]+`, as real ids do. */
+  const orphan = {
+    id: "preownershipbotrecord0001",
+    threadId: "preownershiptrheadrecord0001",
+    name: "Pre-ownership Bot",
+  };
+
+  /** The bodies this fixture sends. Concrete, like the fixture above's, so
+   * the anti-slop rules have a contract instead of a dictionary. */
+  interface OrphanRequestBody {
+    text?: string;
+    name?: string;
+  }
+
+  const call = async (account: Account, method: string, path: string, body?: OrphanRequestBody) => {
+    const headers = new Headers({ cookie: account.cookie });
+    if (body) headers.set("content-type", "application/json");
+    const res = await fetch(`${base}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
+    return { status: res.status, text: await res.text() };
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 1_200));
+
+  beforeAll(async () => {
+    const port = await freePortBlock([0, 1]);
+    base = `http://127.0.0.1:${port}`;
+    home = mkdtempSync(join(tmpdir(), "omb-ownerless-guard-"));
+    dataDir = join(home, "data");
+    const companion = join(home, "companion");
+    const ui = join(home, "ui");
+    for (const dir of [dataDir, companion, ui, join(home, ".muster")]) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(home, ".muster", "config.json"), "{}");
+    // Planted BEFORE the first boot and while the account table is still
+    // empty, which is the only window in which the boot ownership migration
+    // finds no primary to stamp it with. Everything after that — both
+    // signups, every route — runs normally, so the record really is ownerless
+    // on a deployment that has two signed-in accounts.
+    writeFileSync(
+      join(dataDir, "bots.json"),
+      JSON.stringify([
+        {
+          id: orphan.id,
+          threadId: orphan.threadId,
+          name: orphan.name,
+          title: "",
+          description: "",
+          notifications: true,
+          unread: false,
+          privacyShield: true,
+          color: "orange",
+          character: "star",
+          modelSelection: { instanceId: "", model: "" },
+          resumeCursors: {},
+          createdAt: Date.now(),
+          tasks: [{ threadId: orphan.threadId, title: "First task", createdAt: Date.now(), resumeCursors: {} }],
+        },
+      ]),
+    );
+
+    const env = pairingServerEnvironment({
+      home,
+      dataDirectory: dataDir,
+      companionDirectory: companion,
+      staticDir: ui,
+      port,
+      webhookPort: port + 1,
+      secret: randomBytes(32).toString("hex"),
+    });
+    // Without this SELF_HOSTED is false, no session is required and the whole
+    // file tests nothing — see the note on the fixture above.
+    env.OMB_PUBLIC_HOST = `127.0.0.1:${port}`;
+
+    child = spawn(process.execPath, ["--experimental-strip-types", "server/index.ts"], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
+    // stdout, not stderr: the migration announces itself with console.log, and
+    // it runs above `server.listen`, so the whole boot log has arrived by the
+    // time readiness returns.
+    let bootLog = "";
+    child.stdout!.on("data", (chunk) => (bootLog += String(chunk)));
+    await waitForOwnedServer(child, base);
+    if (/ownership migration/.test(bootLog)) {
+      throw new Error("the boot migration stamped the planted record, so this fixture would not be testing an ownerless record at all");
+    }
+
+    const signUp = async (name: string): Promise<Account> => {
+      const res = await fetch(`${base}/api/auth/sign-up/email`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: `${name}@ownerless.example.com`, password: "correct-horse-battery", name }),
+      });
+      const header = res.headers.getSetCookie().find((cookie) => cookie.startsWith("better-auth.session_token="));
+      if (!header) throw new Error(`signup for ${name} did not return a session: ${res.status}`);
+      const cookie = header.split(";")[0]!;
+      const session = z.object({ user: z.object({ id: z.string() }) }).parse(
+        JSON.parse(await (await fetch(`${base}/api/auth/get-session`, { headers: { cookie } })).text()),
+      );
+      return { cookie, name, userId: session.user.id };
+    };
+    // Signup order decides the operator: the first account created is the
+    // primary one, which is what both guards compare a signed-in account to.
+    operator = await signUp("operator");
+    member = await signUp("member");
+    expect(operator.userId, "the fixture needs two distinct accounts").not.toBe(member.userId);
+    seedConnectedGoogleRow(dataDir, operator.userId);
+    seedConnectedGoogleRow(dataDir, member.userId);
+  }, 120_000);
+
+  afterAll(async () => {
+    if (child) await waitForExit(child, { signal: "SIGTERM" });
+    await removeTempDir(home);
+  });
+
+  it("refuses an ownerless thread to a second account, and keeps it for the operator", async () => {
+    // The API half of the contract, stated first so the stream half below has
+    // something to disagree with. 404 rather than 403: a record you may not
+    // read must be indistinguishable from one that does not exist. Both the
+    // record id and the thread id are checked, because both are separate arms
+    // of the same guard and the stream test below names the same record.
+    const refusedThread = await call(member, "GET", `/api/threads/${orphan.threadId}/messages`);
+    expect(refusedThread.status, "a non-operator account may not read an ownerless thread").toBe(404);
+    const refusedWrite = await call(member, "PATCH", `/api/bots/${orphan.id}`, { name: "Member Was Here" });
+    expect(refusedWrite.status, "nor may it rename an ownerless record").toBe(404);
+
+    // And the operator still can — the strict reading must not become "hidden
+    // from everyone", which is the failure mode a naive fix to this invites.
+    const allowed = await call(operator, "GET", `/api/threads/${orphan.threadId}/messages`);
+    expect(allowed.status, "the operator must still read an ownerless thread").toBe(200);
+  }, 60_000);
+
+  it("streams no frame about an ownerless record to a second account, and still does to the operator", async () => {
+    const memberStream = await StreamReader.open(base, member.cookie);
+    const operatorStream = await StreamReader.open(base, operator.cookie);
+    await settle();
+
+    // Two frame shapes, because the two guards reach the answer by different
+    // routes and a fix to only one of them leaves the other leaking:
+    //
+    //   the `bot` frame nests everything under `bot:`, so no top-level id is
+    //   read at all and the filter falls through to its default answer;
+    //   the `message` frame is exactly `{threadId, message}`, so it is the
+    //   threadId branch that decides — the branch the audit names.
+    const renamed = await call(operator, "PATCH", `/api/bots/${orphan.id}`, { name: "Pre-ownership Bot Renamed" });
+    expect(renamed.status, "the operator must still be able to rename an ownerless record").toBe(200);
+    // No engine is configured on this fixture, so the turn is refused with 409
+    // — but only AFTER the words land in the thread, which is what emits the
+    // frames under test.
+    const spoke = await call(operator, "POST", `/api/bots/${orphan.id}/messages`, { text: "hello from the operator" });
+    expect(spoke.status, "the operator's own words must still reach its own thread").toBe(409);
+    await settle();
+
+    expect(
+      memberStream.mentioning(orphan.threadId),
+      "no frame about an ownerless record may reach a non-operator account — the API guard already refuses it",
+    ).toEqual([]);
+    expect(
+      memberStream.mentioning("Pre-ownership Bot Renamed"),
+      "and certainly not the name it was renamed to",
+    ).toEqual([]);
+
+    // A filter that dropped EVERYTHING would pass the two assertions above, so
+    // the operator's stream is the control: it must still carry both frames.
+    expect(
+      operatorStream.mentioning(orphan.threadId).length,
+      "the operator must still receive live frames for an ownerless record",
+    ).toBeGreaterThan(0);
+    expect(
+      operatorStream.mentioning("Pre-ownership Bot Renamed").length,
+      "including the rename it just performed",
+    ).toBeGreaterThan(0);
+
+    memberStream.stop();
+    operatorStream.stop();
+  }, 60_000);
+
+  it("does not disclose an ownerless record when its name also resolves to the viewer's owned bot", async () => {
+    const hired = await call(member, "POST", "/api/bots", { name: "Member Mixed-frame Control" });
+    expect(hired.status).toBe(201);
+    const ownId = botsEnvelope.parse(JSON.parse((await call(member, "GET", "/api/bots")).text)).bots[0]!.id;
+    const stream = await StreamReader.open(base, member.cookie);
+    try {
+      const ready = await call(member, "PATCH", `/api/bots/${ownId}`, { name: "Member Stream Ready" });
+      expect(ready.status).toBe(200);
+      await expect.poll(() => stream.mentioning("Member Stream Ready").length).toBeGreaterThan(0);
+      // The real bot frame now names both records. A named owned record must
+      // not erase the operator-only restriction on the ownerless record.
+      expect((await call(operator, "PATCH", `/api/bots/${orphan.id}`, { name: ownId })).status).toBe(200);
+      // A message frame names its bot by threadId, rather than by bot id.
+      // User text that happens to be an owned id cannot override that owner.
+      expect((await call(operator, "POST", `/api/bots/${orphan.id}/messages`, { text: ownId })).status).toBe(409);
+      expect((await call(member, "PATCH", `/api/bots/${ownId}`, { name: "Member Stream Barrier" })).status).toBe(200);
+      await expect.poll(() => stream.mentioning("Member Stream Barrier").length).toBeGreaterThan(0);
+      expect(stream.mentioning(orphan.id)).toEqual([]);
+      expect(stream.mentioning(orphan.threadId)).toEqual([]);
+    } finally {
+      stream.stop();
+    }
+  }, 60_000);
+});

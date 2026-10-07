@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 // Did the sign-in code actually LEAVE the building?
 //
 // This module exists because better-auth cannot answer that question. The
@@ -8,12 +10,10 @@
 // {success:true} whether the mail went out, was refused by the provider, or
 // never left. The plugin's success IS the only signal the HTTP layer gets.
 //
-// So the outcome is recorded here at the moment it is known — inside the
-// sender, next to the transport call that produced it — and read back by
-// server/email-otp-login.ts after the delegation returns. Keyed by the same
-// normalized mailbox the send policy uses, because that is the only identity
-// both sides share: the plugin lowercases the address, the wrapper lowercases
-// it, and neither knows the other's request object.
+// The sender records the verdict inside the async context of the delegated
+// send request. The wrapper reads only that context, so an unwrapped reset
+// for the same mailbox cannot consume or overwrite its delivery evidence.
+// Standalone sign-in callers retain the bounded legacy mailbox bookkeeping.
 //
 // Absent means "no delivery was attempted", which is NOT the same as
 // "delivery failed": the plugin short-circuits the send route for an unknown
@@ -71,6 +71,40 @@ export function shouldRecordDelivery(type: OtpCodeType): boolean {
   return type === "sign-in";
 }
 
+interface OtpDeliveryCapture {
+  mailbox: string;
+  outcome: DeliveryOutcome | undefined;
+  active: boolean;
+}
+
+const otpDeliveryContext = new AsyncLocalStorage<OtpDeliveryCapture>();
+
+/** Capture only deliveries made by this awaited auth delegation. There is no
+ * mailbox-global pending marker: unrelated requests have separate async
+ * contexts, even when both target the same mailbox. No sender means undefined.
+ * Closing the frame also prevents detached work from changing a finished
+ * request's receipt; Better Auth must continue awaiting its sender. */
+export async function withOtpDeliveryCapture<T>(
+  email: string,
+  operation: () => Promise<T>,
+): Promise<{ value: T; outcome: DeliveryOutcome | undefined }> {
+  const frame: OtpDeliveryCapture = { mailbox: deliveryKey(email), outcome: undefined, active: true };
+  try {
+    const value = await otpDeliveryContext.run(frame, operation);
+    return { value, outcome: frame.outcome };
+  } finally {
+    frame.active = false;
+  }
+}
+
+/** Non-sign-in senders record only into their own active request frame. */
+export function recordDeliveryIfPending(email: string, outcome: DeliveryOutcome): boolean {
+  const frame = otpDeliveryContext.getStore();
+  if (!frame?.active || frame.mailbox !== deliveryKey(email)) return false;
+  recordDelivery(email, outcome);
+  return true;
+}
+
 /** How long a recorded outcome stays readable. Generous next to the
  * transport's own timeout (see RESEND_TIMEOUT_MS in email.ts) so a slow but
  * answered send is still attributed correctly, and short enough that a request
@@ -119,8 +153,12 @@ export function recordDelivery(email: string, outcome: DeliveryOutcome): void {
 
 export function recordDeliveryFor(channel: DeliveryChannel, email: string, outcome: DeliveryOutcome): void {
   const key = slotKey(channel, email);
-  // One mailbox has one send in flight: the per-mailbox cooldown admits no
-  // second attempt, so the newest verdict is the only one that can be read.
+  const frame = otpDeliveryContext.getStore();
+  if (channel === "otp" && frame?.active && frame.mailbox === deliveryKey(email)) {
+    frame.outcome = outcome;
+  }
+  // Legacy standalone readers retain bounded mailbox slots. The send wrapper
+  // uses its request frame instead, so unrelated deliveries cannot decide it.
   outcomes.set(key, { outcome, at: Date.now() });
   // The transport's health is a property of the DEPLOYMENT, not of one
   // mailbox, and it is tracked apart from the slots because the reset route

@@ -1,0 +1,6 @@
+# This standalone project has its own lockfile; pin PostCSS's compatible
+# source-map-js range to the first patched release for GHSA-68fv-2mgg-jv7q.
+packages:
+  - "."
+overrides:
+  "source-map-js@<1.2.2": "1.2.2"

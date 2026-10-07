@@ -25,6 +25,8 @@ import {
   mailTransportFailing,
   recordDelivery,
   recordDeliveryFor,
+  recordDeliveryIfPending,
+  withOtpDeliveryCapture,
   resetDeliveries,
   shouldRecordDelivery,
 } from "./otp-delivery.ts";
@@ -174,5 +176,46 @@ describe("deployment transport verdict", () => {
     } finally {
       Date.now = realNow;
     }
+  });
+});
+
+describe("request-scoped send verdicts", () => {
+  it("records only for its matching active context", async () => {
+    expect(recordDeliveryIfPending("waited@example.test", { ok: true })).toBe(false);
+    const captured = await withOtpDeliveryCapture(" Waited@example.test ", async () => {
+      expect(recordDeliveryIfPending("other@example.test", { ok: true })).toBe(false);
+      expect(recordDeliveryIfPending("WAITED@example.test", { ok: true })).toBe(true);
+      return "delegated";
+    });
+    expect(captured).toEqual({ value: "delegated", outcome: { ok: true } });
+    expect(recordDeliveryIfPending("waited@example.test", { ok: true })).toBe(false);
+  });
+
+  it("leaves no-sender and throwing operations without a reusable context", async () => {
+    expect((await withOtpDeliveryCapture("a@example.test", async () => "no sender")).outcome).toBeUndefined();
+    await expect(withOtpDeliveryCapture("a@example.test", async () => { throw new Error("delegate refused"); }))
+      .rejects.toThrow("delegate refused");
+    expect(recordDeliveryIfPending("a@example.test", { ok: true })).toBe(false);
+    expect(deliverySlotCount()).toBe(0);
+  });
+
+  it("isolates same-mailbox concurrent captures despite opposite global verdicts", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const first = withOtpDeliveryCapture("a@example.test", async () => {
+      await held;
+      recordDelivery("a@example.test", { ok: true });
+      return "first";
+    });
+    const second = await withOtpDeliveryCapture("a@example.test", async () => {
+      recordDeliveryIfPending("a@example.test", { ok: false, reason: "rejected", status: 500 });
+      return "second";
+    });
+    expect(second.outcome).toEqual({ ok: false, reason: "rejected", status: 500 });
+    expect(mailTransportFailing()).toBe(true);
+    expect(recordDeliveryIfPending("a@example.test", { ok: true })).toBe(false);
+    release();
+    expect((await first).outcome).toEqual({ ok: true });
+    expect(mailTransportFailing()).toBe(false);
   });
 });

@@ -308,6 +308,42 @@ protocol ProtectedCredentialStore: Sendable {
     /// UNCONDITIONAL removal of the record for a key. A separate, explicit
     /// operation — invalidation must never be relied on to delete.
     func delete(_ clientKey: String) async throws -> Bool
+
+    // MARK: The three members a CONSUMER needs and the store alone does not.
+    //
+    // `commit`/`get`/`read`/`invalidate`/`delete` are the protected-write
+    // surface. These three are the control surface a consumer cannot invent for
+    // itself, and adding them here (rather than letting a consumer depend on
+    // the concrete actor) is what keeps every fail-closed decision inside the
+    // custody boundary instead of in each caller's own re-implementation:
+    //
+    //   * `noteGeneration` is the announcement a begin MUST await before it can
+    //     report success (the server's optional `deps.noteGeneration`,
+    //     `installation-enrollment-contract.ts:857-861`). Durable announcement
+    //     first is what makes a completion's conditional commit decidable.
+    //   * `isFenced` is the consultation a consumer must make BEFORE a write,
+    //     so "custody is unresolved" is observed rather than assumed.
+    //   * `fence` is the consumer-side arming the server centralises in
+    //     `unresolved` (`installation-enrollment-contract.ts:998-1001`): a write
+    //     that may have landed and could not be removed must leave the key
+    //     fenced, so recovery is an explicit owner reset and not a retry.
+    //   * `resetFences` is that explicit owner action, and it belongs on the
+    //     seam so a consumer cannot reach for an in-memory-only un-fence.
+    //
+    // No existing behavior changes: the store already implements all four.
+
+    /// Announce the newest custody generation for a key, durably, BEFORE the
+    /// caller continues. An older generation is ignored, never rolled back.
+    func noteGeneration(clientKey: String, generation: String) async throws
+    /// Whether the key counts as fenced — including by a prior process
+    /// instance, and while the fence store's contents are unknown.
+    func isFenced(clientKey: String) async -> Bool
+    /// Arm the durable fence for a key. Persists before returning.
+    func fence(clientKey: String, reason: String) async throws
+    /// The explicit owner action: clear EVERY persisted fence and heal a
+    /// degraded episode. The only way a fenced or unresolved key becomes
+    /// begin-able again.
+    func resetFences() async throws
 }
 
 // MARK: - The store

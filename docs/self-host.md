@@ -29,6 +29,18 @@ docker compose up -d
 
 All settings are environment variables on the `muster` service.
 
+**A variable only reaches the container if the compose file declares it.**
+Compose forwards only the names a service lists in its `environment:` block, or
+points at with `env_file:`. A value exported in your shell, or placed in a `.env`
+file beside the compose file, is invisible to the service unless the name is
+declared there — and the symptom is silent: the deployment simply behaves as if
+you had set nothing. `scripts/deployment-env-policy.test.ts` guards this for the
+outbound-mail variables specifically: it reads the variables the mailer reads out
+of `server/email.ts` and fails if a server-running service in any compose file
+fails to declare one of them, or if a credential is committed as a literal. It
+does not audit every variable in the table below — several are deliberately
+declared by no compose file — so an omission elsewhere is still yours to catch.
+
 | Variable | Default | What it does |
 |---|---|---|
 | `OMB_HOST` | `127.0.0.1` | Bind host for the harness + UI. The recommended private mode binds loopback only; set a public bind only when managed access is required. |

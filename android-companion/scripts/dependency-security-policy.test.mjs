@@ -11,11 +11,18 @@ import { EXPO_TAR_PATCHES, prepareToolchain } from "./prepare-toolchain.mjs";
 
 const companionRoot = fileURLToPath(new URL("..", import.meta.url));
 const require = createRequire(new URL("../package.json", import.meta.url));
+const yamlPackagePaths = [
+  "node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml",
+  "node_modules/cosmiconfig/node_modules/js-yaml",
+];
 const scratch = mkdtempSync(join(companionRoot, ".dependency-security-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const originalSource = (patch) => {
-  let source = readFileSync(require.resolve(`${patch.package}/${patch.file}`), "utf8");
+  const path = patch.package === "js-yaml"
+    ? join(companionRoot, yamlPackagePaths[0], patch.file)
+    : require.resolve(`${patch.package}/${patch.file}`);
+  let source = readFileSync(path, "utf8");
   if (sha256(source) === patch.patchedSha256) {
     for (const [before, after] of [...patch.replacements].reverse()) source = source.split(after).join(before);
   }
@@ -30,7 +37,28 @@ function fixture(name) {
     cpSync(dirname(require.resolve(`${name}/package.json`)), target, { recursive: true });
     packages[`node_modules/${name}`] = { version: require(`${name}/package.json`).version };
   }
-  for (const patch of DEPENDENCY_SECURITY_PATCHES) writeFileSync(join(root, "node_modules", patch.package, patch.file), originalSource(patch));
+  const argparseTarget = join(root, "node_modules/argparse");
+  cpSync(dirname(require.resolve("argparse/package.json")), argparseTarget, { recursive: true });
+  packages["node_modules/argparse"] = { version: require("argparse/package.json").version };
+  for (const [index, yamlPath] of yamlPackagePaths.entries()) {
+    const yamlRoot = join(root, yamlPath);
+    const yamlPackageRoot = join(companionRoot, yamlPackagePaths[0]);
+    mkdirSync(dirname(yamlRoot), { recursive: true });
+    cpSync(yamlPackageRoot, yamlRoot, { recursive: true });
+    packages[yamlPath] = { version: "3.15.2", dependencies: { argparse: "^1.0.7", esprima: "^4.0.0" } };
+    const consumerPath = index === 0 ? "node_modules/@istanbuljs/load-nyc-config" : "node_modules/cosmiconfig";
+    const consumerName = index === 0 ? "@istanbuljs/load-nyc-config" : "cosmiconfig";
+    const consumerRoot = join(root, consumerPath);
+    mkdirSync(consumerRoot, { recursive: true });
+    writeFileSync(join(consumerRoot, "package.json"), JSON.stringify({ name: consumerName, version: index === 0 ? "1.1.0" : "5.2.1", dependencies: { "js-yaml": "^3.15.2" } }));
+    packages[consumerPath] = { version: index === 0 ? "1.1.0" : "5.2.1", dependencies: { "js-yaml": "^3.15.2" } };
+  }
+  for (const patch of DEPENDENCY_SECURITY_PATCHES) {
+    const targets = patch.package === "js-yaml"
+      ? yamlPackagePaths.map((yamlPath) => join(root, yamlPath, patch.file))
+      : [join(root, "node_modules", patch.package, patch.file)];
+    for (const target of targets) writeFileSync(target, originalSource(patch));
+  }
   for (const name of ["@expo/cli", "tar"]) mkdirSync(join(root, "node_modules", name), { recursive: true });
   writeFileSync(join(root, "node_modules/@expo/cli/package.json"), JSON.stringify({ name: "@expo/cli", version: "0.22.28" }));
   writeFileSync(join(root, "node_modules/tar/package.json"), JSON.stringify({ name: "tar", version: "7.5.22" }));
@@ -84,9 +112,9 @@ function rsaFixture(forge) {
 
 test("all installed consumers/copies have reviewed mitigated bytes", () => {
   const result = verifyDependencySecurityPatches(companionRoot);
-  assert.equal(result.files, 5);
-  assert.equal(result.packages.length, 2);
-  assert(result.consumers >= 4);
+  assert.equal(result.files, 7);
+  assert.equal(result.packages.length, 3);
+  assert(result.consumers >= 6);
 });
 
 test("original vulnerable nested RSA structure is accepted before the mitigation", () => {
@@ -156,11 +184,11 @@ test("deep braces and parentheses reject safely through public and private strin
   assert.throws(() => matcher.braces(deepPattern("{", "}", 3500)), /Muster braces nesting/);
 });
 
-test("preparation patches all seven files after preflight and is idempotent", () => {
+test("preparation patches both reviewed CLI copies and existing guards after preflight and is idempotent", () => {
   const root = fixture("prepare");
   const result = prepareToolchain(root);
-  assert.equal(result.files.filter((file) => file.changed).length, 7);
-  assert.equal(verifyDependencySecurityPatches(root).files, 5);
+  assert.equal(result.files.filter((file) => file.changed).length, 9);
+  assert.equal(verifyDependencySecurityPatches(root).files, 7);
   const before = planDependencySecurityPatches(root).files.map((file) => statSync(file.target));
   assert.equal(prepareToolchain(root).status, "unchanged");
   for (const [index, file] of planDependencySecurityPatches(root).files.entries()) {
@@ -168,6 +196,56 @@ test("preparation patches all seven files after preflight and is idempotent", ()
     assert.equal(after.ino, before[index].ino);
     assert.equal(after.mtimeMs, before[index].mtimeMs);
   }
+});
+
+test("formatter dependency and unknown js-yaml CLI source are refused before preparation writes", () => {
+  const dependencyRoot = fixture("reject-js-yaml-formatter");
+  const dependencyLockPath = join(dependencyRoot, "package-lock.json");
+  const dependencyLock = JSON.parse(readFileSync(dependencyLockPath, "utf8"));
+  dependencyLock.packages["node_modules/sprintf-js"] = { version: "1.0.3" };
+  writeFileSync(dependencyLockPath, JSON.stringify(dependencyLock));
+  assert.throws(() => planDependencySecurityPatches(dependencyRoot), /sprintf-js/);
+
+  const optionalFormatterRoot = fixture("reject-js-yaml-optional-formatter");
+  const optionalFormatterLockPath = join(optionalFormatterRoot, "package-lock.json");
+  const optionalFormatterLock = JSON.parse(readFileSync(optionalFormatterLockPath, "utf8"));
+  optionalFormatterLock.packages["node_modules/optional-consumer"] = { version: "1.0.0", optionalDependencies: { "sprintf-js": "^1.0.3" } };
+  writeFileSync(optionalFormatterLockPath, JSON.stringify(optionalFormatterLock));
+  assert.throws(() => planDependencySecurityPatches(optionalFormatterRoot), /sprintf-js.*optionalDependencies/);
+
+  const devFormatterRoot = fixture("reject-js-yaml-dev-formatter");
+  const devFormatterLockPath = join(devFormatterRoot, "package-lock.json");
+  const devFormatterLock = JSON.parse(readFileSync(devFormatterLockPath, "utf8"));
+  devFormatterLock.packages[""] = { version: "1.0.0", devDependencies: { "sprintf-js": "^1.0.3" } };
+  writeFileSync(devFormatterLockPath, JSON.stringify(devFormatterLock));
+  assert.throws(() => planDependencySecurityPatches(devFormatterRoot), /sprintf-js.*devDependencies/);
+
+  const optionalYamlRoot = fixture("reject-js-yaml-optional-version");
+  const optionalYamlLockPath = join(optionalYamlRoot, "package-lock.json");
+  const optionalYamlLock = JSON.parse(readFileSync(optionalYamlLockPath, "utf8"));
+  optionalYamlLock.packages["node_modules/optional-consumer"] = { version: "1.0.0", optionalDependencies: { "js-yaml": "3.15.3" } };
+  optionalYamlLock.packages["node_modules/optional-consumer/node_modules/js-yaml"] = { version: "3.15.3" };
+  writeFileSync(optionalYamlLockPath, JSON.stringify(optionalYamlLock));
+  assert.throws(() => planDependencySecurityPatches(optionalYamlRoot), /Unsupported js-yaml version in package graph/);
+
+  const sourceRoot = fixture("reject-js-yaml-source");
+  const cli = join(sourceRoot, yamlPackagePaths[1], "bin/js-yaml.js");
+  writeFileSync(cli, readFileSync(cli, "utf8") + "\n// unexpected local edit\n");
+  const expoTar = join(sourceRoot, "node_modules/@expo/cli/build/src/utils/tar.js");
+  const expoTarBefore = readFileSync(expoTar, "utf8");
+  assert.throws(() => prepareToolchain(sourceRoot), /Unknown js-yaml source/);
+  assert.equal(readFileSync(expoTar, "utf8"), expoTarBefore);
+  assert.equal(sha256(readFileSync(join(sourceRoot, yamlPackagePaths[0], "bin/js-yaml.js"))), DEPENDENCY_SECURITY_PATCHES.find((patch) => patch.package === "js-yaml").originalSha256);
+
+  const lockVersionRoot = fixture("reject-js-yaml-lock-version");
+  const lockVersionPath = join(lockVersionRoot, "package-lock.json");
+  const lockVersion = JSON.parse(readFileSync(lockVersionPath, "utf8"));
+  lockVersion.packages[yamlPackagePaths[1]].version = "3.15.3";
+  writeFileSync(lockVersionPath, JSON.stringify(lockVersion));
+  const bracesBefore = readFileSync(join(lockVersionRoot, "node_modules/braces/lib/parse.js"), "utf8");
+  assert.throws(() => prepareToolchain(lockVersionRoot), /Unsupported js-yaml version in package graph/);
+  assert.equal(readFileSync(join(lockVersionRoot, "node_modules/braces/lib/parse.js"), "utf8"), bracesBefore);
+  assert.equal(sha256(readFileSync(join(lockVersionRoot, yamlPackagePaths[0], "bin/js-yaml.js"))), DEPENDENCY_SECURITY_PATCHES.find((patch) => patch.package === "js-yaml").originalSha256);
 });
 
 test("unknown dependency bytes or versions reject before any reviewed source is changed", () => {
@@ -192,7 +270,7 @@ test("nested resolved copies are planned and unverifiable inherited resolution i
   const lock = JSON.parse(readFileSync(lockPath));
   lock.packages["node_modules/caller/node_modules/braces"] = { version: "3.0.3" };
   writeFileSync(lockPath, JSON.stringify(lock));
-  assert.equal(planDependencySecurityPatches(root).files.length, 9);
+  assert.equal(planDependencySecurityPatches(root).files.length, 11);
   prepareToolchain(root);
   assert.equal(verifyDependencySecurityPatches(root).packages.find((entry) => entry.name === "braces").copies, 2);
   delete lock.packages["node_modules/caller/node_modules/braces"];
