@@ -230,7 +230,7 @@ test("the current server docs404 retains shared readable styling and recovery li
   await expectFits(page, 320);
   expect(await appearance(page)).toEqual(await appearance(normal));
   await expect(page.locator('a[href="/"]').first()).toBeVisible();
-  await page.locator('a[href="/docs"]').click();
+  await page.getByRole("link", { name: "Documentation", exact: true }).click();
   await expect(page.locator('#docs-navigation a[aria-current="page"]')).toHaveAttribute("href", "/docs");
 });
 for (const width of [320, 1440]) {
