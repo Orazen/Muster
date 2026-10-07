@@ -16,6 +16,7 @@
     "dist-native/**",
     "dist-server/**",
     "electron/vendor/**",
+    "www/landing-workroom/v1/mascot/vendor/**",
     "release/**",
     "tools/oxlint/anti-slop/**"
   ],
