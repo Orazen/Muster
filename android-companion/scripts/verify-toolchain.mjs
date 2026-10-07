@@ -221,7 +221,7 @@ async function main() {
   const vectorMessage = Buffer.from("muster offline advisory regression");
   const vectorDigest = () => forge.md.sha256.create().update(vectorMessage.toString("binary"));
   const sha256Oid = () => forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OID, false, forge.asn1.oidToDer(forge.pki.oids.sha256).getBytes());
-  const nullParameters = () => forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.NULL, false, "");
+  const nullParameters = (value = "") => forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.NULL, false, value);
   const digestInfoDer = (algorithmChildren, trailing = []) => forge.asn1.toDer(forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [
     forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, algorithmChildren),
     forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.OCTETSTRING, false, vectorDigest().digest().getBytes()),
@@ -257,6 +257,28 @@ async function main() {
       assert.throws(() => vectorKeys.pair.publicKey.verify(vectorDigest().digest().getBytes(), rawSign(digestInfoDer(algorithmChildren))),
         /valid RSASSA-PKCS1-v1_5 DigestInfo/);
     }
+  });
+
+  await check("supplemental RSA NULL backport rejects nonempty contents and preserves BER, PSS and NONE", () => {
+    // Synthetic signatures use our private key and demonstrate malformed
+    // encoding refusal, not a private-key-free signature forgery.
+    const digest = vectorDigest().digest().getBytes();
+    for (const length of [1, 8, 32]) {
+      assert.throws(() => vectorKeys.pair.publicKey.verify(digest, rawSign(digestInfoDer([sha256Oid(), nullParameters("x".repeat(length))]))),
+        /valid RSASSA-PKCS1-v1_5 DigestInfo/);
+    }
+    const der = digestInfoDer([sha256Oid(), nullParameters()]);
+    assert.equal(der.charCodeAt(0), 0x30);
+    assert(der.charCodeAt(1) < 0x80);
+    assert.equal(vectorKeys.pair.publicKey.verify(digest, rawSign("\x30\x80" + der.slice(2) + "\x00\x00")), true);
+    const wrongDigest = forge.md.sha256.create().update("different owned vector").digest().getBytes();
+    const pss = forge.pss.create({ md: forge.md.sha256.create(), mgf: forge.mgf.mgf1.create(forge.md.sha256.create()), saltLength: 20 });
+    const pssSignature = vectorKeys.pair.privateKey.sign(vectorDigest(), pss);
+    assert.equal(vectorKeys.pair.publicKey.verify(digest, pssSignature, pss), true);
+    assert.equal(vectorKeys.pair.publicKey.verify(wrongDigest, pssSignature, pss), false);
+    const noneSignature = vectorKeys.pair.privateKey.sign(digest, "NONE");
+    assert.equal(vectorKeys.pair.publicKey.verify(digest, noneSignature, "NONE"), true);
+    assert.equal(vectorKeys.pair.publicKey.verify(wrongDigest, noneSignature, "NONE"), false);
   });
 
   // Copy only the reviewed source bytes and package metadata. Preparation
