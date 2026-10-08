@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { constants, createHash, generateKeyPairSync, privateEncrypt, sign as nodeSign } from "node:crypto";
-import { cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { after, test } from "node:test";
-import { DEPENDENCY_SECURITY_PATCHES, planDependencySecurityPatches, verifyDependencySecurityPatches } from "./dependency-security-policy.mjs";
+import { DEPENDENCY_SECURITY_PATCHES, IMMUTABLE_DEPENDENCY_FORKS, planDependencySecurityPatches, verifyDependencySecurityPatches } from "./dependency-security-policy.mjs";
 import { EXPO_TAR_PATCHES, prepareToolchain } from "./prepare-toolchain.mjs";
 
 const companionRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -29,13 +29,16 @@ const originalSource = (patch) => {
   assert.equal(sha256(source), patch.originalSha256);
   return source;
 };
-function fixture(name) {
+function fixture(name, { originals = false } = {}) {
   const root = join(scratch, name);
-  const packages = {};
+  const packages = { "": { devDependencies: Object.fromEntries(IMMUTABLE_DEPENDENCY_FORKS.map(({ name, relativePath }) => [name, `file:${relativePath}`])) } };
+  const installedLock = JSON.parse(readFileSync(join(companionRoot, "package-lock.json")));
+  mkdirSync(join(root, "vendor"), { recursive: true });
+  cpSync(join(companionRoot, "vendor/dependency-forks"), join(root, "vendor/dependency-forks"), { recursive: true });
   for (const name of ["braces", "node-forge"]) {
     const target = join(root, "node_modules", name);
     cpSync(dirname(require.resolve(`${name}/package.json`)), target, { recursive: true });
-    packages[`node_modules/${name}`] = { version: require(`${name}/package.json`).version };
+    packages[`node_modules/${name}`] = { ...installedLock.packages[`node_modules/${name}`] };
   }
   const argparseTarget = join(root, "node_modules/argparse");
   cpSync(dirname(require.resolve("argparse/package.json")), argparseTarget, { recursive: true });
@@ -57,7 +60,7 @@ function fixture(name) {
     const targets = patch.package === "js-yaml"
       ? yamlPackagePaths.map((yamlPath) => join(root, yamlPath, patch.file))
       : [join(root, "node_modules", patch.package, patch.file)];
-    for (const target of targets) writeFileSync(target, originalSource(patch));
+    if (originals || patch.package === "js-yaml") for (const target of targets) writeFileSync(target, originalSource(patch));
   }
   for (const name of ["@expo/cli", "tar"]) mkdirSync(join(root, "node_modules", name), { recursive: true });
   writeFileSync(join(root, "node_modules/@expo/cli/package.json"), JSON.stringify({ name: "@expo/cli", version: "0.22.28" }));
@@ -119,7 +122,7 @@ test("all installed consumers/copies have reviewed mitigated bytes", () => {
 });
 
 test("original vulnerable nested RSA structure is accepted before the mitigation", () => {
-  const root = fixture("rsa-original");
+  const root = fixture("rsa-original", { originals: true });
   const forge = createRequire(join(root, "package.json"))("node-forge");
   const f = rsaFixture(forge);
   assert.equal(f.publicKey.verify(f.digest.digest().getBytes(), f.signDer(f.der([f.oid(), f.nil(), f.garbage()]))), true);
@@ -144,7 +147,7 @@ test("mitigated RSA rejects nested garbage with and without NULL and preserves n
 });
 
 test("prior arity-only RSA image accepts malformed nonempty NULL encodings", () => {
-  const root = fixture("rsa-prior-null");
+  const root = fixture("rsa-prior-null", { originals: true });
   const patch = DEPENDENCY_SECURITY_PATCHES.find((entry) => entry.package === "node-forge");
   const target = join(root, "node_modules/node-forge/lib/rsa.js");
   const [before, after, count] = patch.replacements[0];
@@ -192,7 +195,7 @@ test("strict RSA NULL backport rejects nonempty parameters and preserves other v
 });
 
 test("original braces walker reproduces stack exhaustion in a bounded child", () => {
-  const root = fixture("braces-original");
+  const root = fixture("braces-original", { originals: true });
   try {
     // fixture() reconstructs and verifies the exact reviewed original bytes.
     // Bound this negative control instead of relying on the parent V8 stack size.
@@ -233,10 +236,10 @@ test("deep braces and parentheses reject safely through public and private strin
   assert.throws(() => matcher.braces(deepPattern("{", "}", 3500)), /Muster braces nesting/);
 });
 
-test("preparation patches both reviewed CLI copies and existing guards after preflight and is idempotent", () => {
+test("preparation keeps immutable forks untouched while adapting reviewed CLI and YAML sources", () => {
   const root = fixture("prepare");
   const result = prepareToolchain(root);
-  assert.equal(result.files.filter((file) => file.changed).length, 9);
+  assert.equal(result.files.filter((file) => file.changed).length, 4);
   assert.equal(verifyDependencySecurityPatches(root).files, 7);
   const before = planDependencySecurityPatches(root).files.map((file) => statSync(file.target));
   assert.equal(prepareToolchain(root).status, "unchanged");
@@ -247,23 +250,20 @@ test("preparation patches both reviewed CLI copies and existing guards after pre
   }
 });
 
-test("preparation upgrades the pinned prior RSA image without replacing unchanged sources", () => {
-  const root = fixture("upgrade-prior-rsa");
+test("a prior RSA image is refused without install-time repair or unrelated writes", () => {
+  const root = fixture("reject-prior-rsa");
   prepareToolchain(root);
   const patch = DEPENDENCY_SECURITY_PATCHES.find((entry) => entry.package === "node-forge");
   const target = join(root, "node_modules/node-forge/lib/rsa.js");
   const [before, after] = patch.replacements[1];
   const prior = readFileSync(target, "utf8").replace(after, before);
   assert.equal(sha256(prior), patch.previousPatchedSha256);
-  writeFileSync(target, prior);
   const unchanged = planDependencySecurityPatches(root).files.filter((file) => file.target !== target)
     .map((file) => ({ target: file.target, stat: statSync(file.target), hash: sha256(readFileSync(file.target)) }));
-  assert.throws(() => verifyDependencySecurityPatches(root), /mitigations are missing/);
-  const result = prepareToolchain(root);
-  assert.deepEqual(result.files.filter((file) => file.changed).map((file) => file.name), ["node_modules/node-forge/lib/rsa.js"]);
-  assert.equal(sha256(readFileSync(target)), patch.patchedSha256);
-  assert.equal(verifyDependencySecurityPatches(root).files, 7);
-  assert.equal(prepareToolchain(root).status, "unchanged");
+  writeFileSync(target, prior);
+  assert.throws(() => verifyDependencySecurityPatches(root), /Unknown immutable node-forge source/);
+  assert.throws(() => prepareToolchain(root), /Unknown immutable node-forge source/);
+  assert.equal(sha256(readFileSync(target)), patch.previousPatchedSha256);
   for (const file of unchanged) {
     assert.equal(sha256(readFileSync(file.target)), file.hash);
     assert.equal(statSync(file.target).ino, file.stat.ino);
@@ -327,9 +327,9 @@ test("unknown dependency bytes or versions reject before any reviewed source is 
     const rsa = join(root, "node_modules/node-forge/lib/rsa.js");
     if (change === "bytes") writeFileSync(rsa, readFileSync(rsa, "utf8") + "\n// unexpected\n");
     else writeFileSync(join(root, "node_modules/node-forge/package.json"), JSON.stringify({ name: "node-forge", version: "1.4.1" }));
-    assert.throws(() => prepareToolchain(root), change === "bytes" ? /Unknown node-forge source/ : /Unsupported node-forge version/);
+    assert.throws(() => prepareToolchain(root), change === "bytes" ? /Unknown immutable node-forge source|Unexpected immutable input size/ : /Unsupported node-forge version/);
     for (const patch of DEPENDENCY_SECURITY_PATCHES.filter((patch) => patch.package === "braces")) {
-      assert.equal(sha256(readFileSync(join(root, "node_modules", patch.package, patch.file))), patch.originalSha256);
+      assert.equal(sha256(readFileSync(join(root, "node_modules", patch.package, patch.file))), patch.patchedSha256);
     }
     assert.equal(sha256(readFileSync(join(root, "node_modules/@expo/cli/build/src/utils/tar.js"))), EXPO_TAR_PATCHES[0].originalSha256);
   }
@@ -341,7 +341,7 @@ test("nested resolved copies are planned and unverifiable inherited resolution i
   cpSync(join(root, "node_modules/braces"), copy, { recursive: true });
   const lockPath = join(root, "package-lock.json");
   const lock = JSON.parse(readFileSync(lockPath));
-  lock.packages["node_modules/caller/node_modules/braces"] = { version: "3.0.3" };
+  lock.packages["node_modules/caller/node_modules/braces"] = { ...lock.packages["node_modules/braces"] };
   writeFileSync(lockPath, JSON.stringify(lock));
   assert.equal(planDependencySecurityPatches(root).files.length, 11);
   prepareToolchain(root);
@@ -380,4 +380,61 @@ test("toolchain verifier stops on missing mitigation before dependency callers a
   assert.match(result.stderr, /Dependency mitigations are missing/);
   assert.doesNotMatch(result.stderr, /Cannot find module|MODULE_NOT_FOUND/);
   assert.equal(result.stdout, "");
+});
+
+
+test("immutable fork archives, provenance and every lock edge refuse drift before writes", () => {
+  for (const change of ["archive", "provenance", "registry-resolution", "integrity", "root-selection"]) {
+    const root = fixture(`immutable-${change}`);
+    const descriptor = IMMUTABLE_DEPENDENCY_FORKS.find(({ name }) => name === "node-forge");
+    const cli = join(root, "node_modules/@expo/cli/build/src/utils/tar.js");
+    const cliBefore = readFileSync(cli);
+    if (change === "archive" || change === "provenance") {
+      const target = join(root, change === "archive" ? descriptor.relativePath : "vendor/dependency-forks/provenance.json");
+      const bytes = readFileSync(target); bytes[0] ^= 1; writeFileSync(target, bytes);
+    } else {
+      const path = join(root, "package-lock.json"); const lock = JSON.parse(readFileSync(path));
+      if (change === "registry-resolution") lock.packages["node_modules/node-forge"].resolved = "https://registry.npmjs.org/node-forge/-/node-forge-1.4.0.tgz";
+      if (change === "integrity") lock.packages["node_modules/node-forge"].integrity = "sha512-unreviewed";
+      if (change === "root-selection") lock.packages[""].devDependencies["node-forge"] = "1.4.0";
+      writeFileSync(path, JSON.stringify(lock));
+    }
+    assert.throws(() => prepareToolchain(root), /Unknown immutable|Unreviewed immutable|Root must select immutable/);
+    assert.deepEqual(readFileSync(cli), cliBefore);
+  }
+});
+
+test("complete immutable inventory rejects unpatched entrypoints, omitted bundles and unrelated file changes", () => {
+  for (const change of ["original-rsa", "added-dist", "empty-dist", "altered-license", "missing-file"]) {
+    const root = fixture(`inventory-${change}`);
+    const packageRoot = join(root, "node_modules/node-forge");
+    const cli = join(root, "node_modules/@expo/cli/build/src/utils/tar.js"); const before = readFileSync(cli);
+    if (change === "original-rsa") writeFileSync(join(packageRoot, "lib/rsa.js"), originalSource(DEPENDENCY_SECURITY_PATCHES.find(({ package: name }) => name === "node-forge")));
+    if (change === "added-dist") { mkdirSync(join(packageRoot, "dist")); writeFileSync(join(packageRoot, "dist/forge.min.js"), "unreviewed vulnerable browser distribution"); }
+    if (change === "empty-dist") mkdirSync(join(packageRoot, "dist"));
+    if (change === "altered-license") { const target = join(packageRoot, "LICENSE"); const bytes = readFileSync(target); bytes[0] ^= 1; writeFileSync(target, bytes); }
+    if (change === "missing-file") rmSync(join(packageRoot, "lib/sha256.js"));
+    assert.throws(() => prepareToolchain(root), /Unknown immutable/);
+    assert.deepEqual(readFileSync(cli), before);
+  }
+  assert.throws(() => require.resolve("node-forge/dist/forge.min.js"), { code: "MODULE_NOT_FOUND" });
+  assert.throws(() => require.resolve("node-forge/dist/forge.all.min.js"), { code: "MODULE_NOT_FOUND" });
+  assert.equal(typeof require("node-forge").pki.publicKeyFromPem, "function");
+});
+
+
+test("immutable archive links and installed source permissions fail closed", () => {
+  for (const change of ["archive-symlink", "archive-hardlink", "source-mode"]) {
+    const root = fixture(`identity-${change}`);
+    const descriptor = IMMUTABLE_DEPENDENCY_FORKS[0];
+    const target = join(root, descriptor.relativePath);
+    const before = readFileSync(join(root, "node_modules/@expo/cli/build/src/utils/tar.js"));
+    if (change === "source-mode") chmodSync(join(root, "node_modules/braces/index.js"), 0o600);
+    else {
+      const owned = join(root, "archive-copy.tgz"); writeFileSync(owned, readFileSync(target)); rmSync(target);
+      if (change === "archive-symlink") symlinkSync(owned, target); else linkSync(owned, target);
+    }
+    assert.throws(() => prepareToolchain(root), /unlinked regular dependency file|Unknown immutable braces mode/);
+    assert.deepEqual(readFileSync(join(root, "node_modules/@expo/cli/build/src/utils/tar.js")), before);
+  }
 });

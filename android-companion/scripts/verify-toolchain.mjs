@@ -4,13 +4,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { constants, createHash, generateKeyPairSync, privateEncrypt, sign as nodeSign } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { EXPO_TAR_PATCHES, prepareToolchain } from "./prepare-toolchain.mjs";
-import { DEPENDENCY_SECURITY_PATCHES, verifyDependencySecurityPatches } from "./dependency-security-policy.mjs";
+import { DEPENDENCY_SECURITY_PATCHES, IMMUTABLE_DEPENDENCY_FORKS, verifyDependencySecurityPatches } from "./dependency-security-policy.mjs";
 
 const require = createRequire(new URL("../package.json", import.meta.url));
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "muster-expo-compat-")));
@@ -54,7 +54,7 @@ async function main() {
   // This prerequisite is deliberately outside check(): a failure must stop
   // before resolving/evaluating any Expo or Metro dependency caller.
   const securityReceipt = verifyDependencySecurityPatches(fileURLToPath(new URL("..", import.meta.url)));
-  await check("all installed vulnerable-package sources have reviewed mitigations before loading callers", () => {
+  await check("all immutable fork sources and YAML adaptations are verified before loading callers", () => {
     const receipt = securityReceipt;
     assert.equal(receipt.files, 7);
     assert.equal(receipt.packages.length, 3);
@@ -297,8 +297,17 @@ async function main() {
     writeFileSync(join(root, "node_modules/@expo/cli/package.json"), JSON.stringify({ name: "@expo/cli", version: "0.22.28" }));
     writeFileSync(join(root, "node_modules/tar/package.json"), JSON.stringify({ name: "tar", version: "7.5.22" }));
     for (const [file, source] of originalSources) writeFileSync(fixturePath(root, file), source);
-    const securityPackages = {};
-    for (const patch of DEPENDENCY_SECURITY_PATCHES) {
+    const securityPackages = { "": { devDependencies: Object.fromEntries(IMMUTABLE_DEPENDENCY_FORKS.map(({ name, relativePath }) => [name, `file:${relativePath}`])) } };
+    const companion = fileURLToPath(new URL("..", import.meta.url));
+    const installedLock = JSON.parse(readFileSync(join(companion, "package-lock.json")));
+    mkdirSync(join(root, "vendor"));
+    cpSync(join(companion, "vendor/dependency-forks"), join(root, "vendor/dependency-forks"), { recursive: true });
+    for (const descriptor of IMMUTABLE_DEPENDENCY_FORKS) {
+      const packagePath = `node_modules/${descriptor.name}`;
+      cpSync(join(companion, packagePath), join(root, packagePath), { recursive: true });
+      securityPackages[packagePath] = { ...installedLock.packages[packagePath] };
+    }
+    for (const patch of DEPENDENCY_SECURITY_PATCHES.filter(({ package: name }) => name === "js-yaml")) {
       const packagePaths = patch.package === "js-yaml"
         ? [
           "node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml",
@@ -339,7 +348,7 @@ async function main() {
   await check("trusted preparation changes both reviewed imports in an owned copy", () => {
     const result = prepareToolchain(preparationRoot);
     assert.equal(result.status, "prepared");
-    assert.equal(result.files.filter((file) => file.changed).length, 9);
+    assert.equal(result.files.filter((file) => file.changed).length, 4);
     for (const patch of EXPO_TAR_PATCHES) {
       assert.equal(createHash("sha256").update(readFileSync(fixturePath(preparationRoot, patch.name))).digest("hex"), patch.patchedSha256);
     }

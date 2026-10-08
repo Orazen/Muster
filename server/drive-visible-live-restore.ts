@@ -221,7 +221,14 @@ export async function applyLiveAccountRestore(input: { runtime: LiveRestoreRunti
     current(); journal.assert();
     receipt = journal.mark(receipt, "committed", "committed");
     const committed = result(intent);
-    try { input.onPhase?.("committed"); runtime.publish?.({ userId: authority.account.userId, workspaceId: authority.account.workspaceId }, committed); input.onPhase?.("ack"); } catch { /* Receipt remains committed; publication/ack is never a rollback trigger. */ }
+    try {
+      input.onPhase?.("committed");
+      // Publication needs current authority even after the durable commit.
+      // Losing it suppresses the event, never compensates committed records.
+      current();
+      runtime.publish?.({ userId: authority.account.userId, workspaceId: authority.account.workspaceId }, committed);
+      input.onPhase?.("ack");
+    } catch { /* Receipt remains committed; publication/ack is never a rollback trigger. */ }
     return committed;
   } catch (error) {
     if (!intent || !receipt) throw error;
