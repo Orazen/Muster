@@ -163,7 +163,7 @@ export function createRoleOutfit(role, { robot, leftArm, rightArm, faceDepth }) 
       frontLine('developer-drawstring-right', [[.23, 2.21], [.25, 2.04], [.24, 1.91]], paper, .017);
       pocket('developer-hoodie-pocket', 0, 1.45, .55);
       const laptop = new THREE.Group(); laptop.name = 'developer-laptop'; group.add(laptop);
-      laptop.position.set(0, 1.60, .94); animatedProp = laptop;
+      laptop.position.set(0, 1.60, 1.20); animatedProp = laptop;
       const laptopMaterial = material('#414342', { metalness: .25, roughness: .45 });
       const base = box('developer-laptop-base', 1.04, .07, .54, laptopMaterial, laptop);
       base.position.y = -.22;

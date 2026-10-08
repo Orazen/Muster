@@ -35,7 +35,7 @@ const LOCKED = {
   "www/landing-workroom/v1/mascot/vendor/three.module.js": "c8211c69345d2e9949dc7a8ac969380497aa0600a5a8ac6a459c8cd02dd9cb8a",
   "www/landing-workroom/v1/social.jpg": "904d06b4be8b19fc4f208eb50bede54359c554dd614b940ac76af72d7eab18a3",
   "www/landing-workroom/v1/style.css": "4381475c350302af5afcc71c43e856258c10ec247821e6b2ccad22e00b99ef24",
-  "www/landing-workroom/v1/mascot/role-outfits.js": "5cb00ec157035e74788159d07c9e205f7077b60747b41d5873643adfec516285",
+  "www/landing-workroom/v1/mascot/role-outfits.js": "8bf6ed506aaad479230bdbb9ed744a712d3c182fad02e7664747f6c81db3701b",
   "www/landing-workroom/v1/mascot/crew.js": "198ada2121c9e861fd9889db4e59975f08261b2680c96df7b2ec214b76e55b24",
   "www/landing-workroom/v1/mascot/posters/designer.png": "d5c7db650f96f0bb2d2055de792ed8c08f099527b6fba74340cda2d1aef562e7",
   "www/landing-workroom/v1/mascot/posters/developer.png": "7b7d81811425f9114ca836d01279c912e6fe0b6413046e07729a7df497d68404",

@@ -114,6 +114,66 @@ describe("actual additive offline account apply",()=>{
     expect(await importer.applyAccountRecoveryOffline({...input,resolveEngine:()=>null})).toMatchObject({reason:"preflight-refused"});unchanged();
     const original=input.resolveEngine;expect(await importer.applyAccountRecoveryOffline({...input,resolveEngine:(...args)=>({...original(...args)!,ownerId:"bob"})})).toMatchObject({reason:"preflight-refused"});unchanged();
   });
+  it.each(["model", "effort"])("refuses an unsupported recovery %s before account writes", async field => {
+    const original = input.resolveEngine;
+    input.resolveEngine = (...args) => {
+      const offered = original(...args)!;
+      return { ...offered, selection: { ...offered.selection,
+        ...(field === "model" ? { model: "nonexistent-recovery-model" } : { effort: "high" as const }) } };
+    };
+    expect(await importer.applyAccountRecoveryOffline(input)).toMatchObject({ status: "unavailable", reason: "preflight-refused" });
+    unchanged();
+    expect(existsSync(join(owned.root, "account-recovery-journal", "owned-operation"))).toBe(false);
+  });
+  it("keeps explicitly registered custom models and supported effort available", async () => {
+    const original = input.resolveEngine;
+    const instance = original(ids.own, input.resolveAccount()!.account)!.instance;
+    instance.models.options.push({ id: "custom/owned-model", label: "Owned custom model", custom: true });
+    instance.adapter.capabilities.effortLevels = ["high"];
+    input.resolveEngine = (...args) => ({ ...original(...args)!,
+      selection: { instanceId: instance.instanceId, model: "custom/owned-model", effort: "high" } });
+    const restored = await importer.applyAccountRecoveryOffline(input);
+    expect(restored.status).toBe("committed");
+    if (restored.status !== "committed") throw new Error("Custom recovery refused");
+    for (const botId of Object.values(restored.mapping.bot)) {
+      expect(input.store.bot(botId)?.modelSelection).toEqual({ instanceId: instance.instanceId, model: "custom/owned-model", effort: "high" });
+    }
+    expect(send).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each(["preflight", "readback"])("refuses a provider replaced during its %s snapshot", async phase => {
+    let offered = input.resolveEngine(ids.own, input.resolveAccount()!.account)!;
+    const prior = offered.instance, snapshot = prior.snapshot.bind(prior);
+    const replacement = { ...prior, snapshot };
+    input.resolveEngine = () => offered;
+    const replaceDuringSnapshot = () => { prior.snapshot = async () => {
+      offered = { ...offered, instance: replacement };
+      return snapshot();
+    }; };
+    if (phase === "preflight") replaceDuringSnapshot();
+    else input.onPhase = current => { if (current === "readback") replaceDuringSnapshot(); };
+    expect(await importer.applyAccountRecoveryOffline(input)).toMatchObject({ status: "unavailable",
+      reason: phase === "preflight" ? "preflight-refused" : "rolled-back" });
+    unchanged();
+  });
+  it("revalidates earlier selections after another provider's awaited snapshot", async () => {
+    const offered = input.resolveEngine(ids.own, input.resolveAccount()!.account)!;
+    let first = offered.instance, firstSource: string | undefined, replaced = false;
+    const snapshot = first.snapshot.bind(first), replacement = { ...first, snapshot };
+    const second = { ...first, instanceId: "secondApi:alice", snapshot: async () => {
+      first = replacement; replaced = true; return snapshot();
+    } };
+    input.resolveEngine = sourceBotId => {
+      // Canonical archive IDs sort random UUIDs, so discover the first bot
+      // instead of assuming the fixture's creation order survives projection.
+      firstSource ??= sourceBotId;
+      const instance = sourceBotId === firstSource ? first : second;
+      return { ownerId: "alice", instance, selection: { instanceId: instance.instanceId, model: "fake-1" } };
+    };
+    expect(await importer.applyAccountRecoveryOffline(input)).toMatchObject({ status: "unavailable", reason: "preflight-refused" });
+    expect(replaced).toBe(true);
+    unchanged();
+    expect(existsSync(join(owned.root, "account-recovery-journal", "owned-operation"))).toBe(false);
+  });
   it("wrong key and changed subject do not expose or mutate account data",async()=>{
     expect(await importer.applyAccountRecoveryOffline({...input,key:{custody:"user-held",passphrase:"WRONG-SYNTHETIC-PASSPHRASE"}})).toMatchObject({reason:"preflight-refused"});unchanged();
     const resolveAccount=input.resolveAccount;expect(await importer.applyAccountRecoveryOffline({...input,resolveAccount:()=>({...resolveAccount()!,googleSub:"foreign-google"})})).toMatchObject({reason:"preflight-refused"});unchanged();
