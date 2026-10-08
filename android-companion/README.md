@@ -93,29 +93,41 @@ local template extraction, plist parsing, UUID consumers and Metro's PostCSS
 path with owned fixtures. They complement the app tests and Android export;
 they do not prove native installation or device behavior.
 
-The same preparation step applies local, version/hash-bound mitigations to
-`braces` 3.0.3 and `node-forge` 1.4.0. Braces rejects parser nesting and recursive
-AST walking beyond 100 levels, including parentheses and direct compile,
-expand and stringify entry points. Node-forge rejects extra nested
-`DigestAlgorithm` children during RSA PKCS#1 v1.5 verification, backporting the
-fix proposed in upstream [forge PR 1152](https://github.com/digitalbazaar/forge/pull/1152)
-at `ceba34402e329f0365134f23fe19898756527d65`. Every lockfile copy and installed
-consumer resolution is checked before any reviewed source is replaced;
-unrecognized versions, bytes, symlinks and hardlinks fail preparation.
+Braces 3.0.3 and node-forge 1.4.0 now come from committed immutable tarballs in
+`vendor/dependency-forks/`, selected by root file devDependencies and `$braces` /
+`$node-forge` overrides. The same five reviewed lib backports are present even
+with `npm ci --ignore-scripts`; preparation verifies them and never repairs an
+original, prior or altered copy. Expo tar and js-yaml compatibility adaptations
+still require `prepare:toolchain` before loading those callers.
 
-These are local source mitigations for
+The provenance file records the official registry SHA512/SHA256, full original
+inventories, licenses, local revision and exact installed files. Forge's six
+precompiled `dist/` assets are explicitly removed, with their original hashes
+retained in provenance. They are not repaired or supported browser entrypoints.
+The pinned Expo CLI, code-signing-certificates and selfsigned consumers import
+`node-forge`'s unchanged Node library entry; normal `lib/` APIs, metadata and
+licenses are preserved apart from the reviewed RSA checks and the removed dist
+publish globs. Future consumers requiring a precompiled bundle need separate
+review rather than an unreviewed fallback.
+
+The policy binds both immutable archives, provenance, every lock copy, complete
+installed inventory and actual consumer resolution before dependency code is
+loaded. Unknown files, registry copies, altered versions/bytes, links and drift
+fail closed before unrelated preparation writes. Braces rejects nesting/AST
+walking beyond 100 levels. Forge rejects extra nested DigestAlgorithm children
+and nonempty NULL parameters using the existing reviewed PR1152/PR1157
+backports. Focused tests retain original vulnerable fixtures plus normal
+matching, signatures and real Expo/selfsigned behavior; they also test immutable
+archive/lock/inventory refusal and owned preparation cleanup.
+
+These remain project-maintained local backports for
 [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) and
-[GHSA-86w9-cpqp-85rv](https://github.com/advisories/GHSA-86w9-cpqp-85rv).
-The npm versions remain within the upstream affected ranges and the audit
-findings remain visible; dismissing a Dependabot alert does not apply the
-mitigations. There is no patched upstream npm release as of 2026-10-05. An
-SDK upgrade needs its own compatibility and native acceptance checks and does
-not by itself establish repair. Installations made with `--ignore-scripts`
-must run `prepare:toolchain` before loading Expo/Metro. The focused Node tests
-reproduce both original flaws, reject malformed/deep inputs after mitigation,
-retain ordinary matching/RSA/Expo-certificate behavior and verify repeatable
-preparation. Those tests and `verify:toolchain` do not prove a native app build,
-installed-device behavior or a whole-project security assessment.
+[GHSA-86w9-cpqp-85rv](https://github.com/advisories/GHSA-86w9-cpqp-85rv), not
+patched upstream releases or a whole-project security assessment. Original
+package names/versions remain in affected advisory ranges; scanner findings and
+alert-dismissal history must remain visible. Packaging these fixes immutably is
+not itself a passing consumer test, native build, installed-device or release
+receipt. Expo SDK upgrades require their own coherent compatibility acceptance.
 
 Metro's `image-size` dependency **is the owned parser in `vendor/image-size/`**,
 declared as an npm workspace so `node_modules/image-size` links to it and the

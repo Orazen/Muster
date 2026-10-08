@@ -1,0 +1,1444 @@
+{
+  "schemaVersion": 1,
+  "distribution": "Project-maintained immutable local backports, not patched upstream versions",
+  "revision": "muster-security-v1",
+  "packages": [
+    {
+      "name": "braces",
+      "version": "3.0.3",
+      "localRevision": "muster-security-v1",
+      "archive": {
+        "relativePath": "vendor/dependency-forks/braces-3.0.3-muster-security-v1.tgz",
+        "bytes": 14018,
+        "sha256": "6797dd2778cc8a5fe34aa2c2fb39fdad3e09b33387378b2496fb17c5ca4e7b97",
+        "integrity": "sha512-DTMccNLRRrH9Dvb7rJL3ayzUghKMZ7ZgeviM6SX0OrdJJ/+UEV6EiG+H/tjILsBFxpJjCj5UAtZjFJIcWRfbWw=="
+      },
+      "upstream": {
+        "tarball": "https://registry.npmjs.org/braces/-/braces-3.0.3.tgz",
+        "sha256": "1cd18e862c8640b4568b1425a7df4ee030ff201d45b2da8f9f222d2987494ffc",
+        "integrity": "sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==",
+        "bytes": 13972,
+        "license": "MIT",
+        "originalFileCount": 10,
+        "completeInventory": [
+          {
+            "path": "LICENSE",
+            "upstreamArchivePath": "package/LICENSE",
+            "mode": "0o644",
+            "upstreamBytes": 1091,
+            "upstreamSha256": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+            "candidateBytes": 1091,
+            "candidateSha256": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+            "localBackport": false
+          },
+          {
+            "path": "README.md",
+            "upstreamArchivePath": "package/README.md",
+            "mode": "0o644",
+            "upstreamBytes": 21505,
+            "upstreamSha256": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+            "candidateBytes": 21505,
+            "candidateSha256": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+            "localBackport": false
+          },
+          {
+            "path": "index.js",
+            "upstreamArchivePath": "package/index.js",
+            "mode": "0o644",
+            "upstreamBytes": 4380,
+            "upstreamSha256": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+            "candidateBytes": 4380,
+            "candidateSha256": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+            "localBackport": false
+          },
+          {
+            "path": "lib/compile.js",
+            "upstreamArchivePath": "package/lib/compile.js",
+            "mode": "0o644",
+            "upstreamBytes": 1501,
+            "upstreamSha256": "dc98f22eee3d511785d92a00758d5f0d48efed5f5813bdecc2de430c529b5c9f",
+            "candidateBytes": 1625,
+            "candidateSha256": "ccc779d1c36fc0f634d90f7f005245550b2b9b8de6264b7d39cbd12999497406",
+            "localBackport": true
+          },
+          {
+            "path": "lib/constants.js",
+            "upstreamArchivePath": "package/lib/constants.js",
+            "mode": "0o644",
+            "upstreamBytes": 1589,
+            "upstreamSha256": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+            "candidateBytes": 1589,
+            "candidateSha256": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+            "localBackport": false
+          },
+          {
+            "path": "lib/expand.js",
+            "upstreamArchivePath": "package/lib/expand.js",
+            "mode": "0o644",
+            "upstreamBytes": 2797,
+            "upstreamSha256": "41ccc196ebfa7b7781a634e721eb744e4e7bcb54cba427a7e3d6806a1b9e58f7",
+            "candidateBytes": 2921,
+            "candidateSha256": "0370999f2ce73ab4d3abc5f42dde90bd19bffe5027dc5871c4c77b3fde2a1680",
+            "localBackport": true
+          },
+          {
+            "path": "lib/parse.js",
+            "upstreamArchivePath": "package/lib/parse.js",
+            "mode": "0o644",
+            "upstreamBytes": 6899,
+            "upstreamSha256": "e572166565f15fa6ad9865ae49d678218e32aabfd1b3720f6d0d43d39800d310",
+            "candidateBytes": 7123,
+            "candidateSha256": "38d9f0c3762d2fbc267488edb9da2a01c32ad62ab8af57299aea02dc4dd6146e",
+            "localBackport": true
+          },
+          {
+            "path": "lib/stringify.js",
+            "upstreamArchivePath": "package/lib/stringify.js",
+            "mode": "0o644",
+            "upstreamBytes": 708,
+            "upstreamSha256": "379f22d77bfa1478341ccd49c5e4267464aabcbba03558bab332aac23fc6f23a",
+            "candidateBytes": 836,
+            "candidateSha256": "181c363997e97a88a5986590a66a8f9c507fb60c34c6f8c4ef17970aef1c495c",
+            "localBackport": true
+          },
+          {
+            "path": "lib/utils.js",
+            "upstreamArchivePath": "package/lib/utils.js",
+            "mode": "0o644",
+            "upstreamBytes": 2518,
+            "upstreamSha256": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+            "candidateBytes": 2518,
+            "candidateSha256": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+            "localBackport": false
+          },
+          {
+            "path": "package.json",
+            "upstreamArchivePath": "package/package.json",
+            "mode": "0o644",
+            "upstreamBytes": 1647,
+            "upstreamSha256": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7",
+            "candidateBytes": 1647,
+            "candidateSha256": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7",
+            "localBackport": false
+          }
+        ]
+      },
+      "installedFiles": [
+        {
+          "path": "LICENSE",
+          "bytes": 1091,
+          "sha256": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+          "mode": 420,
+          "upstreamSha256": "35bdd8a44339719441900fb50fbefc5e2dca1ca662cbaed7a687de842c8b70f2",
+          "upstreamBytes": 1091,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "README.md",
+          "bytes": 21505,
+          "sha256": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+          "mode": 420,
+          "upstreamSha256": "947b0fc3cc12eaaa070207126213fbdf9ab2bf8cd13dcc6e4007b36b79309866",
+          "upstreamBytes": 21505,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "index.js",
+          "bytes": 4380,
+          "sha256": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+          "mode": 420,
+          "upstreamSha256": "332ea07c7b006361aad12aa994ca75dc1db8e8382b884909e2f38f10b85c88a4",
+          "upstreamBytes": 4380,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/compile.js",
+          "bytes": 1625,
+          "sha256": "ccc779d1c36fc0f634d90f7f005245550b2b9b8de6264b7d39cbd12999497406",
+          "mode": 420,
+          "upstreamSha256": "dc98f22eee3d511785d92a00758d5f0d48efed5f5813bdecc2de430c529b5c9f",
+          "upstreamBytes": 1501,
+          "change": "existing reviewed security backport"
+        },
+        {
+          "path": "lib/constants.js",
+          "bytes": 1589,
+          "sha256": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+          "mode": 420,
+          "upstreamSha256": "c18ac5adb57308f1ce42a28552da3a31f5d83709743ebd9a636336813a744d4b",
+          "upstreamBytes": 1589,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/expand.js",
+          "bytes": 2921,
+          "sha256": "0370999f2ce73ab4d3abc5f42dde90bd19bffe5027dc5871c4c77b3fde2a1680",
+          "mode": 420,
+          "upstreamSha256": "41ccc196ebfa7b7781a634e721eb744e4e7bcb54cba427a7e3d6806a1b9e58f7",
+          "upstreamBytes": 2797,
+          "change": "existing reviewed security backport"
+        },
+        {
+          "path": "lib/parse.js",
+          "bytes": 7123,
+          "sha256": "38d9f0c3762d2fbc267488edb9da2a01c32ad62ab8af57299aea02dc4dd6146e",
+          "mode": 420,
+          "upstreamSha256": "e572166565f15fa6ad9865ae49d678218e32aabfd1b3720f6d0d43d39800d310",
+          "upstreamBytes": 6899,
+          "change": "existing reviewed security backport"
+        },
+        {
+          "path": "lib/stringify.js",
+          "bytes": 836,
+          "sha256": "181c363997e97a88a5986590a66a8f9c507fb60c34c6f8c4ef17970aef1c495c",
+          "mode": 420,
+          "upstreamSha256": "379f22d77bfa1478341ccd49c5e4267464aabcbba03558bab332aac23fc6f23a",
+          "upstreamBytes": 708,
+          "change": "existing reviewed security backport"
+        },
+        {
+          "path": "lib/utils.js",
+          "bytes": 2518,
+          "sha256": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+          "mode": 420,
+          "upstreamSha256": "b5a7596aa67730412b3c029ef09e84e6b67b8e445cffd35d1d295549c89066c7",
+          "upstreamBytes": 2518,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "package.json",
+          "bytes": 1647,
+          "sha256": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7",
+          "mode": 420,
+          "upstreamSha256": "56f08b888a4f30dc7cf8a7dbb36ffe92b737912ba36abe9d069d32167c957ac7",
+          "upstreamBytes": 1647,
+          "change": "unchanged upstream member"
+        }
+      ],
+      "removedUpstreamMembers": [],
+      "supportedEntries": "Default Node CommonJS lib/index.js plus unchanged lib/ module API used by pinned Expo0.22.28/code-signing0.0.6/selfsigned2.4.1. Unshipped precompiled dist/ entrypoints are not supported.",
+      "consumerSourceProof": "Current micromatch4.0.8 imports the default braces entry; all10 braces members retained."
+    },
+    {
+      "name": "node-forge",
+      "version": "1.4.0",
+      "localRevision": "muster-security-v1",
+      "archive": {
+        "relativePath": "vendor/dependency-forks/node-forge-1.4.0-muster-security-v1.tgz",
+        "bytes": 270970,
+        "sha256": "0d439ec5baf6289d8027664d092267a800191930ec162ce866545da7eb94e700",
+        "integrity": "sha512-AJhGtX5YGZwSYVXlV8KGeVFzgrpWjJHXj3NJwq/OlyNdMy+SUveZ83SYuMZkQPfnMeCvYvxOA03tIR8RnRniSQ=="
+      },
+      "upstream": {
+        "tarball": "https://registry.npmjs.org/node-forge/-/node-forge-1.4.0.tgz",
+        "sha256": "bf9d7ca0d774235354697bd4b5e642af6505e7ce2066762c3b855138cf870820",
+        "integrity": "sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ==",
+        "bytes": 435334,
+        "license": "(BSD-3-Clause OR GPL-2.0)",
+        "originalFileCount": 59,
+        "completeInventory": [
+          {
+            "path": "LICENSE",
+            "upstreamArchivePath": "package/LICENSE",
+            "mode": "0o644",
+            "upstreamBytes": 17972,
+            "upstreamSha256": "f63ff0e4e239244aa79280da2dd4811a0469e5e201caf5cbc0d97c3a1dff8e82",
+            "candidateBytes": 17972,
+            "candidateSha256": "f63ff0e4e239244aa79280da2dd4811a0469e5e201caf5cbc0d97c3a1dff8e82",
+            "localBackport": false
+          },
+          {
+            "path": "README.md",
+            "upstreamArchivePath": "package/README.md",
+            "mode": "0o644",
+            "upstreamBytes": 59605,
+            "upstreamSha256": "4ea0e2db410fd5d87c3c9b21912b9ed3fe6c57b3107fa92e2c90b1e618121a49",
+            "candidateBytes": 59605,
+            "candidateSha256": "4ea0e2db410fd5d87c3c9b21912b9ed3fe6c57b3107fa92e2c90b1e618121a49",
+            "localBackport": false
+          },
+          {
+            "path": "dist/forge.all.min.js",
+            "upstreamArchivePath": "package/dist/forge.all.min.js",
+            "mode": "0o644",
+            "upstreamBytes": 304809,
+            "upstreamSha256": "cb9ba4045a81825f8edb646c38d53a1ac30ce07665bf26042c8dea86d7208642",
+            "candidateBytes": 304809,
+            "candidateSha256": "cb9ba4045a81825f8edb646c38d53a1ac30ce07665bf26042c8dea86d7208642",
+            "localBackport": false
+          },
+          {
+            "path": "dist/forge.all.min.js.map",
+            "upstreamArchivePath": "package/dist/forge.all.min.js.map",
+            "mode": "0o644",
+            "upstreamBytes": 121,
+            "upstreamSha256": "0b21eb8fb1c124e963d564b6462177331027f6e739f48e73184e0f6a81cac3f1",
+            "candidateBytes": 121,
+            "candidateSha256": "0b21eb8fb1c124e963d564b6462177331027f6e739f48e73184e0f6a81cac3f1",
+            "localBackport": false
+          },
+          {
+            "path": "dist/forge.min.js",
+            "upstreamArchivePath": "package/dist/forge.min.js",
+            "mode": "0o644",
+            "upstreamBytes": 283279,
+            "upstreamSha256": "d9b9074e6861200d676e25dcfe97889db5e8f4150bb766d29c491ad709a51b58",
+            "candidateBytes": 283279,
+            "candidateSha256": "d9b9074e6861200d676e25dcfe97889db5e8f4150bb766d29c491ad709a51b58",
+            "localBackport": false
+          },
+          {
+            "path": "dist/forge.min.js.map",
+            "upstreamArchivePath": "package/dist/forge.min.js.map",
+            "mode": "0o644",
+            "upstreamBytes": 113,
+            "upstreamSha256": "5f11be794b0ad083ce9b2bcee1079e7ee1f0771d37beb90d6f13b2b9a8a0eba3",
+            "candidateBytes": 113,
+            "candidateSha256": "5f11be794b0ad083ce9b2bcee1079e7ee1f0771d37beb90d6f13b2b9a8a0eba3",
+            "localBackport": false
+          },
+          {
+            "path": "dist/prime.worker.min.js",
+            "upstreamArchivePath": "package/dist/prime.worker.min.js",
+            "mode": "0o644",
+            "upstreamBytes": 21461,
+            "upstreamSha256": "877bd31b0cc79ecb9163649034fbafaeec45e8e2861fc4fa9fb11335f28c4ef9",
+            "candidateBytes": 21461,
+            "candidateSha256": "877bd31b0cc79ecb9163649034fbafaeec45e8e2861fc4fa9fb11335f28c4ef9",
+            "localBackport": false
+          },
+          {
+            "path": "dist/prime.worker.min.js.map",
+            "upstreamArchivePath": "package/dist/prime.worker.min.js.map",
+            "mode": "0o644",
+            "upstreamBytes": 121,
+            "upstreamSha256": "73f786b89ef54b00e0cfb6969b2881e7cffa77b4be3f03e998f70993290716a8",
+            "candidateBytes": 121,
+            "candidateSha256": "73f786b89ef54b00e0cfb6969b2881e7cffa77b4be3f03e998f70993290716a8",
+            "localBackport": false
+          },
+          {
+            "path": "flash/swf/SocketPool.swf",
+            "upstreamArchivePath": "package/flash/swf/SocketPool.swf",
+            "mode": "0o644",
+            "upstreamBytes": 21162,
+            "upstreamSha256": "0ebae322dc751e77e18ceef4960bcda1d1634f53a49e7030fb640cf90f1d8839",
+            "candidateBytes": 21162,
+            "candidateSha256": "0ebae322dc751e77e18ceef4960bcda1d1634f53a49e7030fb640cf90f1d8839",
+            "localBackport": false
+          },
+          {
+            "path": "lib/aes.js",
+            "upstreamArchivePath": "package/lib/aes.js",
+            "mode": "0o644",
+            "upstreamBytes": 39025,
+            "upstreamSha256": "be13b617cfff1d583f616c0ce97147cebd9bf101cf893f027cc18c3a54bd3a2f",
+            "candidateBytes": 39025,
+            "candidateSha256": "be13b617cfff1d583f616c0ce97147cebd9bf101cf893f027cc18c3a54bd3a2f",
+            "localBackport": false
+          },
+          {
+            "path": "lib/aesCipherSuites.js",
+            "upstreamArchivePath": "package/lib/aesCipherSuites.js",
+            "mode": "0o644",
+            "upstreamBytes": 9112,
+            "upstreamSha256": "bdc5762c0d6edee74e469a59e0157555463d7abeadf34c4377121673dacc2360",
+            "candidateBytes": 9112,
+            "candidateSha256": "bdc5762c0d6edee74e469a59e0157555463d7abeadf34c4377121673dacc2360",
+            "localBackport": false
+          },
+          {
+            "path": "lib/asn1-validator.js",
+            "upstreamArchivePath": "package/lib/asn1-validator.js",
+            "mode": "0o644",
+            "upstreamBytes": 2295,
+            "upstreamSha256": "6f206656ab557712c2a09f3b8bba69004dd41b2b37cee0cb836d44ea8034004b",
+            "candidateBytes": 2295,
+            "candidateSha256": "6f206656ab557712c2a09f3b8bba69004dd41b2b37cee0cb836d44ea8034004b",
+            "localBackport": false
+          },
+          {
+            "path": "lib/asn1.js",
+            "upstreamArchivePath": "package/lib/asn1.js",
+            "mode": "0o644",
+            "upstreamBytes": 45406,
+            "upstreamSha256": "271047be6eab614060ef361cce2c8a92abf066c40fb329f44cfac3269214b912",
+            "candidateBytes": 45406,
+            "candidateSha256": "271047be6eab614060ef361cce2c8a92abf066c40fb329f44cfac3269214b912",
+            "localBackport": false
+          },
+          {
+            "path": "lib/baseN.js",
+            "upstreamArchivePath": "package/lib/baseN.js",
+            "mode": "0o644",
+            "upstreamBytes": 5068,
+            "upstreamSha256": "08175e677127132340002bdb63dd19ba41c0baae546936032c7d6a6335e219b6",
+            "candidateBytes": 5068,
+            "candidateSha256": "08175e677127132340002bdb63dd19ba41c0baae546936032c7d6a6335e219b6",
+            "localBackport": false
+          },
+          {
+            "path": "lib/cipher.js",
+            "upstreamArchivePath": "package/lib/cipher.js",
+            "mode": "0o644",
+            "upstreamBytes": 6668,
+            "upstreamSha256": "67e3547ac39aaa8862d9519f55571dc0deef6e1d3d6a48ea6d6b653fb7a35a3f",
+            "candidateBytes": 6668,
+            "candidateSha256": "67e3547ac39aaa8862d9519f55571dc0deef6e1d3d6a48ea6d6b653fb7a35a3f",
+            "localBackport": false
+          },
+          {
+            "path": "lib/cipherModes.js",
+            "upstreamArchivePath": "package/lib/cipherModes.js",
+            "mode": "0o644",
+            "upstreamBytes": 28917,
+            "upstreamSha256": "79d74191887706cd5e14bbbcd1ff49472aa1f2baa9154e45f7578c17c3ffefbb",
+            "candidateBytes": 28917,
+            "candidateSha256": "79d74191887706cd5e14bbbcd1ff49472aa1f2baa9154e45f7578c17c3ffefbb",
+            "localBackport": false
+          },
+          {
+            "path": "lib/des.js",
+            "upstreamArchivePath": "package/lib/des.js",
+            "mode": "0o644",
+            "upstreamBytes": 20445,
+            "upstreamSha256": "cb0ae63c8477e61be95c3948bf52f1b7ed02d8522791d9ed1704b6b8b8517734",
+            "candidateBytes": 20445,
+            "candidateSha256": "cb0ae63c8477e61be95c3948bf52f1b7ed02d8522791d9ed1704b6b8b8517734",
+            "localBackport": false
+          },
+          {
+            "path": "lib/ed25519.js",
+            "upstreamArchivePath": "package/lib/ed25519.js",
+            "mode": "0o644",
+            "upstreamBytes": 25349,
+            "upstreamSha256": "b0d15f1e11168a3a6de9914cdff9bf1be0c5c2fc313499e44dfeb164f5202849",
+            "candidateBytes": 25349,
+            "candidateSha256": "b0d15f1e11168a3a6de9914cdff9bf1be0c5c2fc313499e44dfeb164f5202849",
+            "localBackport": false
+          },
+          {
+            "path": "lib/forge.js",
+            "upstreamArchivePath": "package/lib/forge.js",
+            "mode": "0o644",
+            "upstreamBytes": 200,
+            "upstreamSha256": "4300955cc75f3cb5b71287b0fa37ec07d3a6bb721a9f6f8b7db19328801046bf",
+            "candidateBytes": 200,
+            "candidateSha256": "4300955cc75f3cb5b71287b0fa37ec07d3a6bb721a9f6f8b7db19328801046bf",
+            "localBackport": false
+          },
+          {
+            "path": "lib/form.js",
+            "upstreamArchivePath": "package/lib/form.js",
+            "mode": "0o644",
+            "upstreamBytes": 3880,
+            "upstreamSha256": "a2f6e0fbab87d5acb02e08c8f92ea8269445f9f35ee1706fb82246ba8f5aba12",
+            "candidateBytes": 3880,
+            "candidateSha256": "a2f6e0fbab87d5acb02e08c8f92ea8269445f9f35ee1706fb82246ba8f5aba12",
+            "localBackport": false
+          },
+          {
+            "path": "lib/hmac.js",
+            "upstreamArchivePath": "package/lib/hmac.js",
+            "mode": "0o644",
+            "upstreamBytes": 3833,
+            "upstreamSha256": "bab6d0f322458186f6d123cfdd208ab1298a64ab6925b478968a0dfb446a8fa9",
+            "candidateBytes": 3833,
+            "candidateSha256": "bab6d0f322458186f6d123cfdd208ab1298a64ab6925b478968a0dfb446a8fa9",
+            "localBackport": false
+          },
+          {
+            "path": "lib/http.js",
+            "upstreamArchivePath": "package/lib/http.js",
+            "mode": "0o644",
+            "upstreamBytes": 39070,
+            "upstreamSha256": "3ad8ec7eb451c173b5980265f30f7b3d84268a1cc9b3e0e86337bc55facbc658",
+            "candidateBytes": 39070,
+            "candidateSha256": "3ad8ec7eb451c173b5980265f30f7b3d84268a1cc9b3e0e86337bc55facbc658",
+            "localBackport": false
+          },
+          {
+            "path": "lib/index.all.js",
+            "upstreamArchivePath": "package/lib/index.all.js",
+            "mode": "0o644",
+            "upstreamBytes": 366,
+            "upstreamSha256": "48fa7454923f3baa3dd5a5bf9475892aa5f272c4cc8b5a0ec4f3d6c2370ac631",
+            "candidateBytes": 366,
+            "candidateSha256": "48fa7454923f3baa3dd5a5bf9475892aa5f272c4cc8b5a0ec4f3d6c2370ac631",
+            "localBackport": false
+          },
+          {
+            "path": "lib/index.js",
+            "upstreamArchivePath": "package/lib/index.js",
+            "mode": "0o644",
+            "upstreamBytes": 640,
+            "upstreamSha256": "c231851a9d065df1fae045d6e6fb17cf5688b260f9ee0db4965fe1ef3c0607ab",
+            "candidateBytes": 640,
+            "candidateSha256": "c231851a9d065df1fae045d6e6fb17cf5688b260f9ee0db4965fe1ef3c0607ab",
+            "localBackport": false
+          },
+          {
+            "path": "lib/jsbn.js",
+            "upstreamArchivePath": "package/lib/jsbn.js",
+            "mode": "0o644",
+            "upstreamBytes": 36893,
+            "upstreamSha256": "9d2cd4ad90eadf84b0110d9e1fc02512fc89e7ad64d0fee2d578fa51af28e48d",
+            "candidateBytes": 36893,
+            "candidateSha256": "9d2cd4ad90eadf84b0110d9e1fc02512fc89e7ad64d0fee2d578fa51af28e48d",
+            "localBackport": false
+          },
+          {
+            "path": "lib/kem.js",
+            "upstreamArchivePath": "package/lib/kem.js",
+            "mode": "0o644",
+            "upstreamBytes": 5217,
+            "upstreamSha256": "6552b048e05b92278f70b2810317e1505d521ee9e2ec5496047d927f5f7d1f70",
+            "candidateBytes": 5217,
+            "candidateSha256": "6552b048e05b92278f70b2810317e1505d521ee9e2ec5496047d927f5f7d1f70",
+            "localBackport": false
+          },
+          {
+            "path": "lib/log.js",
+            "upstreamArchivePath": "package/lib/log.js",
+            "mode": "0o644",
+            "upstreamBytes": 9264,
+            "upstreamSha256": "9453eeba574a617225c8f54cfd2c11f1bade2e6a39f73d6e1a9da142db1afaeb",
+            "candidateBytes": 9264,
+            "candidateSha256": "9453eeba574a617225c8f54cfd2c11f1bade2e6a39f73d6e1a9da142db1afaeb",
+            "localBackport": false
+          },
+          {
+            "path": "lib/md.all.js",
+            "upstreamArchivePath": "package/lib/md.all.js",
+            "mode": "0o644",
+            "upstreamBytes": 251,
+            "upstreamSha256": "6a10918cc8f727cc8cec20fee5e13f55c11e30b3f03b8800108cabb299211d4d",
+            "candidateBytes": 251,
+            "candidateSha256": "6a10918cc8f727cc8cec20fee5e13f55c11e30b3f03b8800108cabb299211d4d",
+            "localBackport": false
+          },
+          {
+            "path": "lib/md.js",
+            "upstreamArchivePath": "package/lib/md.js",
+            "mode": "0o644",
+            "upstreamBytes": 253,
+            "upstreamSha256": "ebfc33ed52d3c8cf2d584310fe0f45b23d911f532deef8044844bf2271b04402",
+            "candidateBytes": 253,
+            "candidateSha256": "ebfc33ed52d3c8cf2d584310fe0f45b23d911f532deef8044844bf2271b04402",
+            "localBackport": false
+          },
+          {
+            "path": "lib/md5.js",
+            "upstreamArchivePath": "package/lib/md5.js",
+            "mode": "0o644",
+            "upstreamBytes": 7983,
+            "upstreamSha256": "ed58ce89d124a276a083280bd7003b09c294c4063e6925d83fe422664a51f810",
+            "candidateBytes": 7983,
+            "candidateSha256": "ed58ce89d124a276a083280bd7003b09c294c4063e6925d83fe422664a51f810",
+            "localBackport": false
+          },
+          {
+            "path": "lib/mgf.js",
+            "upstreamArchivePath": "package/lib/mgf.js",
+            "mode": "0o644",
+            "upstreamBytes": 274,
+            "upstreamSha256": "2d6d851d6791d0cc1697342edf275993e745fd8c33ef13ad7201026d8a0eea54",
+            "candidateBytes": 274,
+            "candidateSha256": "2d6d851d6791d0cc1697342edf275993e745fd8c33ef13ad7201026d8a0eea54",
+            "localBackport": false
+          },
+          {
+            "path": "lib/mgf1.js",
+            "upstreamArchivePath": "package/lib/mgf1.js",
+            "mode": "0o644",
+            "upstreamBytes": 1645,
+            "upstreamSha256": "9a4acd26ee423034995a811c357e69a6c2368480664b62862982f5c404cfcc0e",
+            "candidateBytes": 1645,
+            "candidateSha256": "9a4acd26ee423034995a811c357e69a6c2368480664b62862982f5c404cfcc0e",
+            "localBackport": false
+          },
+          {
+            "path": "lib/oids.js",
+            "upstreamArchivePath": "package/lib/oids.js",
+            "mode": "0o644",
+            "upstreamBytes": 6874,
+            "upstreamSha256": "13e31fe08ccb431fefe44f9d2285891b846e65b17b24329bf14eed04de584015",
+            "candidateBytes": 6874,
+            "candidateSha256": "13e31fe08ccb431fefe44f9d2285891b846e65b17b24329bf14eed04de584015",
+            "localBackport": false
+          },
+          {
+            "path": "lib/pbe.js",
+            "upstreamArchivePath": "package/lib/pbe.js",
+            "mode": "0o644",
+            "upstreamBytes": 30999,
+            "upstreamSha256": "2b5c931e1549f5b98478a5b7b014fd3b62260a20db0704f72612dbe64540e25c",
+            "candidateBytes": 30999,
+            "candidateSha256": "2b5c931e1549f5b98478a5b7b014fd3b62260a20db0704f72612dbe64540e25c",
+            "localBackport": false
+          },
+          {
+            "path": "lib/pbkdf2.js",
+            "upstreamArchivePath": "package/lib/pbkdf2.js",
+            "mode": "0o644",
+            "upstreamBytes": 5809,
+            "upstreamSha256": "1cd2f133c60cf860f23d05313a39a5dc060389adcca8423c2143ee904db9f627",
+            "candidateBytes": 5809,
+            "candidateSha256": "1cd2f133c60cf860f23d05313a39a5dc060389adcca8423c2143ee904db9f627",
+            "localBackport": false
+          },
+          {
+            "path": "lib/pem.js",
+            "upstreamArchivePath": "package/lib/pem.js",
+            "mode": "0o644",
+            "upstreamBytes": 6693,
+            "upstreamSha256": "c6509f3aae5ad5e9286da727ea4cbf3b748ad7deff407e76b226f7a6a3b6a120",
+            "candidateBytes": 6693,
+            "candidateSha256": "c6509f3aae5ad5e9286da727ea4cbf3b748ad7deff407e76b226f7a6a3b6a120",
+            "localBackport": false
+          },
+          {
+            "path": "lib/pkcs1.js",
+            "upstreamArchivePath": "package/lib/pkcs1.js",
+            "mode": "0o644",
+            "upstreamBytes": 8375,
+            "upstreamSha256": "c43cf348520a3f6adc4769a3c3410cde502a6bc7a768d5a71a575fa72d19acc7",
+            "candidateBytes": 8375,
+            "candidateSha256": "c43cf348520a3f6adc4769a3c3410cde502a6bc7a768d5a71a575fa72d19acc7",
+            "localBackport": false
+          },
+          {
+            "path": "lib/pkcs12.js",
+            "upstreamArchivePath": "package/lib/pkcs12.js",
+            "mode": "0o644",
+            "upstreamBytes": 33596,
+            "upstreamSha256": "d0f9693ff8b6e755031566139f0e23a762c9a7af6a1b08a27d522810019906d3",
+            "candidateBytes": 33596,
+            "candidateSha256": "d0f9693ff8b6e755031566139f0e23a762c9a7af6a1b08a27d522810019906d3",
+            "localBackport": false
+          },
+          {
+            "path": "lib/pkcs7.js",
+            "upstreamArchivePath": "package/lib/pkcs7.js",
+            "mode": "0o644",
+            "upstreamBytes": 39869,
+            "upstreamSha256": "f5cc5a89b093262cdcf8f7e01615dddcdb87907228a1c56b5fe73db8cc4160a2",
+            "candidateBytes": 39869,
+            "candidateSha256": "f5cc5a89b093262cdcf8f7e01615dddcdb87907228a1c56b5fe73db8cc4160a2",
+            "localBackport": false
+          },
+          {
+            "path": "lib/pkcs7asn1.js",
+            "upstreamArchivePath": "package/lib/pkcs7asn1.js",
+            "mode": "0o644",
+            "upstreamBytes": 11484,
+            "upstreamSha256": "9a00faef7bff964e3c983eb4a435e8218bdd631b0f0217807b1b2bff895ab76a",
+            "candidateBytes": 11484,
+            "candidateSha256": "9a00faef7bff964e3c983eb4a435e8218bdd631b0f0217807b1b2bff895ab76a",
+            "localBackport": false
+          },
+          {
+            "path": "lib/pki.js",
+            "upstreamArchivePath": "package/lib/pki.js",
+            "mode": "0o644",
+            "upstreamBytes": 2651,
+            "upstreamSha256": "43f1b98dbd39a0c8277b7c0d44325a851712ce5434146ca2a2587a2a7ae1bb1e",
+            "candidateBytes": 2651,
+            "candidateSha256": "43f1b98dbd39a0c8277b7c0d44325a851712ce5434146ca2a2587a2a7ae1bb1e",
+            "localBackport": false
+          },
+          {
+            "path": "lib/prime.js",
+            "upstreamArchivePath": "package/lib/prime.js",
+            "mode": "0o644",
+            "upstreamBytes": 8776,
+            "upstreamSha256": "5c63550c13aa4351c210b0766a8ad4a1f23101e1968c6244be7aad8f008e4073",
+            "candidateBytes": 8776,
+            "candidateSha256": "5c63550c13aa4351c210b0766a8ad4a1f23101e1968c6244be7aad8f008e4073",
+            "localBackport": false
+          },
+          {
+            "path": "lib/prime.worker.js",
+            "upstreamArchivePath": "package/lib/prime.worker.js",
+            "mode": "0o644",
+            "upstreamBytes": 4805,
+            "upstreamSha256": "c2fc7777c7a07c7bc3909d400f9f65dabd6c484a11840e1ef71b2b67236ffd9d",
+            "candidateBytes": 4805,
+            "candidateSha256": "c2fc7777c7a07c7bc3909d400f9f65dabd6c484a11840e1ef71b2b67236ffd9d",
+            "localBackport": false
+          },
+          {
+            "path": "lib/prng.js",
+            "upstreamArchivePath": "package/lib/prng.js",
+            "mode": "0o644",
+            "upstreamBytes": 12326,
+            "upstreamSha256": "fc70051ea878498be4d7473ba6b0982f3e2522962e3deee558b393ac4fb18cf9",
+            "candidateBytes": 12326,
+            "candidateSha256": "fc70051ea878498be4d7473ba6b0982f3e2522962e3deee558b393ac4fb18cf9",
+            "localBackport": false
+          },
+          {
+            "path": "lib/pss.js",
+            "upstreamArchivePath": "package/lib/pss.js",
+            "mode": "0o644",
+            "upstreamBytes": 7854,
+            "upstreamSha256": "c9e83c50451bd90735030cf3fe3d2a68403f678853a6d300cfa3e59b813e7f9b",
+            "candidateBytes": 7854,
+            "candidateSha256": "c9e83c50451bd90735030cf3fe3d2a68403f678853a6d300cfa3e59b813e7f9b",
+            "localBackport": false
+          },
+          {
+            "path": "lib/random.js",
+            "upstreamArchivePath": "package/lib/random.js",
+            "mode": "0o644",
+            "upstreamBytes": 5438,
+            "upstreamSha256": "13daf47db350648ebb98cc0d694f246ae7be508aa03a0d7b9c9f2dbdf127add0",
+            "candidateBytes": 5438,
+            "candidateSha256": "13daf47db350648ebb98cc0d694f246ae7be508aa03a0d7b9c9f2dbdf127add0",
+            "localBackport": false
+          },
+          {
+            "path": "lib/rc2.js",
+            "upstreamArchivePath": "package/lib/rc2.js",
+            "mode": "0o644",
+            "upstreamBytes": 11949,
+            "upstreamSha256": "d2eb78b77441d9784f5edfced1ad2f49cb35c2a956687ce9d754cf40bbd1b3c3",
+            "candidateBytes": 11949,
+            "candidateSha256": "d2eb78b77441d9784f5edfced1ad2f49cb35c2a956687ce9d754cf40bbd1b3c3",
+            "localBackport": false
+          },
+          {
+            "path": "lib/rsa.js",
+            "upstreamArchivePath": "package/lib/rsa.js",
+            "mode": "0o644",
+            "upstreamBytes": 60848,
+            "upstreamSha256": "fd4740238145ec26470eb3f06a627c72039538ce1307dbdce40521f94dfd0a50",
+            "candidateBytes": 61013,
+            "candidateSha256": "ff1d46675dbf07c80b438381c0a41b9b16ae3d4c84d103b1e9f067ad4a9c00fe",
+            "localBackport": true
+          },
+          {
+            "path": "lib/sha1.js",
+            "upstreamArchivePath": "package/lib/sha1.js",
+            "mode": "0o644",
+            "upstreamBytes": 9089,
+            "upstreamSha256": "0792cc13fa342fd9d8c213c4ffd0d697fc019144258e383dd0ac985bd717564c",
+            "candidateBytes": 9089,
+            "candidateSha256": "0792cc13fa342fd9d8c213c4ffd0d697fc019144258e383dd0ac985bd717564c",
+            "localBackport": false
+          },
+          {
+            "path": "lib/sha256.js",
+            "upstreamArchivePath": "package/lib/sha256.js",
+            "mode": "0o644",
+            "upstreamBytes": 9574,
+            "upstreamSha256": "54b2f4c0ee9d4a561b6d18b1713fddeb815ea1c9d50537f7cbb4fc4474ab732d",
+            "candidateBytes": 9574,
+            "candidateSha256": "54b2f4c0ee9d4a561b6d18b1713fddeb815ea1c9d50537f7cbb4fc4474ab732d",
+            "localBackport": false
+          },
+          {
+            "path": "lib/sha512.js",
+            "upstreamArchivePath": "package/lib/sha512.js",
+            "mode": "0o644",
+            "upstreamBytes": 17133,
+            "upstreamSha256": "d600f189d7bd22630b9301a5dea0fd49bb0ac3687f2c8feb7ecdcccd3d21c092",
+            "candidateBytes": 17133,
+            "candidateSha256": "d600f189d7bd22630b9301a5dea0fd49bb0ac3687f2c8feb7ecdcccd3d21c092",
+            "localBackport": false
+          },
+          {
+            "path": "lib/socket.js",
+            "upstreamArchivePath": "package/lib/socket.js",
+            "mode": "0o644",
+            "upstreamBytes": 8329,
+            "upstreamSha256": "689715cdeeba3274d6763ab92716a8a3dc1d24a684ea88fee9e2aca72e2dade0",
+            "candidateBytes": 8329,
+            "candidateSha256": "689715cdeeba3274d6763ab92716a8a3dc1d24a684ea88fee9e2aca72e2dade0",
+            "localBackport": false
+          },
+          {
+            "path": "lib/ssh.js",
+            "upstreamArchivePath": "package/lib/ssh.js",
+            "mode": "0o644",
+            "upstreamBytes": 7163,
+            "upstreamSha256": "6f27454e3fc028c8a6b1c02ae98969aace558ee0c1b6784e8fb12d4419e46d24",
+            "candidateBytes": 7163,
+            "candidateSha256": "6f27454e3fc028c8a6b1c02ae98969aace558ee0c1b6784e8fb12d4419e46d24",
+            "localBackport": false
+          },
+          {
+            "path": "lib/tls.js",
+            "upstreamArchivePath": "package/lib/tls.js",
+            "mode": "0o644",
+            "upstreamBytes": 132975,
+            "upstreamSha256": "ceee226d32c623bbae290d76b5950be0c06880310ec26dc289f66bd631de4916",
+            "candidateBytes": 132975,
+            "candidateSha256": "ceee226d32c623bbae290d76b5950be0c06880310ec26dc289f66bd631de4916",
+            "localBackport": false
+          },
+          {
+            "path": "lib/tlssocket.js",
+            "upstreamArchivePath": "package/lib/tlssocket.js",
+            "mode": "0o644",
+            "upstreamBytes": 6967,
+            "upstreamSha256": "99728e72301548ee5233c16bc0417f07892022d24fd178dfb9c0a40aff541a47",
+            "candidateBytes": 6967,
+            "candidateSha256": "99728e72301548ee5233c16bc0417f07892022d24fd178dfb9c0a40aff541a47",
+            "localBackport": false
+          },
+          {
+            "path": "lib/util.js",
+            "upstreamArchivePath": "package/lib/util.js",
+            "mode": "0o644",
+            "upstreamBytes": 69861,
+            "upstreamSha256": "a05620c922303dd687e9447754ebde42878f37e51c390a9a3aedb592434795bc",
+            "candidateBytes": 69861,
+            "candidateSha256": "a05620c922303dd687e9447754ebde42878f37e51c390a9a3aedb592434795bc",
+            "localBackport": false
+          },
+          {
+            "path": "lib/x509.js",
+            "upstreamArchivePath": "package/lib/x509.js",
+            "mode": "0o644",
+            "upstreamBytes": 102130,
+            "upstreamSha256": "cce5b00838c8c08486964c1f62cb8ae3491365509b26a27cfe1917f73dee3be9",
+            "candidateBytes": 102130,
+            "candidateSha256": "cce5b00838c8c08486964c1f62cb8ae3491365509b26a27cfe1917f73dee3be9",
+            "localBackport": false
+          },
+          {
+            "path": "lib/xhr.js",
+            "upstreamArchivePath": "package/lib/xhr.js",
+            "mode": "0o644",
+            "upstreamBytes": 22117,
+            "upstreamSha256": "d9abf523180b6d03b2cc99909eef3488a6b4bc1f822d7fb9d1e945abf555cb42",
+            "candidateBytes": 22117,
+            "candidateSha256": "d9abf523180b6d03b2cc99909eef3488a6b4bc1f822d7fb9d1e945abf555cb42",
+            "localBackport": false
+          },
+          {
+            "path": "package.json",
+            "upstreamArchivePath": "package/package.json",
+            "mode": "0o644",
+            "upstreamBytes": 3256,
+            "upstreamSha256": "a907bca8a62d97478062f2bd8ed5cd47d00b79385d3f08a8cad1c3bd7e3eb5bf",
+            "candidateBytes": 3256,
+            "candidateSha256": "a907bca8a62d97478062f2bd8ed5cd47d00b79385d3f08a8cad1c3bd7e3eb5bf",
+            "localBackport": false
+          }
+        ]
+      },
+      "installedFiles": [
+        {
+          "path": "LICENSE",
+          "bytes": 17972,
+          "sha256": "f63ff0e4e239244aa79280da2dd4811a0469e5e201caf5cbc0d97c3a1dff8e82",
+          "mode": 420,
+          "upstreamSha256": "f63ff0e4e239244aa79280da2dd4811a0469e5e201caf5cbc0d97c3a1dff8e82",
+          "upstreamBytes": 17972,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "README.md",
+          "bytes": 59605,
+          "sha256": "4ea0e2db410fd5d87c3c9b21912b9ed3fe6c57b3107fa92e2c90b1e618121a49",
+          "mode": 420,
+          "upstreamSha256": "4ea0e2db410fd5d87c3c9b21912b9ed3fe6c57b3107fa92e2c90b1e618121a49",
+          "upstreamBytes": 59605,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "flash/swf/SocketPool.swf",
+          "bytes": 21162,
+          "sha256": "0ebae322dc751e77e18ceef4960bcda1d1634f53a49e7030fb640cf90f1d8839",
+          "mode": 420,
+          "upstreamSha256": "0ebae322dc751e77e18ceef4960bcda1d1634f53a49e7030fb640cf90f1d8839",
+          "upstreamBytes": 21162,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/aes.js",
+          "bytes": 39025,
+          "sha256": "be13b617cfff1d583f616c0ce97147cebd9bf101cf893f027cc18c3a54bd3a2f",
+          "mode": 420,
+          "upstreamSha256": "be13b617cfff1d583f616c0ce97147cebd9bf101cf893f027cc18c3a54bd3a2f",
+          "upstreamBytes": 39025,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/aesCipherSuites.js",
+          "bytes": 9112,
+          "sha256": "bdc5762c0d6edee74e469a59e0157555463d7abeadf34c4377121673dacc2360",
+          "mode": 420,
+          "upstreamSha256": "bdc5762c0d6edee74e469a59e0157555463d7abeadf34c4377121673dacc2360",
+          "upstreamBytes": 9112,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/asn1-validator.js",
+          "bytes": 2295,
+          "sha256": "6f206656ab557712c2a09f3b8bba69004dd41b2b37cee0cb836d44ea8034004b",
+          "mode": 420,
+          "upstreamSha256": "6f206656ab557712c2a09f3b8bba69004dd41b2b37cee0cb836d44ea8034004b",
+          "upstreamBytes": 2295,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/asn1.js",
+          "bytes": 45406,
+          "sha256": "271047be6eab614060ef361cce2c8a92abf066c40fb329f44cfac3269214b912",
+          "mode": 420,
+          "upstreamSha256": "271047be6eab614060ef361cce2c8a92abf066c40fb329f44cfac3269214b912",
+          "upstreamBytes": 45406,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/baseN.js",
+          "bytes": 5068,
+          "sha256": "08175e677127132340002bdb63dd19ba41c0baae546936032c7d6a6335e219b6",
+          "mode": 420,
+          "upstreamSha256": "08175e677127132340002bdb63dd19ba41c0baae546936032c7d6a6335e219b6",
+          "upstreamBytes": 5068,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/cipher.js",
+          "bytes": 6668,
+          "sha256": "67e3547ac39aaa8862d9519f55571dc0deef6e1d3d6a48ea6d6b653fb7a35a3f",
+          "mode": 420,
+          "upstreamSha256": "67e3547ac39aaa8862d9519f55571dc0deef6e1d3d6a48ea6d6b653fb7a35a3f",
+          "upstreamBytes": 6668,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/cipherModes.js",
+          "bytes": 28917,
+          "sha256": "79d74191887706cd5e14bbbcd1ff49472aa1f2baa9154e45f7578c17c3ffefbb",
+          "mode": 420,
+          "upstreamSha256": "79d74191887706cd5e14bbbcd1ff49472aa1f2baa9154e45f7578c17c3ffefbb",
+          "upstreamBytes": 28917,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/des.js",
+          "bytes": 20445,
+          "sha256": "cb0ae63c8477e61be95c3948bf52f1b7ed02d8522791d9ed1704b6b8b8517734",
+          "mode": 420,
+          "upstreamSha256": "cb0ae63c8477e61be95c3948bf52f1b7ed02d8522791d9ed1704b6b8b8517734",
+          "upstreamBytes": 20445,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/ed25519.js",
+          "bytes": 25349,
+          "sha256": "b0d15f1e11168a3a6de9914cdff9bf1be0c5c2fc313499e44dfeb164f5202849",
+          "mode": 420,
+          "upstreamSha256": "b0d15f1e11168a3a6de9914cdff9bf1be0c5c2fc313499e44dfeb164f5202849",
+          "upstreamBytes": 25349,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/forge.js",
+          "bytes": 200,
+          "sha256": "4300955cc75f3cb5b71287b0fa37ec07d3a6bb721a9f6f8b7db19328801046bf",
+          "mode": 420,
+          "upstreamSha256": "4300955cc75f3cb5b71287b0fa37ec07d3a6bb721a9f6f8b7db19328801046bf",
+          "upstreamBytes": 200,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/form.js",
+          "bytes": 3880,
+          "sha256": "a2f6e0fbab87d5acb02e08c8f92ea8269445f9f35ee1706fb82246ba8f5aba12",
+          "mode": 420,
+          "upstreamSha256": "a2f6e0fbab87d5acb02e08c8f92ea8269445f9f35ee1706fb82246ba8f5aba12",
+          "upstreamBytes": 3880,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/hmac.js",
+          "bytes": 3833,
+          "sha256": "bab6d0f322458186f6d123cfdd208ab1298a64ab6925b478968a0dfb446a8fa9",
+          "mode": 420,
+          "upstreamSha256": "bab6d0f322458186f6d123cfdd208ab1298a64ab6925b478968a0dfb446a8fa9",
+          "upstreamBytes": 3833,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/http.js",
+          "bytes": 39070,
+          "sha256": "3ad8ec7eb451c173b5980265f30f7b3d84268a1cc9b3e0e86337bc55facbc658",
+          "mode": 420,
+          "upstreamSha256": "3ad8ec7eb451c173b5980265f30f7b3d84268a1cc9b3e0e86337bc55facbc658",
+          "upstreamBytes": 39070,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/index.all.js",
+          "bytes": 366,
+          "sha256": "48fa7454923f3baa3dd5a5bf9475892aa5f272c4cc8b5a0ec4f3d6c2370ac631",
+          "mode": 420,
+          "upstreamSha256": "48fa7454923f3baa3dd5a5bf9475892aa5f272c4cc8b5a0ec4f3d6c2370ac631",
+          "upstreamBytes": 366,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/index.js",
+          "bytes": 640,
+          "sha256": "c231851a9d065df1fae045d6e6fb17cf5688b260f9ee0db4965fe1ef3c0607ab",
+          "mode": 420,
+          "upstreamSha256": "c231851a9d065df1fae045d6e6fb17cf5688b260f9ee0db4965fe1ef3c0607ab",
+          "upstreamBytes": 640,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/jsbn.js",
+          "bytes": 36893,
+          "sha256": "9d2cd4ad90eadf84b0110d9e1fc02512fc89e7ad64d0fee2d578fa51af28e48d",
+          "mode": 420,
+          "upstreamSha256": "9d2cd4ad90eadf84b0110d9e1fc02512fc89e7ad64d0fee2d578fa51af28e48d",
+          "upstreamBytes": 36893,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/kem.js",
+          "bytes": 5217,
+          "sha256": "6552b048e05b92278f70b2810317e1505d521ee9e2ec5496047d927f5f7d1f70",
+          "mode": 420,
+          "upstreamSha256": "6552b048e05b92278f70b2810317e1505d521ee9e2ec5496047d927f5f7d1f70",
+          "upstreamBytes": 5217,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/log.js",
+          "bytes": 9264,
+          "sha256": "9453eeba574a617225c8f54cfd2c11f1bade2e6a39f73d6e1a9da142db1afaeb",
+          "mode": 420,
+          "upstreamSha256": "9453eeba574a617225c8f54cfd2c11f1bade2e6a39f73d6e1a9da142db1afaeb",
+          "upstreamBytes": 9264,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/md.all.js",
+          "bytes": 251,
+          "sha256": "6a10918cc8f727cc8cec20fee5e13f55c11e30b3f03b8800108cabb299211d4d",
+          "mode": 420,
+          "upstreamSha256": "6a10918cc8f727cc8cec20fee5e13f55c11e30b3f03b8800108cabb299211d4d",
+          "upstreamBytes": 251,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/md.js",
+          "bytes": 253,
+          "sha256": "ebfc33ed52d3c8cf2d584310fe0f45b23d911f532deef8044844bf2271b04402",
+          "mode": 420,
+          "upstreamSha256": "ebfc33ed52d3c8cf2d584310fe0f45b23d911f532deef8044844bf2271b04402",
+          "upstreamBytes": 253,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/md5.js",
+          "bytes": 7983,
+          "sha256": "ed58ce89d124a276a083280bd7003b09c294c4063e6925d83fe422664a51f810",
+          "mode": 420,
+          "upstreamSha256": "ed58ce89d124a276a083280bd7003b09c294c4063e6925d83fe422664a51f810",
+          "upstreamBytes": 7983,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/mgf.js",
+          "bytes": 274,
+          "sha256": "2d6d851d6791d0cc1697342edf275993e745fd8c33ef13ad7201026d8a0eea54",
+          "mode": 420,
+          "upstreamSha256": "2d6d851d6791d0cc1697342edf275993e745fd8c33ef13ad7201026d8a0eea54",
+          "upstreamBytes": 274,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/mgf1.js",
+          "bytes": 1645,
+          "sha256": "9a4acd26ee423034995a811c357e69a6c2368480664b62862982f5c404cfcc0e",
+          "mode": 420,
+          "upstreamSha256": "9a4acd26ee423034995a811c357e69a6c2368480664b62862982f5c404cfcc0e",
+          "upstreamBytes": 1645,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/oids.js",
+          "bytes": 6874,
+          "sha256": "13e31fe08ccb431fefe44f9d2285891b846e65b17b24329bf14eed04de584015",
+          "mode": 420,
+          "upstreamSha256": "13e31fe08ccb431fefe44f9d2285891b846e65b17b24329bf14eed04de584015",
+          "upstreamBytes": 6874,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/pbe.js",
+          "bytes": 30999,
+          "sha256": "2b5c931e1549f5b98478a5b7b014fd3b62260a20db0704f72612dbe64540e25c",
+          "mode": 420,
+          "upstreamSha256": "2b5c931e1549f5b98478a5b7b014fd3b62260a20db0704f72612dbe64540e25c",
+          "upstreamBytes": 30999,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/pbkdf2.js",
+          "bytes": 5809,
+          "sha256": "1cd2f133c60cf860f23d05313a39a5dc060389adcca8423c2143ee904db9f627",
+          "mode": 420,
+          "upstreamSha256": "1cd2f133c60cf860f23d05313a39a5dc060389adcca8423c2143ee904db9f627",
+          "upstreamBytes": 5809,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/pem.js",
+          "bytes": 6693,
+          "sha256": "c6509f3aae5ad5e9286da727ea4cbf3b748ad7deff407e76b226f7a6a3b6a120",
+          "mode": 420,
+          "upstreamSha256": "c6509f3aae5ad5e9286da727ea4cbf3b748ad7deff407e76b226f7a6a3b6a120",
+          "upstreamBytes": 6693,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/pkcs1.js",
+          "bytes": 8375,
+          "sha256": "c43cf348520a3f6adc4769a3c3410cde502a6bc7a768d5a71a575fa72d19acc7",
+          "mode": 420,
+          "upstreamSha256": "c43cf348520a3f6adc4769a3c3410cde502a6bc7a768d5a71a575fa72d19acc7",
+          "upstreamBytes": 8375,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/pkcs12.js",
+          "bytes": 33596,
+          "sha256": "d0f9693ff8b6e755031566139f0e23a762c9a7af6a1b08a27d522810019906d3",
+          "mode": 420,
+          "upstreamSha256": "d0f9693ff8b6e755031566139f0e23a762c9a7af6a1b08a27d522810019906d3",
+          "upstreamBytes": 33596,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/pkcs7.js",
+          "bytes": 39869,
+          "sha256": "f5cc5a89b093262cdcf8f7e01615dddcdb87907228a1c56b5fe73db8cc4160a2",
+          "mode": 420,
+          "upstreamSha256": "f5cc5a89b093262cdcf8f7e01615dddcdb87907228a1c56b5fe73db8cc4160a2",
+          "upstreamBytes": 39869,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/pkcs7asn1.js",
+          "bytes": 11484,
+          "sha256": "9a00faef7bff964e3c983eb4a435e8218bdd631b0f0217807b1b2bff895ab76a",
+          "mode": 420,
+          "upstreamSha256": "9a00faef7bff964e3c983eb4a435e8218bdd631b0f0217807b1b2bff895ab76a",
+          "upstreamBytes": 11484,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/pki.js",
+          "bytes": 2651,
+          "sha256": "43f1b98dbd39a0c8277b7c0d44325a851712ce5434146ca2a2587a2a7ae1bb1e",
+          "mode": 420,
+          "upstreamSha256": "43f1b98dbd39a0c8277b7c0d44325a851712ce5434146ca2a2587a2a7ae1bb1e",
+          "upstreamBytes": 2651,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/prime.js",
+          "bytes": 8776,
+          "sha256": "5c63550c13aa4351c210b0766a8ad4a1f23101e1968c6244be7aad8f008e4073",
+          "mode": 420,
+          "upstreamSha256": "5c63550c13aa4351c210b0766a8ad4a1f23101e1968c6244be7aad8f008e4073",
+          "upstreamBytes": 8776,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/prime.worker.js",
+          "bytes": 4805,
+          "sha256": "c2fc7777c7a07c7bc3909d400f9f65dabd6c484a11840e1ef71b2b67236ffd9d",
+          "mode": 420,
+          "upstreamSha256": "c2fc7777c7a07c7bc3909d400f9f65dabd6c484a11840e1ef71b2b67236ffd9d",
+          "upstreamBytes": 4805,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/prng.js",
+          "bytes": 12326,
+          "sha256": "fc70051ea878498be4d7473ba6b0982f3e2522962e3deee558b393ac4fb18cf9",
+          "mode": 420,
+          "upstreamSha256": "fc70051ea878498be4d7473ba6b0982f3e2522962e3deee558b393ac4fb18cf9",
+          "upstreamBytes": 12326,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/pss.js",
+          "bytes": 7854,
+          "sha256": "c9e83c50451bd90735030cf3fe3d2a68403f678853a6d300cfa3e59b813e7f9b",
+          "mode": 420,
+          "upstreamSha256": "c9e83c50451bd90735030cf3fe3d2a68403f678853a6d300cfa3e59b813e7f9b",
+          "upstreamBytes": 7854,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/random.js",
+          "bytes": 5438,
+          "sha256": "13daf47db350648ebb98cc0d694f246ae7be508aa03a0d7b9c9f2dbdf127add0",
+          "mode": 420,
+          "upstreamSha256": "13daf47db350648ebb98cc0d694f246ae7be508aa03a0d7b9c9f2dbdf127add0",
+          "upstreamBytes": 5438,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/rc2.js",
+          "bytes": 11949,
+          "sha256": "d2eb78b77441d9784f5edfced1ad2f49cb35c2a956687ce9d754cf40bbd1b3c3",
+          "mode": 420,
+          "upstreamSha256": "d2eb78b77441d9784f5edfced1ad2f49cb35c2a956687ce9d754cf40bbd1b3c3",
+          "upstreamBytes": 11949,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/rsa.js",
+          "bytes": 61013,
+          "sha256": "ff1d46675dbf07c80b438381c0a41b9b16ae3d4c84d103b1e9f067ad4a9c00fe",
+          "mode": 420,
+          "upstreamSha256": "fd4740238145ec26470eb3f06a627c72039538ce1307dbdce40521f94dfd0a50",
+          "upstreamBytes": 60848,
+          "change": "existing reviewed security backport"
+        },
+        {
+          "path": "lib/sha1.js",
+          "bytes": 9089,
+          "sha256": "0792cc13fa342fd9d8c213c4ffd0d697fc019144258e383dd0ac985bd717564c",
+          "mode": 420,
+          "upstreamSha256": "0792cc13fa342fd9d8c213c4ffd0d697fc019144258e383dd0ac985bd717564c",
+          "upstreamBytes": 9089,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/sha256.js",
+          "bytes": 9574,
+          "sha256": "54b2f4c0ee9d4a561b6d18b1713fddeb815ea1c9d50537f7cbb4fc4474ab732d",
+          "mode": 420,
+          "upstreamSha256": "54b2f4c0ee9d4a561b6d18b1713fddeb815ea1c9d50537f7cbb4fc4474ab732d",
+          "upstreamBytes": 9574,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/sha512.js",
+          "bytes": 17133,
+          "sha256": "d600f189d7bd22630b9301a5dea0fd49bb0ac3687f2c8feb7ecdcccd3d21c092",
+          "mode": 420,
+          "upstreamSha256": "d600f189d7bd22630b9301a5dea0fd49bb0ac3687f2c8feb7ecdcccd3d21c092",
+          "upstreamBytes": 17133,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/socket.js",
+          "bytes": 8329,
+          "sha256": "689715cdeeba3274d6763ab92716a8a3dc1d24a684ea88fee9e2aca72e2dade0",
+          "mode": 420,
+          "upstreamSha256": "689715cdeeba3274d6763ab92716a8a3dc1d24a684ea88fee9e2aca72e2dade0",
+          "upstreamBytes": 8329,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/ssh.js",
+          "bytes": 7163,
+          "sha256": "6f27454e3fc028c8a6b1c02ae98969aace558ee0c1b6784e8fb12d4419e46d24",
+          "mode": 420,
+          "upstreamSha256": "6f27454e3fc028c8a6b1c02ae98969aace558ee0c1b6784e8fb12d4419e46d24",
+          "upstreamBytes": 7163,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/tls.js",
+          "bytes": 132975,
+          "sha256": "ceee226d32c623bbae290d76b5950be0c06880310ec26dc289f66bd631de4916",
+          "mode": 420,
+          "upstreamSha256": "ceee226d32c623bbae290d76b5950be0c06880310ec26dc289f66bd631de4916",
+          "upstreamBytes": 132975,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/tlssocket.js",
+          "bytes": 6967,
+          "sha256": "99728e72301548ee5233c16bc0417f07892022d24fd178dfb9c0a40aff541a47",
+          "mode": 420,
+          "upstreamSha256": "99728e72301548ee5233c16bc0417f07892022d24fd178dfb9c0a40aff541a47",
+          "upstreamBytes": 6967,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/util.js",
+          "bytes": 69861,
+          "sha256": "a05620c922303dd687e9447754ebde42878f37e51c390a9a3aedb592434795bc",
+          "mode": 420,
+          "upstreamSha256": "a05620c922303dd687e9447754ebde42878f37e51c390a9a3aedb592434795bc",
+          "upstreamBytes": 69861,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/x509.js",
+          "bytes": 102130,
+          "sha256": "cce5b00838c8c08486964c1f62cb8ae3491365509b26a27cfe1917f73dee3be9",
+          "mode": 420,
+          "upstreamSha256": "cce5b00838c8c08486964c1f62cb8ae3491365509b26a27cfe1917f73dee3be9",
+          "upstreamBytes": 102130,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "lib/xhr.js",
+          "bytes": 22117,
+          "sha256": "d9abf523180b6d03b2cc99909eef3488a6b4bc1f822d7fb9d1e945abf555cb42",
+          "mode": 420,
+          "upstreamSha256": "d9abf523180b6d03b2cc99909eef3488a6b4bc1f822d7fb9d1e945abf555cb42",
+          "upstreamBytes": 22117,
+          "change": "unchanged upstream member"
+        },
+        {
+          "path": "package.json",
+          "bytes": 3210,
+          "sha256": "e231812ba642846066398cd5ca8a731bebd9bdf1e4b95e7e37c1ec82244cbbe1",
+          "mode": 420,
+          "upstreamSha256": "a907bca8a62d97478062f2bd8ed5cd47d00b79385d3f08a8cad1c3bd7e3eb5bf",
+          "upstreamBytes": 3256,
+          "change": "Remove dist globs from publish file list; name/version/main/browser/license/engines and every other metadata value unchanged."
+        }
+      ],
+      "removedUpstreamMembers": [
+        {
+          "path": "dist/forge.all.min.js",
+          "upstreamSha256": "cb9ba4045a81825f8edb646c38d53a1ac30ce07665bf26042c8dea86d7208642",
+          "upstreamBytes": 304809,
+          "reason": "Unused precompiled browser distribution omitted from the Node-only project fork. Default lib/index.js and actual Expo/selfsigned imports preserved; no fixed-browser-bundle claim."
+        },
+        {
+          "path": "dist/forge.all.min.js.map",
+          "upstreamSha256": "0b21eb8fb1c124e963d564b6462177331027f6e739f48e73184e0f6a81cac3f1",
+          "upstreamBytes": 121,
+          "reason": "Unused precompiled browser distribution omitted from the Node-only project fork. Default lib/index.js and actual Expo/selfsigned imports preserved; no fixed-browser-bundle claim."
+        },
+        {
+          "path": "dist/forge.min.js",
+          "upstreamSha256": "d9b9074e6861200d676e25dcfe97889db5e8f4150bb766d29c491ad709a51b58",
+          "upstreamBytes": 283279,
+          "reason": "Unused precompiled browser distribution omitted from the Node-only project fork. Default lib/index.js and actual Expo/selfsigned imports preserved; no fixed-browser-bundle claim."
+        },
+        {
+          "path": "dist/forge.min.js.map",
+          "upstreamSha256": "5f11be794b0ad083ce9b2bcee1079e7ee1f0771d37beb90d6f13b2b9a8a0eba3",
+          "upstreamBytes": 113,
+          "reason": "Unused precompiled browser distribution omitted from the Node-only project fork. Default lib/index.js and actual Expo/selfsigned imports preserved; no fixed-browser-bundle claim."
+        },
+        {
+          "path": "dist/prime.worker.min.js",
+          "upstreamSha256": "877bd31b0cc79ecb9163649034fbafaeec45e8e2861fc4fa9fb11335f28c4ef9",
+          "upstreamBytes": 21461,
+          "reason": "Unused precompiled browser distribution omitted from the Node-only project fork. Default lib/index.js and actual Expo/selfsigned imports preserved; no fixed-browser-bundle claim."
+        },
+        {
+          "path": "dist/prime.worker.min.js.map",
+          "upstreamSha256": "73f786b89ef54b00e0cfb6969b2881e7cffa77b4be3f03e998f70993290716a8",
+          "upstreamBytes": 121,
+          "reason": "Unused precompiled browser distribution omitted from the Node-only project fork. Default lib/index.js and actual Expo/selfsigned imports preserved; no fixed-browser-bundle claim."
+        }
+      ],
+      "supportedEntries": "Default Node CommonJS lib/index.js plus unchanged lib/ module API used by pinned Expo0.22.28/code-signing0.0.6/selfsigned2.4.1. Unshipped precompiled dist/ entrypoints are not supported.",
+      "consumerSourceProof": {
+        "receiptSha256": "6a5566d82291d47150d96183c1aca7006dba8f5966b6b4168b0a7d5b2bca9580",
+        "integrityBoundReferences": [
+          {
+            "consumer": "@expo/cli",
+            "version": "0.22.28",
+            "tarballSha256": "62812f1e10b5d120e9cde1afc774e100c7ee1287181cd50dcca43b0e3aca7ada",
+            "references": [
+              {
+                "path": "build/src/run/ios/codeSigning/Security.js",
+                "line": 28,
+                "text": "const data = /*#__PURE__*/ _interopRequireDefault(require(\"node-forge\"));"
+              },
+              {
+                "path": "package.json",
+                "line": 86,
+                "text": "\"node-forge\": \"^1.3.3\","
+              }
+            ]
+          },
+          {
+            "consumer": "@expo/code-signing-certificates",
+            "version": "0.0.6",
+            "tarballSha256": "0460d57dd2f7d6839e95a42495f2339b6d950c8e171ae6e54778cb594f8fb582",
+            "references": [
+              {
+                "path": "build/__tests__/main-test.js",
+                "line": 7,
+                "text": "const node_forge_1 = require(\"node-forge\");"
+              },
+              {
+                "path": "build/__tests__/main-test.js",
+                "line": 222,
+                "text": "test.each([['a', '\u00f6\u00e4\u00e5']])('encoding assumption about node-forge: case %p', (input) => {"
+              },
+              {
+                "path": "build/main.js",
+                "line": 8,
+                "text": "const node_forge_1 = require(\"node-forge\");"
+              },
+              {
+                "path": "package.json",
+                "line": 38,
+                "text": "\"node-forge\": \"^1.3.3\""
+              },
+              {
+                "path": "package.json",
+                "line": 44,
+                "text": "\"@types/node-forge\": \"^1.0.0\","
+              },
+              {
+                "path": "build/main.d.ts",
+                "line": 2,
+                "text": "import { pki as PKI } from 'node-forge';"
+              }
+            ]
+          },
+          {
+            "consumer": "selfsigned",
+            "version": "2.4.1",
+            "tarballSha256": "f37ac21915c13d4bd6479db74d40b6f53ec03a6168be1fb79278a26de9631e48",
+            "references": [
+              {
+                "path": "index.js",
+                "line": 1,
+                "text": "var forge = require('node-forge');"
+              },
+              {
+                "path": "test/tests.js",
+                "line": 2,
+                "text": "var forge      = require('node-forge');"
+              },
+              {
+                "path": "package.json",
+                "line": 35,
+                "text": "\"@types/node-forge\": \"^1.3.0\","
+              },
+              {
+                "path": "package.json",
+                "line": 36,
+                "text": "\"node-forge\": \"^1\""
+              },
+              {
+                "path": "index.d.ts",
+                "line": 1,
+                "text": "import { pki } from 'node-forge'"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "securityStatus": "Names and versions intentionally remain original and affected upstream advisory ranges stay visible. Exactly five reviewed lib fixes are packaged before any install script. Six unused vulnerable Forge dist artifacts are explicitly omitted with full original hashes; no assertion that omitted browser entrypoints were repaired. Consumer/build/device acceptance requires separate evidence."
+}

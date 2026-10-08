@@ -3,7 +3,7 @@
 // Source preparation evaluates no dependency code and refuses unreviewed bytes.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
 
@@ -75,6 +75,86 @@ const policy = [
 ];
 export const DEPENDENCY_SECURITY_PATCHES = Object.freeze(policy.map((entry) => Object.freeze({ ...entry, replacements: Object.freeze(entry.replacements.map(Object.freeze)) })));
 
+// Reviewed literal pins never derive expected bytes from installed packages.
+export const IMMUTABLE_FORK_PROVENANCE_SHA256 = "6569e49dac1084b01a6272f8b76bc53b41cff46e1d72b5e27b41d940f554525f";
+export const IMMUTABLE_DEPENDENCY_FORKS = Object.freeze([
+  Object.freeze({ name: "braces", version: "3.0.3", relativePath: "vendor/dependency-forks/braces-3.0.3-muster-security-v1.tgz", bytes: 14018, sha256: "6797dd2778cc8a5fe34aa2c2fb39fdad3e09b33387378b2496fb17c5ca4e7b97", integrity: "sha512-DTMccNLRRrH9Dvb7rJL3ayzUghKMZ7ZgeviM6SX0OrdJJ/+UEV6EiG+H/tjILsBFxpJjCj5UAtZjFJIcWRfbWw==" }),
+  Object.freeze({ name: "node-forge", version: "1.4.0", relativePath: "vendor/dependency-forks/node-forge-1.4.0-muster-security-v1.tgz", bytes: 270970, sha256: "0d439ec5baf6289d8027664d092267a800191930ec162ce866545da7eb94e700", integrity: "sha512-AJhGtX5YGZwSYVXlV8KGeVFzgrpWjJHXj3NJwq/OlyNdMy+SUveZ83SYuMZkQPfnMeCvYvxOA03tIR8RnRniSQ==" }),
+]);
+
+const sameIdentity = (left, right) => ["dev", "ino", "mode", "nlink", "size", "mtimeNs", "ctimeNs"].every((key) => left[key] === right[key]);
+function readPinnedRegularFile(root, target, limit) {
+  assert(target.startsWith(`${root}${sep}`), "Immutable input must remain under the companion root");
+  const directories = [];
+  for (let current = dirname(target);; current = dirname(current)) {
+    const stat = lstatSync(current, { bigint: true });
+    assert(stat.isDirectory() && !stat.isSymbolicLink(), `Expected a regular dependency directory: ${current}`);
+    directories.push({ path: current, stat });
+    if (current === root) break;
+    assert.notEqual(dirname(current), current, "Immutable input escaped its companion root");
+  }
+  const before = lstatSync(target, { bigint: true });
+  assert(before.isFile() && !before.isSymbolicLink() && before.nlink === 1n, `Expected an unlinked regular dependency file: ${target}`);
+  assert(before.size <= BigInt(limit), `Unexpected immutable input size: ${target}`);
+  const fd = openSync(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    assert(sameIdentity(before, fstatSync(fd, { bigint: true })), `Immutable input was replaced: ${target}`);
+    const bytes = readFileSync(fd);
+    assert.equal(BigInt(bytes.length), before.size, `Immutable input size changed: ${target}`);
+    assert(sameIdentity(before, fstatSync(fd, { bigint: true })) && sameIdentity(before, lstatSync(target, { bigint: true })), `Immutable input changed: ${target}`);
+    for (const directory of directories) assert(sameIdentity(directory.stat, lstatSync(directory.path, { bigint: true })), `Immutable input directory changed: ${directory.path}`);
+    return { bytes, mode: Number(before.mode) };
+  } finally { closeSync(fd); }
+}
+
+function immutablePackageInventory(root, packageRoot) {
+  const paths = [];
+  const directories = [];
+  let entries = 0;
+  function visit(directory, depth) {
+    assert(depth <= 8, "Unexpected immutable dependency directory depth");
+    const before = lstatSync(directory, { bigint: true });
+    assert(before.isDirectory() && !before.isSymbolicLink(), `Expected a regular dependency directory: ${directory}`);
+    if (directory !== packageRoot) directories.push(directory.slice(packageRoot.length + 1));
+    for (const name of readdirSync(directory).sort()) {
+      assert(++entries <= 100, "Unexpected immutable dependency entry count");
+      const target = join(directory, name);
+      const stat = lstatSync(target, { bigint: true });
+      if (stat.isDirectory() && !stat.isSymbolicLink()) visit(target, depth + 1);
+      else {
+        assert(stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1n, `Expected an unlinked regular dependency file: ${target}`);
+        paths.push(target.slice(packageRoot.length + 1));
+        assert(paths.length <= 80, "Unexpected immutable dependency file count");
+      }
+    }
+    assert(sameIdentity(before, lstatSync(directory, { bigint: true })), `Immutable dependency inventory changed: ${directory}`);
+  }
+  assert(packageRoot.startsWith(`${join(root, "node_modules")}${sep}`), "Installed immutable package must be in node_modules");
+  visit(packageRoot, 0);
+  return { files: paths.sort(), directories: directories.sort() };
+}
+
+function immutableForkPolicy(root, lock) {
+  const bytes = readPinnedRegularFile(root, join(root, "vendor/dependency-forks/provenance.json"), 128 * 1024).bytes;
+  assert.equal(sha256(bytes), IMMUTABLE_FORK_PROVENANCE_SHA256, "Unknown immutable dependency provenance");
+  const provenance = JSON.parse(bytes);
+  assert.equal(provenance.schemaVersion, 1);
+  assert.equal(provenance.revision, "muster-security-v1");
+  assert.deepEqual(provenance.packages.map(({ name }) => name), IMMUTABLE_DEPENDENCY_FORKS.map(({ name }) => name));
+  for (const descriptor of IMMUTABLE_DEPENDENCY_FORKS) {
+    const pkg = provenance.packages.find(({ name }) => name === descriptor.name);
+    assert.equal(pkg.version, descriptor.version);
+    assert.equal(pkg.localRevision, "muster-security-v1");
+    for (const key of ["relativePath", "bytes", "sha256", "integrity"]) assert.equal(pkg.archive[key], descriptor[key], `Unknown immutable ${descriptor.name} archive descriptor`);
+    const archive = readPinnedRegularFile(root, join(root, descriptor.relativePath), descriptor.bytes).bytes;
+    assert.equal(archive.length, descriptor.bytes);
+    assert.equal(sha256(archive), descriptor.sha256, `Unknown immutable ${descriptor.name} archive`);
+    assert.equal(`sha512-${createHash("sha512").update(archive).digest("base64")}`, descriptor.integrity);
+    assert.equal(lock.packages[""]?.devDependencies?.[descriptor.name], `file:${descriptor.relativePath}`, `Root must select immutable ${descriptor.name}`);
+  }
+  return provenance.packages;
+}
+
 function readRegularFile(root, target) {
   assert(target.startsWith(`${join(root, "node_modules")}${sep}`), "Dependency target must remain in this companion's node_modules");
   let directory = dirname(target);
@@ -102,6 +182,7 @@ export function planDependencySecurityPatches(root) {
       assert(!entry[section]?.["sprintf-js"], `The sprintf-js formatter dependency remains reachable from ${path} (${section})`);
     }
   }
+  const immutablePackages = immutableForkPolicy(root, lock);
   const files = [];
   const packages = [];
   const consumers = [];
@@ -137,6 +218,26 @@ export function planDependencySecurityPatches(root) {
       assert.equal(metadata.name, name, "Unexpected dependency package");
       assert.equal(metadata.version, descriptors[0].version, `Unsupported ${name} version; review its mitigation`);
       assert.equal(lock.packages[path].version, metadata.version, "Lock/install version mismatch for ${name}");
+      if (name !== "js-yaml") {
+        const descriptor = IMMUTABLE_DEPENDENCY_FORKS.find((entry) => entry.name === name);
+        const immutable = immutablePackages.find((entry) => entry.name === name);
+        assert.equal(lock.packages[path].resolved, `file:${descriptor.relativePath}`, `Unreviewed immutable ${name} lock resolution`);
+        assert.equal(lock.packages[path].integrity, descriptor.integrity, `Unknown immutable ${name} lock integrity`);
+        const packageRoot = resolve(root, path);
+        const inventory = immutablePackageInventory(root, packageRoot);
+        assert.deepEqual(inventory.files, immutable.installedFiles.map(({ path: member }) => member).sort(), `Unknown immutable ${name} inventory`);
+        const expectedDirectories = new Set();
+        for (const member of immutable.installedFiles) {
+          for (let directory = dirname(member.path); directory !== "."; directory = dirname(directory)) expectedDirectories.add(directory);
+        }
+        assert.deepEqual(inventory.directories, [...expectedDirectories].sort(), `Unknown immutable ${name} directories`);
+        for (const member of immutable.installedFiles) {
+          const current = readPinnedRegularFile(root, join(packageRoot, member.path), member.bytes);
+          assert.equal(current.bytes.length, member.bytes, `Unknown immutable ${name} source: ${member.path}`);
+          assert.equal(sha256(current.bytes), member.sha256, `Unknown immutable ${name} source: ${member.path}`);
+          assert.equal(current.mode & 0o777, member.mode, `Unknown immutable ${name} mode: ${member.path}`);
+        }
+      }
       if (name === "js-yaml") {
         const parserPath = createRequire(packagePath).resolve("argparse/package.json");
         const parserMetadata = JSON.parse(readRegularFile(root, parserPath).bytes.toString("utf8"));
@@ -152,6 +253,7 @@ export function planDependencySecurityPatches(root) {
         const currentHash = sha256(current.bytes);
         assert([descriptor.originalSha256, descriptor.previousPatchedSha256, descriptor.patchedSha256].filter(Boolean).includes(currentHash), `Unknown ${name} source: ${path}/${descriptor.file}; refusing to patch`);
         let bytes = current.bytes;
+        if (name !== "js-yaml") assert.equal(currentHash, descriptor.patchedSha256, `Immutable ${name} source must already be patched; no install-time repair`);
         if (currentHash !== descriptor.patchedSha256) {
           let source = bytes.toString("utf8");
           if (currentHash === descriptor.previousPatchedSha256) {

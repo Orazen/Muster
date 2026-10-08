@@ -150,6 +150,49 @@ describe("actual additive live-root account transactions",()=>{
     const journal=await import("./drive-visible-live-journal.ts"),held=journal.openLiveJournal(owned.root);
     try{expect(held.load(input.operationId)!.receipt).toMatchObject({status:"rolled-back",phase:"compensated"});}finally{held.release();}
   });
+  it.each(["cancel","session","member","subject","account","runtime"])("keeps committed data without publication after committed-phase %s invalidation",async reason=>{
+    const control=new AbortController(),publish=vi.fn(),phases:string[]=[];
+    const originalReady=input.runtime.assertReady;let ready=true,committedFiles:string[]=[],committedThreads:string="",invalidatedAuth="";
+    input.signal=control.signal;input.runtime.publish=publish;
+    input.runtime.assertReady=()=>{if(!ready)throw Error("Retired owned runtime");originalReady();};
+    input.onPhase=phase=>{
+      phases.push(phase);if(phase!=="committed")return;
+      committedFiles=["bots.json","groups.json","task-plans.json"].map(name=>readFileSync(join(owned.root,name),"utf8"));
+      committedThreads=JSON.stringify(mdb.recoveryThreadIds());
+      if(reason==="cancel")control.abort();
+      if(reason==="session")auth.exec("DELETE FROM session WHERE id='alice-session'");
+      if(reason==="member")auth.exec("DELETE FROM member WHERE userId='alice'");
+      if(reason==="subject")auth.exec("UPDATE account SET accountId='changed' WHERE userId='alice'");
+      if(reason==="account")auth.exec("UPDATE session SET userId='bob',activeOrganizationId='bob-org' WHERE id='alice-session'");
+      if(reason==="runtime")ready=false;
+      invalidatedAuth=authRows();
+    };
+    const restored=await importer.applyLiveAccountRestore(input);
+    expect(restored.status).toBe("committed");expect(publish).not.toHaveBeenCalled();expect(phases).not.toContain("ack");
+    expect(committedFiles).toHaveLength(3);
+    expect(["bots.json","groups.json","task-plans.json"].map(name=>readFileSync(join(owned.root,name),"utf8"))).toEqual(committedFiles);
+    expect(JSON.stringify(mdb.recoveryThreadIds())).toBe(committedThreads);expect(authRows()).toBe(invalidatedAuth);
+    expect(mdb.readThreadSnapshot(restored.mapping.thread[ids.thread]!)).toMatchObject({activeLeafId:"selected",messages:[{id:"root"},{id:"selected"},{id:"newer-fork"}]});
+    expect(readFileSync(join(owned.root,"workspaces",restored.mapping.bot[ids.own]!,"MEMORY.md"),"utf8")).toBe("Original memory");
+    expect(mdb.readThreadSnapshot(foreignThread)).toMatchObject({messages:[{text:"FOREIGN-UNCHANGED"}]});
+    expect(send).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();
+    // The original account's durable receipt survives even though publication
+    // lost authority. Restoring only the fixture runtime permits receipt reads;
+    // it does not reauthorize the cancelled request or the replaced account.
+    input.runtime.assertReady=originalReady;
+    expect(importer.readLiveRestoreReceipt(input.runtime,input.operationId,{userId:"alice",workspaceId:"alice-org"})).toEqual(restored);
+    expect(()=>importer.readLiveRestoreReceipt(input.runtime,input.operationId,{userId:"bob",workspaceId:"bob-org"})).toThrow("could not be confirmed");
+    const journal=await import("./drive-visible-live-journal.ts"),held=journal.openLiveJournal(owned.root);
+    try{expect(held.load(input.operationId)!.receipt).toMatchObject({status:"committed",phase:"committed"});}finally{held.release();}
+  });
+  it("retains the committed receipt when the current account's sole publication throws",async()=>{
+    const publish=vi.fn(()=>{throw Error("Owned publication failure");});input.runtime.publish=publish;
+    const restored=await importer.applyLiveAccountRestore(input);
+    expect(publish).toHaveBeenCalledOnce();expect(publish).toHaveBeenCalledWith({userId:"alice",workspaceId:"alice-org"},restored);
+    expect(importer.readLiveRestoreReceipt(input.runtime,input.operationId,{userId:"alice",workspaceId:"alice-org"})).toEqual(restored);
+    expect(mdb.readThreadSnapshot(restored.mapping.thread[ids.thread]!)).toMatchObject({activeLeafId:"selected"});
+    expect(send).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();
+  });
   it("rejects stale archive digest, wrong key and foreign engine before record mutation",async()=>{
     await expect(importer.applyLiveAccountRestore({...input,expectedSourceDigest:"0".repeat(64)})).rejects.toMatchObject({code:"preflight-refused"});
     await expect(importer.applyLiveAccountRestore({...input,key:{custody:"user-held",passphrase:"wrong-user-held-key"}})).rejects.toMatchObject({code:"preflight-refused"});
