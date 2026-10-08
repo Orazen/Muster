@@ -173,10 +173,32 @@ test("four crew choices keep costumes, all forty expressions and independent con
   await expect(crew.locator("#crew-expressions button")).toHaveCount(16);
   await crew.getByRole("button", { name: "Laughing", exact: true }).click();
   await expect(crew).toHaveAttribute("data-crew-state", "laughing");
-  for (const value of await crew.locator("#crew-expression option").evaluateAll(options => options.map(option => option.getAttribute("value") ?? ""))) {
-    await crew.locator("#crew-expression").selectOption(value);
-    await expect(crew).toHaveAttribute("data-crew-state", value);
+  await expect(crew).toHaveAttribute("data-crew-paused", "false");
+  await crew.locator("#crew-pause").click();
+  await expect(crew).toHaveAttribute("data-crew-paused", "true");
+  await expect(crew.locator("#crew-pause")).toHaveAttribute("aria-pressed", "true");
+  const values = await crew.locator("#crew-expression option").evaluateAll(options => options.map(option => option.getAttribute("value") ?? ""));
+  expect(values).toHaveLength(40);
+  expect(new Set(values).size).toBe(40);
+  expect(values).not.toContain("");
+  for (const value of values) {
+    await test.step(`Select crew expression ${value} while paused`, async () => {
+      const started = Date.now();
+      try {
+        await crew.locator("#crew-expression").selectOption(value);
+        await expect(crew).toHaveAttribute("data-crew-state", value);
+        await expect(crew.locator("#crew-expression")).toHaveValue(value);
+        await expect(crew).toHaveAttribute("data-crew-paused", "true");
+      } finally {
+        console.log(JSON.stringify({ event: "CREW_EXPRESSION_CASE", value, elapsedMs: Date.now() - started }));
+      }
+    });
   }
+  await crew.locator("#crew-pause").click();
+  await expect(crew).toHaveAttribute("data-crew-paused", "false");
+  await expect(crew.locator("#crew-pause")).toHaveAttribute("aria-pressed", "false");
+  await expect(crew).toHaveAttribute("data-crew-state", values.at(-1)!);
+  await expect(crew.locator("#crew-expression")).toHaveValue(values.at(-1)!);
   expect(errors).toEqual([]);
 });
 
