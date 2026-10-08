@@ -3,6 +3,8 @@
 const characterNames = [
   "flower", "star", "blob", "cursor", "hexagon", "triangle", "egg", "drop", "heart",
   "pebble", "squircle", "capsule", "cloud", "ball", "sparkle", "circle",
+  // New opt-in crew follows every existing choice; saved identities keep their values.
+  "designer", "researcher", "developer", "coordinator",
 ] as const;
 
 // Existing saved Lottie characters still render, but are not offered for new

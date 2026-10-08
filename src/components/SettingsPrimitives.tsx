@@ -1,9 +1,11 @@
 // The settings-row anatomy (SettingRow) adapts OpenMausBot's settings rows:
 // © OpenMausBot contributors, licensed under the Apache License 2.0.
-// Everything else in this file is Muster's own.
+// Surface and action primitives compose GAIA UI; domain props remain Muster's.
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { Card as GaiaCard } from "./ui/card";
+import { Button } from "./ui/button";
 
 export function Card({
   title,
@@ -15,11 +17,11 @@ export function Card({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="workspace-settings-card rounded-xl bg-card p-4">
+    <GaiaCard className="workspace-settings-card rounded-xl border-0 bg-card p-4 shadow-none">
       {title && <div className="workspace-settings-card-title text-[15px] font-medium text-ink">{title}</div>}
       {subtitle && <div className={title ? "mt-0.5 text-[13px] leading-relaxed text-ink-secondary" : "text-[13px] leading-relaxed text-ink-secondary"}>{subtitle}</div>}
       {children && <div className={title || subtitle ? "mt-4" : undefined}>{children}</div>}
-    </div>
+    </GaiaCard>
   );
 }
 
@@ -51,13 +53,16 @@ export function CommandLine({ command }: { command: string }) {
       <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[12px] text-ink">
         {command}
       </code>
-      <button
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
         onClick={() => void copy()}
         aria-label="Copy command"
-        className="shrink-0 rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+        className="h-auto w-auto shrink-0 rounded border-0 p-1 text-ink-secondary hover:bg-raised hover:text-ink [&_svg]:size-[13px]"
       >
         {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -79,9 +84,9 @@ export function SettingRow({
   disabled?: boolean;
 }) {
   return (
-    <div
+    <GaiaCard
       className={cn(
-        "workspace-setting-row flex items-center justify-between gap-4 rounded-xl bg-card px-4 py-3.5",
+        "workspace-setting-row flex items-center justify-between gap-4 rounded-xl border-0 bg-card px-4 py-3.5 shadow-none",
         disabled && "opacity-50",
       )}
     >
@@ -92,7 +97,7 @@ export function SettingRow({
         )}
       </div>
       <div className="flex shrink-0 items-center">{children}</div>
-    </div>
+    </GaiaCard>
   );
 }
 

@@ -1,9 +1,10 @@
 import { createHandoff, SCENARIOS } from './handoff.mjs';
+import { mountCrew } from './crew-stage.js';
 const $ = selector => document.querySelector(selector);
 const model = createHandoff();
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let motionPaused = reducedMotion.matches;
-let heroActor, deskActor, helloTimer;
+let heroActor, deskActor, crewActor, helloTimer;
 let disposed = false;
 const lifetime = new AbortController();
 const roleNames = { update: 'Slate', plan: 'Atlas', research: 'Quill' };
@@ -88,6 +89,7 @@ const loadingCleanups = [];
 function syncMotion() {
   heroActor?.setPaused(motionPaused);
   deskActor?.setPaused(motionPaused);
+  crewActor?.setPaused(motionPaused);
   const available = actorSlots.hero.available;
   motionButton.disabled = !available;
   helloButton.disabled = !available;
@@ -151,6 +153,7 @@ async function loadActor(name) {
     }
     const actor = await mountMascot(slot.element, {
       initialState: name === 'hero' ? 'idle' : model.getSnapshot().cue,
+      role: name === 'hero' ? 'designer' : 'coordinator',
       interactive: name === 'hero',
       signal: lifetime.signal,
       onStatus: status => actorStatus(name, status),
@@ -193,6 +196,10 @@ function observeStage(name, element) {
 
 // Only announce enhanced controls after the ordinary page interactions are installed.
 render();
+crewActor = mountCrew($('#crew'), {
+  paused: motionPaused,
+  onPause: value => { motionPaused = value; syncMotion(); },
+});
 syncMotion();
 document.querySelectorAll('[data-scenario], #reset-demo, #menu-toggle, [data-try]').forEach(control => {
   if ('disabled' in control) control.disabled = false;
@@ -209,4 +216,5 @@ window.addEventListener('pagehide', event => {
   disposed = true; clearTimeout(helloTimer); lifetime.abort();
   loadingCleanups.splice(0).forEach(cleanup => cleanup());
   heroActor?.dispose(); deskActor?.dispose();
+  crewActor?.dispose();
 });

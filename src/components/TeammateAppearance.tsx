@@ -1,7 +1,9 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Check, RotateCcw } from "lucide-react";
 import { AgentBotAvatar } from "./AgentBotAvatar";
+import { Button } from "./ui/button";
 import { AGENT_CHARACTERS, AGENT_COLOR_NAMES, AGENT_COLORS, type AgentCharacter, type AgentColor, type AgentState } from "@/lib/mascot";
+import { CREW, CREW_STATES, isCrewCharacter, normalizeCrewState, type CrewState } from "@/lib/mascot/crew";
 import { cn } from "@/lib/cn";
 
 const previews = [
@@ -24,7 +26,8 @@ export function TeammateAppearance({
   onChange: (patch: { character?: AgentCharacter; color?: AgentColor }) => void;
   onReset?: () => void;
 }) {
-  const [preview, setPreview] = useState<AgentState | null>(null);
+  const [preview, setPreview] = useState<CrewState | null>(null);
+  const crew = isCrewCharacter(character);
   const stripRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const strip = stripRef.current;
@@ -39,24 +42,31 @@ export function TeammateAppearance({
     <section aria-label="Teammate appearance" className="w-full min-w-0 overflow-hidden rounded-2xl border border-hairline/40 bg-card">
       <div className="flex items-center justify-between gap-2 px-4 pt-3">
         <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-ink-secondary">Make it yours</span>
-        {onReset && <button type="button" onClick={() => { setPreview(null); onReset(); }} className="flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[12px] text-ink-secondary hover:bg-raised focus-visible:outline-2 focus-visible:outline-focus" aria-label="Reset mascot appearance">
+        {onReset && <Button variant="ghost" size="sm" type="button" onClick={() => { setPreview(null); onReset(); }} className="min-h-11 gap-1.5 px-2 text-[12px] text-ink-secondary" aria-label="Reset mascot appearance">
           <RotateCcw size={12} aria-hidden="true" /> Reset
-        </button>}
+        </Button>}
       </div>
       <div className="relative flex flex-col items-center px-4 pb-3 pt-1">
         <div className="relative flex h-40 w-full items-center justify-center overflow-hidden" data-testid="bot-avatar-preview">
           <span aria-hidden="true" className="absolute size-28 rounded-full" style={{ background: `radial-gradient(circle, ${AGENT_COLORS[color]}24, transparent 72%)` }} />
-          <AgentBotAvatar character={character} color={color} state={preview ?? state} seed={seed} size={128} label={`${name.trim() || "Your teammate"}, mascot preview`} interactive />
+          <AgentBotAvatar character={character} color={color} state={!crew && preview === "thinking-dots" ? state : preview ?? state} seed={seed} size={128} label={`${name.trim() || "Your teammate"}, mascot preview`} interactive />
         </div>
         <p className="max-w-full break-words text-center text-[17px] font-semibold text-ink">{name.trim() || "Your teammate"}</p>
         {title?.trim() && <p className="mt-0.5 max-w-full break-words text-center text-[12px] text-ink-secondary">{title.trim()}</p>}
         <fieldset className="mt-3 flex min-w-0 flex-wrap justify-center gap-1 rounded-xl bg-inset p-1">
           <legend className="sr-only">Preview mascot motion</legend>
-          {previews.map(item => <button key={item.state} type="button" aria-pressed={preview === item.state} onClick={() => setPreview(preview === item.state ? null : item.state)} className={cn("min-h-11 rounded-lg px-3 text-[12px] transition-colors focus-visible:outline-2 focus-visible:outline-focus", preview === item.state ? "bg-raised font-medium text-ink" : "text-ink-secondary hover:text-ink")}>
+          {previews.map(item => <Button key={item.state} variant={preview === item.state ? "secondary" : "ghost"} size="sm" type="button" aria-pressed={preview === item.state} onClick={() => setPreview(preview === item.state ? null : item.state)} className="min-h-11 px-3 text-[12px]">
             {item.label}
-          </button>)}
+          </Button>)}
         </fieldset>
-        <p className="mt-1.5 text-center text-[11px] text-ink-secondary" role="status">{preview ? "Motion preview only · tap again to return" : "Preview a motion without changing your bot"}</p>
+        {crew && <label className="mt-2 flex max-w-full flex-wrap items-center justify-center gap-2 text-[12px] text-ink-secondary">
+          <span>Explore expressions</span>
+          <select aria-label="Preview crew expression" value={preview ?? ""} onChange={event => setPreview(event.target.value ? normalizeCrewState(event.target.value) : null)} className="min-h-11 max-w-full rounded-lg border border-hairline bg-inset px-2 text-ink focus-visible:outline-2 focus-visible:outline-focus">
+            <option value="">Follow current activity</option>
+            {CREW_STATES.map(cue => <option key={cue} value={cue}>{cue.replaceAll("-", " ")}</option>)}
+          </select>
+        </label>}
+        <p className="mt-1.5 text-center text-[11px] text-ink-secondary" role="status">{preview ? (crew ? "Expression preview only · choose current activity to return" : "Motion preview only · tap again to return") : "Preview a motion without changing your bot"}</p>
       </div>
       <div className="border-t border-hairline/40 px-3 py-3">
         <div className="mb-2 flex items-center justify-between gap-2 text-[12px]">
@@ -66,10 +76,10 @@ export function TeammateAppearance({
         <fieldset className="min-w-0">
           <legend className="sr-only">Mascot character</legend>
           <div ref={stripRef} className="flex gap-1.5 overflow-x-auto pb-2 pt-1" tabIndex={0} aria-label="Scroll mascot characters">
-            {AGENT_CHARACTERS.map(choice => <button key={choice} type="button" aria-label={`Use the ${choice} character`} aria-pressed={choice === character} onClick={() => onChange({ character: choice })} className={cn("flex w-[66px] shrink-0 flex-col items-center gap-1 rounded-xl border px-1 py-2 focus-visible:outline-2 focus-visible:outline-focus", choice === character ? "border-accent bg-accent/10 text-ink" : "border-transparent bg-inset text-ink-secondary hover:bg-raised")}>
+            {AGENT_CHARACTERS.map(choice => <Button key={choice} variant="outline" type="button" aria-label={`Use the ${choice} character`} aria-pressed={choice === character} onClick={() => { setPreview(null); onChange({ character: choice }); }} className={cn("h-auto w-[66px] shrink-0 flex-col gap-1 rounded-xl px-1 py-2", choice === character ? "border-accent bg-accent/10 text-ink" : "border-transparent bg-inset text-ink-secondary hover:bg-raised")}>
               <AgentBotAvatar character={choice} color={color} seed={seed} size={36} animated={false} className="pointer-events-none" />
-              <span className="text-[10px] capitalize">{choice}</span>
-            </button>)}
+              <span className="max-w-full truncate text-[10px] capitalize">{isCrewCharacter(choice) ? CREW[choice].label : choice}</span>
+            </Button>)}
           </div>
         </fieldset>
         <fieldset className="mt-2 min-w-0">

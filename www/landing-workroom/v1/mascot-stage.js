@@ -1,15 +1,18 @@
 /** Production host for the approved revision-04 character; character modules remain immutable. */
+import { CREW, isCrewRole } from './mascot/crew.js';
+
 export async function mountMascot(container, {
-  initialState = 'idle', interactive = true, onReady, onStatus, signal,
+  initialState = 'idle', interactive = true, onReady, onStatus, signal, role = 'default',
 } = {}) {
   if (!(container instanceof HTMLElement)) throw new TypeError('A mascot container element is required.');
   const previousPosition = container.style.position;
   const poster = container.querySelector('img.mascot-fallback');
   const cleanups = [], resources = new Set();
-  let renderer, scene, studio, disposed = false, available = false, contextLost = false;
+  let renderer, scene, studio, outfit, disposed = false, available = false, contextLost = false;
   let frameId = 0, tapTimer = 0, stateKeys = [];
   let active = initialState, paused = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let requestRender = () => {}, setState = () => false, resetClock = () => {};
+  let activeRole = isCrewRole(role) ? role : 'default';
+  let requestRender = () => {}, setState = () => false, setRole = () => false, resetClock = () => {};
   const track = resource => { resources.add(resource); return resource; };
   const listen = (target, event, callback, options) => {
     target.addEventListener(event, callback, options);
@@ -31,6 +34,8 @@ export async function mountMascot(container, {
     disposed = true; available = false;
     cancelAnimationFrame(frameId); clearTimeout(tapTimer); frameId = 0;
     cleanups.splice(0).forEach(cleanup => { try { cleanup(); } catch {} });
+    // Costumes own only their additive meshes; release them before traversing the rig.
+    outfit?.dispose(); outfit = null;
     // Traverse even partially constructed scenes and register detached allocations as acquired.
     for (const root of [scene, studio]) root?.traverse(object => {
       if (object.geometry) resources.add(object.geometry);
@@ -49,6 +54,7 @@ export async function mountMascot(container, {
     container.style.position = previousPosition;
     delete container.dataset.mascotState; delete container.dataset.mascotPaused;
     delete container.dataset.mascotProgress;
+    delete container.dataset.mascotRole;
     poster?.removeAttribute('aria-hidden');
   }
   function fail(error) {
@@ -61,6 +67,8 @@ export async function mountMascot(container, {
     get states() { return stateKeys; },
     setState: key => setState(key),
     getState: () => active,
+    setRole: key => setRole(key),
+    getRole: () => activeRole,
     setPaused(value) {
       if (disposed) return;
       paused = Boolean(value); resetClock(); container.dataset.mascotPaused = String(paused);
@@ -74,9 +82,10 @@ export async function mountMascot(container, {
   if (signal) listen(signal, 'abort', () => api.dispose(), { once: true });
   if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
   try {
-    const [THREE, { createSculpt }, { STATES, sampleMotion, transferPosition }, { drawCompanionFace }, { createCompanionEffects }] = await Promise.all([
+    const [THREE, { createSculpt }, { STATES, sampleMotion, transferPosition }, { drawCompanionFace }, { createCompanionEffects }, { createRoleOutfit }] = await Promise.all([
       import('./mascot/vendor/three.module.js'), import('./mascot/sculpt.js'),
       import('./mascot/companion.js'), import('./mascot/expressions.js'), import('./mascot/effects.js'),
+      import('./mascot/role-outfits.js'),
     ]);
     if (disposed || signal?.aborted || !container.isConnected) { api.dispose(); return api; }
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -193,6 +202,22 @@ export async function mountMascot(container, {
   const logoPath = new THREE.CatmullRomCurve3(markPoints, false, 'centripetal', .15);
   const logo = new THREE.Mesh(new THREE.TubeGeometry(logoPath, 28, .012, 8, false), trim); robot.add(logo);
 
+  function applyRole(key) {
+    const next = key === 'default' ? null : createRoleOutfit(key, {
+      robot, leftArm: sculpt.leftArm, rightArm: sculpt.rightArm, faceDepth: sculpt.faceDepth,
+    });
+    outfit?.dispose(); outfit = next; activeRole = key;
+    shell.color.set(key === 'default' ? '#eee04d' : CREW[key].color);
+    trim.color.set(key === 'default' ? '#a0a83b' : CREW[key].trim);
+    logo.visible = key === 'default';
+    container.dataset.mascotRole = key;
+    const name = key === 'default' ? 'Muster companion' : `Muster ${CREW[key].name}`;
+    renderer.domElement.setAttribute('aria-label', interactive
+      ? `Interactive 3D ${name}. Tap or press Enter to greet. Double-tap or press Space to dance. Drag or use arrow keys to turn. Home resets the view.`
+      : key === 'default' ? 'Muster, your golden AI companion' : `${name}, your AI teammate`);
+  }
+  applyRole(activeRole);
+
   const shadowCanvas = document.createElement('canvas'); shadowCanvas.width = shadowCanvas.height = 256;
   const shadowCtx = shadowCanvas.getContext('2d'); const grad = shadowCtx.createRadialGradient(128, 128, 0, 128, 128, 125);
   grad.addColorStop(0, 'rgba(0,0,0,0.55)'); grad.addColorStop(.45, 'rgba(0,0,0,0.22)'); grad.addColorStop(1, 'rgba(0,0,0,0)'); shadowCtx.fillStyle = grad; shadowCtx.fillRect(0, 0, 256, 256);
@@ -220,6 +245,18 @@ export async function mountMascot(container, {
       try { renderFace(); requestRender(); } catch (error) { fail(error); }
       return !disposed;
     };
+    setRole = key => {
+      if (disposed || (key !== 'default' && !isCrewRole(key))) return false;
+      if (key === activeRole) return true;
+      try {
+        // A failed costume allocation leaves the current costume/state intact.
+        applyRole(key); resize(); requestRender();
+      } catch (error) {
+        console.warn('Muster teammate outfit could not change.', error);
+        return false;
+      }
+      return !disposed;
+    };
     requestRender = () => {
       if (!disposed && available && !contextLost && !frameId && inView && !document.hidden) {
         frameId = requestAnimationFrame(frame);
@@ -231,7 +268,8 @@ export async function mountMascot(container, {
         const rect = container.getBoundingClientRect();
         const width = Math.max(1, rect.width), height = Math.max(1, rect.height);
         renderer.setSize(width, height, false); camera.aspect = width / height;
-        baseCameraDistance = Math.max(9.4, 3.15 / (2 * Math.tan(THREE.MathUtils.degToRad(16)) * camera.aspect));
+        const crew = activeRole !== 'default';
+        baseCameraDistance = Math.max(crew ? 10 : 9.4, (crew ? 3.9 : 3.15) / (2 * Math.tan(THREE.MathUtils.degToRad(16)) * camera.aspect));
         camera.position.z = baseCameraDistance; camera.updateProjectionMatrix(); requestRender();
       } catch (error) { fail(error); }
     }
@@ -255,6 +293,7 @@ export async function mountMascot(container, {
       baseYaw += (targetYaw - baseYaw) * lerp;
       robot.rotation.set(pose.lean, baseYaw + pose.spin, pose.tilt);
       arms[0].rotation.set(pose.leftX, 0, pose.left); arms[1].rotation.set(pose.rightX, 0, pose.right);
+      outfit?.update({ time: t, weights, intensity });
       contact.scale.setScalar(Math.max(.15, scale) * (1 - pose.hop * .35 * intensity));
       contact.material.opacity = (.36 - pose.hop * .35 * intensity) * Math.min(1, scale);
       rings.forEach((ring, i) => { const phase = (t * .38 + i / 3) % 1; ring.scale.setScalar(1 + phase * .8); ring.material.opacity = pose.glow * (1 - phase) * .35 * intensity; });
@@ -291,7 +330,7 @@ export async function mountMascot(container, {
       const rect = container.getBoundingClientRect();
       raycaster.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1,
         1 - (event.clientY - rect.top) / rect.height * 2), camera);
-      return raycaster.intersectObjects([sculpt.mesh, effects.group], true).some(hit => {
+      return raycaster.intersectObjects([sculpt.mesh, effects.group, ...(outfit?.roots || [])], true).some(hit => {
         for (let object = hit.object; object; object = object.parent) if (!object.visible) return false;
         return true;
       });

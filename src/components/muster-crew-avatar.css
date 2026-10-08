@@ -1,0 +1,13 @@
+.muster-crew-avatar { position: relative; display: inline-block; flex: none; vertical-align: middle; isolation: isolate; }
+.muster-crew-avatar__body { position: absolute; inset: 0; display: block; transform-origin: 50% 66%; }
+.muster-crew-avatar svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.muster-crew-avatar__shadow, .muster-crew-avatar__sculpt, .muster-crew-avatar__costume, .muster-crew-avatar__morph { position: absolute; inset: 0; pointer-events: none; }
+.muster-crew-avatar__face { position: absolute; left: 27.5%; top: 21.786%; width: 46.429%; height: 37.143%; border-radius: 36%; opacity: 0; pointer-events: none; }
+.muster-crew-avatar[data-face-ready="true"] .muster-crew-avatar__face { opacity: 1; }
+.muster-crew-avatar[data-face-ready="true"] .muster-crew-avatar__fallback { visibility: hidden; }
+.muster-crew-avatar__morph { opacity: 0; transform-origin: 50% 54%; }
+.muster-crew-avatar__morph[data-cue] { opacity: 1; }
+.muster-crew-avatar[data-state="thinking-dots"] .muster-crew-avatar__body { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .muster-crew-avatar__body, .muster-crew-avatar__morph { transition: none; }
+}

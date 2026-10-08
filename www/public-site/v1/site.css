@@ -91,13 +91,23 @@ h1 { font-weight: 650; letter-spacing: -.045em; line-height: 1.03; }
 .site-nav a:hover, .site-footer nav a:hover { text-decoration: underline; }
 .site-nav a[aria-current="page"] { text-decoration: underline; text-decoration-thickness: 2px; }
 .site-cta {
+  /* Same restrained GAIA raised-edge language as the app control adapter.
+     Keep the approved public type, spacing and semantic light/dark colors. */
+  --site-cta-edge: color-mix(in srgb, var(--site-accent) 70%, black);
   display: inline-flex; justify-content: center; align-items: center; gap: 24px;
-  padding: 12px 20px; min-height: 44px; border: 1px solid var(--site-accent);
+  padding: 12px 20px; min-height: 44px; border: 1px solid var(--site-cta-edge);
   border-radius: 6px; background: var(--site-accent); color: var(--site-on-accent);
   font-weight: 600; font-size: 14px; line-height: 1.4; text-decoration: none;
-  transition: transform .18s ease;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .24), 0 2px 0 var(--site-cta-edge), 0 3px 5px rgb(0 0 0 / .16);
+  transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, translate .15s ease;
 }
-.site-cta:hover { background: var(--site-accent-hover); border-color: var(--site-accent-hover); transform: translateY(-2px); }
+.site-cta:not(:disabled):not([aria-disabled="true"]):hover { background: var(--site-accent-hover); text-decoration: none; }
+.site-cta:not(:disabled):not([aria-disabled="true"]):active {
+  translate: 0 1px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .12), 0 1px 0 var(--site-cta-edge);
+}
+.site-cta:focus-visible { outline: 2px solid var(--site-ink); outline-offset: 5px; }
+.site-cta:disabled, .site-cta[aria-disabled="true"] { opacity: .5; }
 .site-eyebrow {
   color: var(--site-muted); font: 600 11px/1.5 var(--site-body);
   text-transform: uppercase; letter-spacing: .13em;
@@ -128,5 +138,6 @@ h1 { font-weight: 650; letter-spacing: -.045em; line-height: 1.03; }
   .site-nav { width: 100%; margin: 0; justify-content: space-between; gap: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .site-cta:active { translate: none !important; }
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }

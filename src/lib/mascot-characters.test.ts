@@ -8,6 +8,7 @@ describe("shared mascot characters", () => {
     expect(AGENT_CHARACTERS).toEqual([
       "flower", "star", "blob", "cursor", "hexagon", "triangle", "egg", "drop", "heart",
       "pebble", "squircle", "capsule", "cloud", "ball", "sparkle", "circle",
+      "designer", "researcher", "developer", "coordinator",
     ]);
     expect(new Set(AGENT_CHARACTERS).size).toBe(AGENT_CHARACTERS.length);
   });

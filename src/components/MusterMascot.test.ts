@@ -8,6 +8,9 @@ import { AgentBotAvatar } from "./AgentBotAvatar";
 import { MusterBloom } from "./MusterBloom";
 import { MusterMascot, MUSTER_BODY, MUSTER_EYES, MUSTER_ORANGE } from "./MusterMascot";
 import { MusterbotMark } from "./MusterbotMark";
+import { CREW, CREW_CHARACTERS, CREW_STATES } from "@/lib/mascot/crew";
+import { MusterCrewAvatar } from "./MusterCrewAvatar";
+import { TeammateAppearance } from "./TeammateAppearance";
 
 const render = (element: ReactElement) => renderToStaticMarkup(element);
 
@@ -167,5 +170,67 @@ describe("AgentBotAvatar", () => {
     const markup = render(createElement(AgentBotAvatar, { color: "green", size: 32 }));
     expect(markup.match(/<canvas/g)).toHaveLength(1);
     expect(markup).toContain('class="inline-flex shrink-0"');
+  });
+});
+
+describe("opt-in Muster crew", () => {
+  it.each(CREW_CHARACTERS)("renders the %s costume through existing app avatar call sites", character => {
+    const markup = render(createElement(AgentAvatar, { character, color: "blue", state: "curious", animated: false, label: "Saved teammate" }));
+    expect(attr(markup, "data-crew-character")).toBe(character);
+    expect(attr(markup, "data-state")).toBe("curious");
+    expect(attr(markup, "data-bot-color")).toBe(AGENT_COLORS.blue);
+    expect(markup).toContain('aria-label="Saved teammate"');
+    expect(markup.match(/<canvas/g)).toHaveLength(1);
+    expect(markup).toContain("muster-crew-avatar__fallback");
+    expect(markup).not.toContain('data-bot-avatar="flower"');
+  });
+
+  it("preserves all forty crew cues rather than mapping reactions to default", () => {
+    for (const state of CREW_STATES) {
+      const markup = render(createElement(AgentBotAvatar, { character: "designer", state, animated: false }));
+      expect(attr(markup, "data-state")).toBe(state);
+    }
+  });
+
+  it("keeps explicit legacy shapes, palette choices and saved Lottie behavior", () => {
+    expect(attr(render(createElement(AgentBotAvatar, { character: "designer", type: "flower" })), "data-bot-avatar")).toBe("flower");
+    expect(attr(render(createElement(AgentBotAvatar, { character: "lottie" })), "data-bot-avatar")).toBe("flower");
+    expect(attr(render(createElement(AgentBotAvatar, { character: "coordinator", color: "#abcdef" })), "data-bot-color")).toBe("#abcdef");
+    expect(attr(render(createElement(MusterCrewAvatar, { character: "researcher" })), "data-bot-color")).toBe(CREW.researcher.color);
+  });
+
+  it("has four distinct costume silhouettes and an SSR portrait before the optional face canvas", () => {
+    const costumes = ["beret-apron", "field-vest", "hoodie-laptop", "utility-jacket"];
+    CREW_CHARACTERS.forEach((character, index) => {
+      const markup = render(createElement(MusterCrewAvatar, { character, label: "Crew <friend>", animated: false }));
+      expect(markup).toContain(`data-costume="${costumes[index]}"`);
+      expect(markup).toContain('role="img"');
+      expect(markup).toContain('aria-label="Crew &lt;friend&gt;"');
+      expect(markup).toContain("<ellipse");
+      expect(markup).not.toContain('data-face-ready="true"');
+      expect(markup).not.toContain("M4 26V6l12 13L28 6v20");
+    });
+  });
+
+  it("keeps crew decorative when unnamed and honors reduced motion before mounting", () => {
+    expect(render(createElement(MusterCrewAvatar, { character: "developer" }))).toContain('aria-hidden="true"');
+    Object.assign(globalThis, { window: { matchMedia: () => ({ matches: true }) } });
+    try {
+      expect(render(createElement(AgentBotAvatar, { character: "designer", animated: true }))).toContain('data-bot-paused="true"');
+    } finally { Reflect.deleteProperty(globalThis, "window"); }
+  });
+
+  it("offers forty local expressions only for crew without calling persistence callbacks during render", () => {
+    let writes = 0;
+    const props = { name: "My teammate", color: "orange" as const, onChange: () => { writes++; } };
+    const crew = render(createElement(TeammateAppearance, { ...props, character: "designer" }));
+    expect(crew).toContain('aria-label="Preview crew expression"');
+    expect(crew.match(/<option /g)).toHaveLength(41);
+    expect(crew).toContain('value="thinking-dots"');
+    expect(crew).toContain('aria-label="Use the coordinator character"');
+    const legacy = render(createElement(TeammateAppearance, { ...props, character: "flower" }));
+    expect(legacy).not.toContain('aria-label="Preview crew expression"');
+    expect(legacy).toContain('aria-label="Use the flower character" aria-pressed="true"');
+    expect(writes).toBe(0);
   });
 });
