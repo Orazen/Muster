@@ -1,3 +1,25 @@
+/* GAIA RaisedButton's tactile edge, adapted to Muster's semantic palette.
+ * Define tokens on each control so nested skin previews and body portals use
+ * their own nearest theme, rather than inheriting a resolved workspace fill.
+ * No typeface or layout reset: the primitive and existing controls keep theirs. */
+.gaia-button,
+.muster-workspace .workspace-approval-actions button.bg-accent,
+.muster-workspace .workspace-composer-input .muster-send-glow {
+  --gaia-button-fill: var(--color-accent);
+  --gaia-button-ink: var(--color-primary-foreground, #fff);
+  --gaia-button-hover: color-mix(in srgb, var(--gaia-button-fill) 94%, black);
+  --gaia-button-edge: color-mix(in srgb, var(--gaia-button-fill) 70%, black);
+  --gaia-button-shadow: inset 0 1px 0 rgb(255 255 255 / 0.24), 0 2px 0 var(--gaia-button-edge), 0 3px 5px rgb(0 0 0 / 0.16);
+  --gaia-button-pressed: inset 0 1px 0 rgb(255 255 255 / 0.12), 0 1px 0 var(--gaia-button-edge);
+}
+
+/* The global focus treatment uses a shadow. An outline remains visible when
+ * a raised control also owns its edge shadow, including inside a body portal. */
+.gaia-button:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 3px;
+}
+
 /* Approved workspace presentation, implemented with Muster's own components.
  * Keep this opt-in: other route shells and saved skin definitions retain
  * their existing presentation. Sidebar density, window controls and scroll
@@ -382,13 +404,56 @@
 }
 
 .muster-workspace .workspace-composer-input .muster-send-glow {
-  background: var(--workspace-send);
-  color: var(--workspace-send-ink);
-  box-shadow: none;
+  --gaia-button-fill: var(--workspace-send);
+  --gaia-button-ink: var(--workspace-send-ink);
 }
 
-.muster-workspace .workspace-composer-input .muster-send-glow:hover {
+/* Only the actual Allow once and Send actions acquire the raised primary
+ * surface. Deny, Always allow, queued send, stop, tabs and toolbar icons keep
+ * their distinct existing treatments and all current dimensions. */
+.muster-workspace .workspace-approval-actions button.bg-accent,
+.muster-workspace .workspace-composer-input .muster-send-glow {
+  background: var(--gaia-button-fill);
+  color: var(--gaia-button-ink);
+  box-shadow: var(--gaia-button-shadow);
+  transition: background-color 150ms var(--workspace-motion), box-shadow 150ms var(--workspace-motion), translate 150ms var(--workspace-motion);
+}
+
+.muster-workspace .workspace-approval-actions button.bg-accent:enabled:hover,
+.muster-workspace .workspace-composer-input .muster-send-glow:enabled:hover {
+  background: var(--gaia-button-hover);
+  filter: none;
+}
+
+.muster-workspace .workspace-approval-actions button.bg-accent:enabled:active,
+.muster-workspace .workspace-composer-input .muster-send-glow:enabled:active {
+  translate: 0 1px;
+  box-shadow: var(--gaia-button-pressed);
+}
+
+/* These named conversation controls are surfaces, not primary actions. */
+.muster-workspace .conversation-primary :is(.model-picker, .task-picker) > button,
+.muster-workspace .conversation-header .conversation-tools-toggle {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+  transition: background-color 150ms var(--workspace-motion), border-color 150ms var(--workspace-motion);
+}
+
+.muster-workspace .conversation-primary :is(.model-picker, .task-picker) > button:enabled:hover {
+  background: var(--color-raised);
+}
+
+/* Cancel turn remains a flat, secondary escape from the approval prompt. */
+.muster-workspace .workspace-approval-actions button.text-ink-secondary {
   box-shadow: none;
+  transition: background-color 150ms var(--workspace-motion), color 150ms var(--workspace-motion);
+}
+
+.muster-workspace .workspace-approval-actions button:focus-visible,
+.muster-workspace .workspace-composer-input .muster-send-glow:focus-visible,
+.muster-workspace .conversation-primary :is(.model-picker, .task-picker) > button:focus-visible,
+.muster-workspace .conversation-header .conversation-tools-toggle:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 3px;
 }
 
 @media (max-width: 767px) {
@@ -444,6 +509,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .gaia-button:active,
+  .muster-workspace .workspace-approval-actions button.bg-accent:enabled:active,
+  .muster-workspace .workspace-composer-input .muster-send-glow:enabled:active {
+    translate: none;
+  }
+
   .muster-workspace,
   .muster-workspace *,
   .muster-workspace *::before,

@@ -56,18 +56,36 @@ function inventory(input: { owned: OwnedOfflineRecoveryRoot; store: Store; plans
     botIds:[...new Set([...input.store.bots.map(bot=>bot.id),...input.store.groups.flatMap(group=>group.memberIds),...input.plans.listPlans().map(plan=>plan.botId),...messageDb.recoveryReservedBotIds()])],
     groupIds:input.store.groups.map(group=>group.id),threadIds,planIds:input.plans.recoveryPlanIds()};
 }
-async function engineSelections(plan: AccountImportPlan, resolver: ResolveRecoveryEngine): Promise<Map<string,ModelSelection>> {
-  const result=new Map<string,ModelSelection>();
-  for(const sourceBotId of Object.keys(plan.mapping.bot)) {
-    const offered=resolver(sourceBotId,plan.account);
-    if(!offered || offered.ownerId!==plan.account.userId || !offered.instance.enabled)throw new Error("Current owned engine unavailable");
-    const selection=selectionSchema.parse(offered.selection), declaredOwner=userInstanceOwner(selection.instanceId);
-    if(selection.instanceId!==offered.instance.instanceId || (declaredOwner!==null && declaredOwner!==plan.account.userId))throw new Error("Current owned engine unavailable");
-    const snapshot=await offered.instance.snapshot();
-    if(snapshot.state!=="available" || snapshot.authenticated===false)throw new Error("Current owned engine unavailable");
-    result.set(plan.mapping.bot[sourceBotId]!,selection);
+function currentRecoveryEngine(sourceBotId: string, plan: AccountImportPlan, resolver: ResolveRecoveryEngine): CurrentOwnedRecoveryEngine {
+  const offered = resolver(sourceBotId, plan.account);
+  if (!offered || offered.ownerId !== plan.account.userId || !offered.instance.enabled) throw new Error("Current owned engine unavailable");
+  const selection = selectionSchema.parse(offered.selection), declaredOwner = userInstanceOwner(selection.instanceId);
+  if (selection.instanceId !== offered.instance.instanceId || (declaredOwner !== null && declaredOwner !== plan.account.userId)
+    || !offered.instance.models.options.some(option => option.id === selection.model)
+    || (selection.effort !== undefined && !(offered.instance.adapter.capabilities.effortLevels ?? []).includes(selection.effort))) {
+    throw new Error("Current owned engine unavailable");
   }
-  return result;
+  return { ...offered, selection };
+}
+async function engineSelections(plan: AccountImportPlan, resolver: ResolveRecoveryEngine): Promise<Map<string, ModelSelection>> {
+  const held = new Map<string, CurrentOwnedRecoveryEngine>();
+  const assertCurrent = (sourceBotId: string, offered: CurrentOwnedRecoveryEngine) => {
+    const current = currentRecoveryEngine(sourceBotId, plan, resolver);
+    if (current.instance !== offered.instance || !isDeepStrictEqual(current.selection, offered.selection)) {
+      throw new Error("Current owned engine changed");
+    }
+  };
+  for (const sourceBotId of Object.keys(plan.mapping.bot)) {
+    const offered = currentRecoveryEngine(sourceBotId, plan, resolver);
+    const snapshot = await offered.instance.snapshot();
+    if (snapshot.state !== "available" || snapshot.authenticated === false) throw new Error("Current owned engine unavailable");
+    assertCurrent(sourceBotId, offered);
+    held.set(sourceBotId, offered);
+  }
+  // A later provider snapshot can replace an earlier bot's engine or catalog.
+  // Rebind all selections together after the last await, before any writes.
+  for (const [sourceBotId, offered] of held) assertCurrent(sourceBotId, offered);
+  return new Map([...held].map(([sourceBotId, offered]) => [plan.mapping.bot[sourceBotId]!, offered.selection]));
 }
 function materialize(plan: AccountImportPlan, engines: Map<string,ModelSelection>) {
   const bots:BotRecord[]=plan.bots.map(bot=>{

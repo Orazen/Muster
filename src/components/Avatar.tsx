@@ -1,5 +1,5 @@
-// AgentAvatar — the app's historical avatar API, now a thin funnel over the
-// one renderer: bot-avatars, through AgentBotAvatar. Call sites keep passing
+// AgentAvatar — the app's historical avatar API, through AgentBotAvatar's
+// legacy and opt-in crew renderers. Call sites keep passing
 // color, character, state, motion, pointer and animation preferences exactly
 // as before; the hand-built body/face engines behind this file are gone.
 //
@@ -9,6 +9,7 @@
 import { memo, useEffect, useState, type CSSProperties } from "react";
 import type { AgentCharacter, AgentColor, AgentMotion, AgentState } from "@/lib/mascot";
 import { AgentBotAvatar } from "./AgentBotAvatar";
+import { crewMotionState, isCrewCharacter } from "@/lib/mascot/crew";
 
 /**
  * The one-shot motions that borrow the `working` state for a beat, so a poke,
@@ -36,7 +37,7 @@ export type AgentAvatarProps = {
   color: AgentColor;
   /** Which body the picker chose; the brand flower is the default. */
   character?: AgentCharacter;
-  /** Named behaviour — mapped onto the library's three states. */
+  /** Crew keeps the expression; legacy characters retain their three draw states. */
   state?: AgentState;
   size?: number;
   label?: string;
@@ -94,12 +95,17 @@ function AgentAvatarComponent({
 }: AgentAvatarProps) {
   // A one-shot motion borrows `working` for a beat, then hands the state back.
   const [beating, setBeating] = useState(false);
+  const crew = isCrewCharacter(character);
+  const reaction = crewMotionState(motion);
   useEffect(() => {
-    if (motion === "none" || !animated || !MOTION_BEATS.has(motion)) return;
+    if (motion === "none" || !animated || (crew ? reaction === null : !MOTION_BEATS.has(motion))) {
+      setBeating(false);
+      return;
+    }
     setBeating(true);
     const timer = setTimeout(() => setBeating(false), MOTION_BEAT_MS);
     return () => clearTimeout(timer);
-  }, [motion, motionKey, animated]);
+  }, [motion, motionKey, animated, crew, reaction]);
 
   // SAFETY: CSS custom properties are outside React's style typings; the
   // value is a 0|1 number consumed only as a CSS variable.
@@ -115,11 +121,12 @@ function AgentAvatarComponent({
       <AgentBotAvatar
         color={color}
         character={character}
-        state={beating ? "working" : state}
+        state={beating ? (crew ? reaction ?? state : "working") : state}
         size={size}
         label={label}
         seed={seed}
         animated={animated}
+        replayKey={crew && beating ? motionKey : undefined}
         interactive={trackPointer && animated}
       />
     </span>

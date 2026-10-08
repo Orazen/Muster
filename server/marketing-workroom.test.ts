@@ -130,10 +130,14 @@ describe("approved public workroom bundle", () => {
       expect(bytes.subarray(0, 4).toString()).toBe("wOF2");
       expect(bytes.length).toBeGreaterThan(1000);
     }
-    const fallback = [...html.matchAll(/<img\b[^>]*>/gi)].map((match) => match[0]).find((tag) => attr(tag, "src") === `${PREFIX}mascot/fallback.png`);
+    const fallbackSrc = `${PREFIX}mascot/posters/designer.png`;
+    const fallback = [...html.matchAll(/<img\b[^>]*>/gi)].map((match) => match[0]).find((tag) =>
+      attr(tag, "src") === fallbackSrc && attr(tag, "class")?.split(/\s+/).includes("mascot-fallback"));
     expect(fallback).toBeTruthy();
     expect(attr(fallback!, "alt")?.trim().length).toBeGreaterThan(10);
-    expect(readFileSync(bundleFile(`${PREFIX}mascot/fallback.png`)).subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    for (const path of [fallbackSrc, `${PREFIX}mascot/fallback.png`]) {
+      expect(readFileSync(bundleFile(path)).subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    }
   });
 
   for (const [file, hash] of Object.entries(LOCKED_MASCOT)) {

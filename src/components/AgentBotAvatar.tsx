@@ -1,6 +1,6 @@
-// Adapter for `bot-avatars` (https://libraries.dev/bots) — the project's single
-// avatar system. Everything else in the app renders through this component, so
-// the 39-state vocabulary, the character picker and the palette map in one place.
+// The app's avatar adapter preserves legacy bot-avatars identities and routes
+// the four explicit crew choices to the bundled full-expression renderer.
+// Existing shape overrides, palette choices and the legacy state map stay here.
 //
 // SAFETY: `bot-avatars` draws to a canvas at runtime; SSR and tests see only a
 // <canvas data-bot-avatar> inside a small wrapper span (class/aria/data attrs).
@@ -14,6 +14,8 @@ import {
 } from "bot-avatars";
 
 import { AGENT_COLORS } from "../lib/mascot";
+import { isCrewCharacter } from "../lib/mascot/crew";
+import { MusterCrewAvatar } from "./MusterCrewAvatar";
 
 export type { BotAvatarFace, BotAvatarState, BotAvatarType };
 
@@ -159,7 +161,7 @@ export interface AgentBotAvatarProps {
   character?: string;
   /** Explicit shape — wins over `identity.character`. */
   type?: BotAvatarType;
-  /** Life-cycle state, mapped to `default` | `working` | `sleeping`. */
+  /** Crew keeps the full expression; legacy shapes keep their three-state mapping. */
   state?: string;
   /** Eye/mouth face: `eyes` blinks (library default), `mouth` draws the smile. */
   face?: BotAvatarFace;
@@ -179,6 +181,8 @@ export interface AgentBotAvatarProps {
   animated?: boolean;
   interactive?: boolean;
   trackPointer?: boolean;
+  /** Replays a crew reaction; ignored by existing library shapes. */
+  replayKey?: number;
   className?: string;
   style?: CSSProperties;
 }
@@ -198,6 +202,7 @@ function AgentBotAvatarImpl({
   animated = true,
   interactive = false,
   trackPointer = false,
+  replayKey,
   className,
   style,
 }: AgentBotAvatarProps) {
@@ -207,6 +212,12 @@ function AgentBotAvatarImpl({
   // SAFETY: `botColor` is either a palette name that is a key of AGENT_COLORS or
   // a CSS colour literal; the lookup is total and a miss falls back to `botColor`.
   const resolvedColor = botColor ? AGENT_COLORS[botColor as keyof typeof AGENT_COLORS] ?? botColor : undefined;
+  // An explicit library shape still wins, including every existing brand flower call.
+  if (!type && isCrewCharacter(character)) {
+    return <MusterCrewAvatar character={character} color={resolvedColor} state={state}
+      size={size} label={label} decorative={decorative} animated={animated}
+      interactive={interactive || trackPointer} replayKey={replayKey} className={className} style={style} />;
+  }
   const botType = type ?? botAvatarTypeForSeed(seed ?? "", character);
   const botState = botAvatarState(state);
   const isAnimated = animated && !prefersReducedMotion();

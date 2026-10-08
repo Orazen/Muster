@@ -13,7 +13,7 @@
 // fetch (URL, key header, error text).
 
 import type { SendTurnInput } from "../contracts.ts";
-import { connectMcpStdio, type McpClient } from "../mcp-client.ts";
+import { connectMcpStdio, type McpClient, type McpToolResult } from "../mcp-client.ts";
 import { callKey } from "../repeat-detector.ts";
 import { computerProxyEnv } from "../container-computer.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
@@ -158,6 +158,28 @@ function terminationText(count: number): string {
   return `terminated by harness after ${count} identical calls this turn — do not repeat this call; change approach or answer directly.`;
 }
 
+/** Stop ends the turn even if an already-dispatched MCP tool never answers.
+ * The driver then closes its clients in finally. This cannot undo the action
+ * already sent; it prevents waiting on it from admitting another action. */
+async function callToolUntilCancelled(client: McpClient, name: string, args: JsonObject, signal?: AbortSignal): Promise<McpToolResult> {
+  if (!signal) return client.callTool(name, args);
+  signal.throwIfAborted();
+  let onAbort: (() => void) | undefined;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    const call = Promise.resolve().then(() => {
+      signal.throwIfAborted();
+      return client.callTool(name, args);
+    });
+    return await Promise.race([call, cancelled]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+
 /** The agentic loop: ask the model, run whatever tools it asked for, feed
  * the results back, repeat until it answers with no more tool calls. */
 export async function runToolLoop(opts: {
@@ -175,7 +197,9 @@ export async function runToolLoop(opts: {
   // outside the round loop: the point is catching repeats ACROSS rounds
   const counts = new Map<string, number>();
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    signal?.throwIfAborted();
     const { text, toolCalls, usage } = await chat(messages, model, tools, signal);
+    signal?.throwIfAborted();
     if (usage) {
       const priorInput: number = totalUsage === null ? 0 : totalUsage.input;
       const priorOutput: number = totalUsage === null ? 0 : totalUsage.output;
@@ -195,6 +219,7 @@ export async function runToolLoop(opts: {
     };
     messages.push(assistantRound);
     for (const call of toolCalls) {
+      signal?.throwIfAborted();
       const sepIdx = call.name.indexOf("__");
       const serverKey = sepIdx === -1 ? "" : call.name.slice(0, sepIdx);
       const toolName = sepIdx === -1 ? call.name : call.name.slice(sepIdx + 2);
@@ -214,12 +239,16 @@ export async function runToolLoop(opts: {
       } else {
         try {
           const args = JSON.parse(call.arguments || "{}");
-          const result = await client.callTool(toolName, args);
+          const result = await callToolUntilCancelled(client, toolName, args, signal);
           resultText = result.content.map((c) => c.text ?? c.data ?? "").join("\n") || "(no output)";
         } catch (e) {
+          // Cancellation is a terminal turn outcome, never a tool error the
+          // model may interpret as permission to retry or try another tool.
+          signal?.throwIfAborted();
           resultText = `error: ${e instanceof Error ? e.message : String(e)}`;
         }
       }
+      signal?.throwIfAborted();
       if (count >= ADVISORY_AT) resultText = `${resultText}\n${enforcementNote(count)}`;
       const toolResult: JsonObject = { role: "tool", tool_call_id: call.id, content: resultText };
       messages.push(toolResult);

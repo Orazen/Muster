@@ -1,6 +1,7 @@
 /** Typography, mascot/runtime assets and legal bodies stay locked. The owner
- * approved M-outline removal and orange presentation on 7 October 2026; only
- * the entry document, stylesheet and favicon hashes advance with that change.
+ * approved M-outline removal/orange on 7 October and the four crew costumes
+ * on 8 October 2026. Only the approved entry/host/controller/styles/new crew
+ * asset pins advance; existing fonts, rig, expression and vendor pins stay exact.
  * This portable contract does not need git at runtime. */
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
@@ -13,16 +14,16 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path: string) => readFileSync(join(ROOT, path), "utf8");
 const digest = (bytes: string | Buffer) => createHash("sha256").update(bytes).digest("hex");
 const LOCKED = {
-  "www/index.html": "889291d8d997cff85354ca6c28263eb12e2b69b646e068f6862625c4c18302f1",
+  "www/index.html": "654e6a561d03da6fcf2418f655649f7e2bde80b6a78f76ff7935e89d3bd996f2",
   "www/landing-workroom/v1/NOTICE.txt": "b71df88ab87bd4fa50342afb115a3a86f682b1aa1dcba94a44e3d1a17c9c407d",
-  "www/landing-workroom/v1/app.js": "faa558ff2e56dc87a97e559b0a95ef5afbf2f78c4afc7fd0f0c24c9787547f82",
+  "www/landing-workroom/v1/app.js": "8c2c852f195c91bad37c0b5e85313b3153cbeb4b74340bc5fc21cb18d58c8cf0",
   "www/landing-workroom/v1/favicon.svg": "28505c526c1631827136b006819490358388f267af99232ef0c96b8676cdcf63",
   "www/landing-workroom/v1/fonts/body-OFL.txt": "9e27a72ed30eb49a08678f6a5d6ed98ec7ba5368f541637ee0683ec9134ef966",
   "www/landing-workroom/v1/fonts/body.woff2": "2ee17598a98d8a59e4df8152d015bec9ab8e4d5672cc0ab42bef806b568e3971",
   "www/landing-workroom/v1/fonts/display-OFL.txt": "4b5a7d8f37f5602621c8a8d7358a6a2e71317e6c231c661e15aef0275d3e07ba",
   "www/landing-workroom/v1/fonts/display.woff2": "a79fdb52d4a5c76552452f69202add96e287401fff03d3e8c0e38b4dcb5a99cd",
   "www/landing-workroom/v1/handoff.mjs": "abe82be98db1624b6bcec2ddd7d612c7d0d9e3def2f13c188352e0e99a85984e",
-  "www/landing-workroom/v1/mascot-stage.js": "84d48f418f18a02fa148a2a99434ad8070c03e22779ffb38a1bd45a0ede42a01",
+  "www/landing-workroom/v1/mascot-stage.js": "1a21d021baeab560e8b781e28c6617b5fdb179fac5178314f8c9b7c0ac152d13",
   "www/landing-workroom/v1/mascot/companion.js": "7662202091fecea1f8fc1dba012fe371f66453b26158f2faeedd3196ff839294",
   "www/landing-workroom/v1/mascot/effects.js": "3fb08bbdd0469622067c850b22697da3117fd67da96f5353633f1be05d83292a",
   "www/landing-workroom/v1/mascot/expressions.js": "19c374beb4e41a3b8465d90b7b59a40deeacb64ac9de40cdd5d195f9fdb8f4fa",
@@ -33,7 +34,15 @@ const LOCKED = {
   "www/landing-workroom/v1/mascot/vendor/three.core.js": "eb077d2417f61d3e6d9264c317cabc4ea35769ed6b0ab533067292a550784c20",
   "www/landing-workroom/v1/mascot/vendor/three.module.js": "c8211c69345d2e9949dc7a8ac969380497aa0600a5a8ac6a459c8cd02dd9cb8a",
   "www/landing-workroom/v1/social.jpg": "904d06b4be8b19fc4f208eb50bede54359c554dd614b940ac76af72d7eab18a3",
-  "www/landing-workroom/v1/style.css": "6dd776f0fd5436c625f82503d5a91ab12a7d5b1b07b2117646ccb98d007cb684"
+  "www/landing-workroom/v1/style.css": "4381475c350302af5afcc71c43e856258c10ec247821e6b2ccad22e00b99ef24",
+  "www/landing-workroom/v1/mascot/role-outfits.js": "8bf6ed506aaad479230bdbb9ed744a712d3c182fad02e7664747f6c81db3701b",
+  "www/landing-workroom/v1/mascot/crew.js": "198ada2121c9e861fd9889db4e59975f08261b2680c96df7b2ec214b76e55b24",
+  "www/landing-workroom/v1/mascot/posters/designer.png": "d5c7db650f96f0bb2d2055de792ed8c08f099527b6fba74340cda2d1aef562e7",
+  "www/landing-workroom/v1/mascot/posters/developer.png": "7b7d81811425f9114ca836d01279c912e6fe0b6413046e07729a7df497d68404",
+  "www/landing-workroom/v1/crew.css": "d64c24b4613f10d646b6cf626371c2a74591a35a26433eddf67105aa820dfd7f",
+  "www/landing-workroom/v1/mascot/posters/coordinator.png": "bffb1b67588e7914f5e324887422d36d061ccbab7aceaa9cdddd39c8bb903e03",
+  "www/landing-workroom/v1/crew-stage.js": "bc958640b5190a4bc2f1555a531645bcfc2b23821ef2ae27e69beede5ffc3740",
+  "www/landing-workroom/v1/mascot/posters/researcher.png": "1e590c5d7413b05279c7cf7dfbb0655890d43c97754039f992b7d8df378eef1d"
 } as const;
 const LEGAL_BODIES = {
   "privacyPolicy": "e42d6b6614762a0f570ce9d77fccbd5deb3aff52ade7e58296d0e86c02d61697",
