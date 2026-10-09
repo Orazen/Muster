@@ -21,7 +21,8 @@ electron
 ios
 cloudflare
 docs
-tools
+tools/*
+!tools/oxlint-linux-arm64
 .muster
 .omb-scratch
 .wrangler
