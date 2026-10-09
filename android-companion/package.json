@@ -19,7 +19,7 @@
     "typecheck": "tsc --noEmit",
     "verify:toolchain": "node scripts/verify-toolchain.mjs",
     "verify:metro-assets": "node scripts/verify-metro-assets.mjs",
-    "verify:autolinking": "node --test plugins/with-companion-autolinking.test.cjs",
+    "verify:autolinking": "node --test plugins/with-companion-autolinking.test.cjs plugins/with-companion-agp.test.cjs",
     "prepare:toolchain": "node scripts/prepare-toolchain.mjs",
     "postinstall": "node scripts/prepare-toolchain.mjs"
   },
