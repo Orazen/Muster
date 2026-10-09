@@ -74,33 +74,60 @@ class StreamReader {
   static async open(base: string, cookie: string): Promise<StreamReader> {
     const controller = new AbortController();
     const reader = new StreamReader(controller);
-    void (async () => {
-      try {
-        const res = await fetch(`${base}/api/events`, {
-          headers: { cookie, accept: "text/event-stream" },
-          signal: controller.signal,
-        });
-        if (!res.ok || !res.body) return;
-        const readerHandle = res.body.getReader();
-        const decoder = new TextDecoder();
-        for (;;) {
-          const chunk = await readerHandle.read();
-          if (chunk.done) break;
-          reader.buffer += decoder.decode(chunk.value, { stream: true });
-          let split = reader.buffer.indexOf("\n\n");
-          while (split !== -1) {
-            const frame = reader.buffer.slice(0, split);
-            reader.buffer = reader.buffer.slice(split + 2);
-            for (const line of frame.split("\n")) {
-              if (line.startsWith("data: ")) reader.seen.push(line.slice(6));
-            }
-            split = reader.buffer.indexOf("\n\n");
+    // The server resolves the live session before subscribing. Returning on
+    // fetch initiation lets the caller's first mutation outrun that boundary.
+    await new Promise<void>((resolve, reject) => {
+      let receivedHello = false;
+      const timeout = setTimeout(() => {
+        reader.stop();
+        reject(new Error("Owned stream did not become ready"));
+      }, 5_000);
+      void (async () => {
+        try {
+          const res = await fetch(`${base}/api/events`, {
+            headers: { cookie, accept: "text/event-stream" },
+            signal: controller.signal,
+          });
+          if (res.status !== 200 || !res.headers.get("content-type")?.startsWith("text/event-stream") || !res.body) {
+            throw new Error("Owned stream was refused");
           }
-        }
-      } catch {
-        /* aborted at teardown */
-      }
-    })();
+          const readerHandle = res.body.getReader();
+          const decoder = new TextDecoder();
+          try {
+            for (;;) {
+              const chunk = await readerHandle.read();
+              if (chunk.done) break;
+              reader.buffer += decoder.decode(chunk.value, { stream: true });
+              let split = reader.buffer.indexOf("\n\n");
+              while (split !== -1) {
+                const frame = reader.buffer.slice(0, split);
+                reader.buffer = reader.buffer.slice(split + 2);
+                for (const line of frame.split("\n")) {
+                  if (!line.startsWith("data: ")) continue;
+                  const data = line.slice(6);
+                  if (!receivedHello) {
+                    z.object({ kind: z.literal("hello"), cursor: z.string().min(1), resumed: z.boolean() }).parse(JSON.parse(data));
+                    receivedHello = true;
+                    clearTimeout(timeout);
+                    resolve();
+                  }
+                  reader.seen.push(data);
+                }
+                split = reader.buffer.indexOf("\n\n");
+              }
+            }
+            if (!receivedHello) throw new Error("Owned stream closed before hello");
+          } finally { readerHandle.releaseLock(); }
+        } catch {
+          if (!receivedHello) {
+            reader.stop();
+            reject(new Error("Owned stream failed before a parsed hello"));
+          }
+          // After readiness, retained frames and positive witness assertions
+          // keep the original behavior; teardown aborts are expected.
+        } finally { clearTimeout(timeout); }
+      })();
+    });
     return reader;
   }
 

@@ -26,9 +26,15 @@ import {
   sendVerificationEmail,
 } from "./email.ts";
 import { mailTransportFailing } from "./otp-delivery.ts";
+import { isPersistedSessionCurrent, type SessionReference } from "./sse-session.ts";
 
 const mailboxProofContext = new AsyncLocalStorage<{ google?: { sub: string; email: string } }>();
 const verifiedGoogleProfile = z.object({ sub: z.string().min(1), email: z.email(), email_verified: z.literal(true) });
+const streamSessionBinding = z.object({
+  userId: z.string().refine(value => value.trim().length > 0),
+  sessionId: z.string().refine(value => value.trim().length > 0),
+  sessionUserId: z.string().min(1),
+});
 
 /**
  * Self-hosting is opt-in and mirrors the same signal server/index.ts uses:
@@ -1081,6 +1087,33 @@ export async function getSession(
   } catch {
     return null;
   }
+}
+
+/** Resolve the stream's exact persisted session without refreshing it or
+ * accepting a cached cookie verdict. Only token-free identifiers leave here. */
+export async function getSessionReference(
+  req: import("node:http").IncomingMessage,
+): Promise<SessionReference | null> {
+  try {
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+    }
+    const result = await auth.api.getSession({ headers, query: { disableCookieCache: true, disableRefresh: true } });
+    const binding = streamSessionBinding.safeParse({
+      userId: result?.user?.id, sessionId: result?.session?.id, sessionUserId: result?.session?.userId,
+    });
+    if (!binding.success || binding.data.userId !== binding.data.sessionUserId) return null;
+    return { userId: binding.data.userId, sessionId: binding.data.sessionId };
+  } catch {
+    return null;
+  }
+}
+
+/** Synchronous write-boundary check against the current auth store. */
+export function isSessionCurrent(reference: SessionReference | null | undefined): boolean {
+  try { return isPersistedSessionCurrent(getDb(), reference); }
+  catch { return false; }
 }
 
 /**

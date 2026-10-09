@@ -235,6 +235,8 @@ import {
   requestOwnOrigin,
   deploymentSigningSecret,
   getSession,
+  getSessionReference,
+  isSessionCurrent,
   getDb,
   isPublicApiPath,
   authCapabilities,
@@ -254,6 +256,7 @@ import {
   signedSessionCookieValue,
   deleteAuthUser,
 } from "./auth.ts";
+import type { SessionReference } from "./sse-session.ts";
 import { fallbackEligible, providerFamilyOf, recordRateLimitHit, recentRateLimitHits } from "./provider-fallback.ts";
 import { ProviderFallbackRunner, matchesActiveProvider } from "./provider-fallback-runner.ts";
 import { getProviderFallbackConsent } from "./provider-fallback-consent.ts";
@@ -1275,6 +1278,9 @@ interface SseClient {
    * records owned by someone else never reach this client — live or
    * replayed. */
   userId?: string;
+  session?: SessionReference;
+  closed: boolean;
+  keepalive?: ReturnType<typeof setInterval>;
   /** Bytes accepted by res.write() but not yet flushed to the socket — our
    * own accounting, since ServerResponse doesn't expose buffer depth. */
   bufferedBytes: number;
@@ -1288,27 +1294,45 @@ const sseClients = new Set<SseClient>();
  * it reconnects. */
 const SSE_CLIENT_CAP = 4 * 1024 * 1024;
 
-/** The only way frames leave the server. Quiet on a dead socket; drops a
- * client whose unflushed backlog passes the cap. */
-function sseWrite(client: SseClient, frame: string): void {
+/** One cleanup path for revocation, disconnect, backpressure and account merge. */
+function closeSseClient(client: SseClient, flushQueued = false): void {
+  if (client.closed) return;
+  client.closed = true;
+  sseClients.delete(client);
+  if (client.keepalive) clearInterval(client.keepalive);
+  client.keepalive = undefined;
+  // A completed account merge already queued its authorized transfer frame.
+  // Mark closed first so ending that response cannot admit any new writes.
+  if (flushQueued) client.res.end();
+  else client.res.destroy();
+}
+
+/** The only way frames leave the server. Hosted streams must still have
+ * their exact persisted session at this synchronous write boundary. */
+function sseWrite(client: SseClient, frame: string): boolean {
+  if (client.closed || client.res.destroyed || client.res.writableEnded ||
+      (SELF_HOSTED && (!client.userId || client.session?.userId !== client.userId || !isSessionCurrent(client.session)))) {
+    closeSseClient(client);
+    return false;
+  }
   client.bufferedBytes += Buffer.byteLength(frame);
   let flushed = false;
   try {
     flushed = client.res.write(frame);
   } catch {
-    sseClients.delete(client);
-    client.res.destroy();
-    return;
+    closeSseClient(client);
+    return false;
   }
   if (flushed) {
     // the stream's buffer is back below its high-water mark
     client.bufferedBytes = 0;
-    return;
+    return true;
   }
   if (client.bufferedBytes > SSE_CLIENT_CAP) {
-    sseClients.delete(client);
-    client.res.destroy();
+    closeSseClient(client);
+    return false;
   }
+  return true;
 }
 
 /** The few frame fields the multi-tenant stream filter inspects; frames
@@ -8043,12 +8067,20 @@ let requestUserEmail = "";
 
     // ── events stream ──
     if (method === "GET" && path === "/api/events") {
+      const session = SELF_HOSTED ? await getSessionReference(req) : null;
+      if (SELF_HOSTED && (!requestUserId || session?.userId !== requestUserId || !isSessionCurrent(session))) {
+        return json(res, 401, { error: "unauthorized: sign in required" });
+      }
       const client: SseClient = {
         res,
         screens: url.searchParams.get("screens") !== "off",
         userId: requestUserId,
+        session: session ?? undefined,
+        closed: false,
         bufferedBytes: 0,
       };
+      req.on("close", () => closeSseClient(client));
+      res.on("close", () => closeSseClient(client));
       res.on("drain", () => {
         client.bufferedBytes = 0;
       });
@@ -8069,7 +8101,7 @@ let requestUserEmail = "";
         since !== null &&
         since <= lastSeq &&
         (replayBuffer.length === 0 ? since === lastSeq : replayBuffer[0].seq <= since + 1);
-      sseWrite(
+      if (!sseWrite(
         client,
         `data: ${JSON.stringify({
           kind: "hello",
@@ -8079,7 +8111,7 @@ let requestUserEmail = "";
           // what a cold start should do.
           resumed,
         })}\n\n`,
-      );
+      )) return;
       if (resumed) {
         for (const buffered of replayBuffer) {
           if (
@@ -8087,19 +8119,17 @@ let requestUserEmail = "";
             buffered.frame &&
             wants(client, buffered.kind) &&
             (!buffered.payload || visibleToClient(client, buffered.payload))
-          )
-            sseWrite(client, buffered.frame);
+          ) {
+            if (!sseWrite(client, buffered.frame)) return;
+          }
         }
       }
 
+      if (client.closed) return;
       sseClients.add(client);
-      const keepalive = setInterval(() => {
+      client.keepalive = setInterval(() => {
         sseWrite(client, ": keepalive\n\n");
       }, 25_000);
-      req.on("close", () => {
-        clearInterval(keepalive);
-        sseClients.delete(client);
-      });
       return;
     }
 
@@ -9993,8 +10023,7 @@ let requestUserEmail = "";
       }
       for (const client of sseClients) {
         if (client.userId !== sourceUserId) continue;
-        client.res.end();
-        sseClients.delete(client);
+        closeSseClient(client, true);
       }
       let enginesNeedRefresh = false;
       try { await reloadUserInstancesAll(); }
