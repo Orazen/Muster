@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "https://github.com/oxc-project/oxc",
+    "commit": "523d5374430ebc4a140239e5e8d43482235b022a",
+    "appVersion": "1.87.0",
+    "license": "MIT",
+    "licenseSha256": "95ced5ecf1133fbf41d409b5555c86c344f83f3b019926057ddbc07cfdcc27b3",
+    "licenseBytes": 1119
+  },
+  "build": {
+    "node": "24.21.0",
+    "pnpm": "12.7.0",
+    "rust": "1.99.0",
+    "target": "aarch64-unknown-linux-gnu",
+    "profile": "release: opt-level=3, lto=fat, codegen-units=1, panic=abort, allocator",
+    "commands": [
+      [
+        "--dir",
+        "apps/oxlint",
+        "run",
+        "build-napi-release",
+        "--",
+        "--frozen",
+        "--offline"
+      ],
+      [
+        "--dir",
+        "apps/oxlint",
+        "run",
+        "build-js"
+      ]
+    ],
+    "buildAcceptedReceiptSha256": "2f3649d246c2cbe6be79726978307bb75511ca5888771002c8a51100541b5a50",
+    "qualifiedConsumerReviewSha256": "c6463db3b9bab0fbee45d9263a61c9e89f5770ad9d3263adbd277e2338edcc87"
+  },
+  "runtime": {
+    "platform": "linux",
+    "arch": "arm64",
+    "libc": "glibc",
+    "glibcVersion": "2.36",
+    "nodeMajor": 24,
+    "nodeAbi": "137",
+    "officialDelegationVersion": "1.86.0",
+    "pluginApiVersion": "1.86.0"
+  },
+  "files": [
+    {
+      "path": "dist/bindings.js",
+      "bytes": 24942,
+      "sha256": "f5cf4c2acdaf3243cc1cc5c7beaa5499c205e0a93026b8d833b476fbed073320"
+    },
+    {
+      "path": "dist/cli.js",
+      "bytes": 4255,
+      "sha256": "0db31aeed17873535fdc4215cb496980701d4a0e0bea0db335d30415a163158d"
+    },
+    {
+      "path": "dist/index.d.ts",
+      "bytes": 254689,
+      "sha256": "463dda356e1c8c094380f79e2dda24c074ffd82417032041263918092169cd6d"
+    },
+    {
+      "path": "dist/index.js",
+      "bytes": 253,
+      "sha256": "bcd7d20da966ad0daf2bbb9386d2f3e325e68a9b33c695de240d4a69e7b9f59a"
+    },
+    {
+      "path": "dist/js_config.js",
+      "bytes": 7508,
+      "sha256": "27596da272e54931618d1b959becdf200d6b992f972b831a54026d8352ea4bdc"
+    },
+    {
+      "path": "dist/lint.js",
+      "bytes": 1145886,
+      "sha256": "fd8d72ac25d6ece807cbb7dddc1bf610696012cc22de09e62f4008ec8d37408a"
+    },
+    {
+      "path": "dist/oxlint.linux-arm64-gnu.node",
+      "bytes": 13524328,
+      "sha256": "66116f748b3cd307b1b9376c8b82e7d58e7d499f4ba63d5fe5206e875fe36ba5"
+    },
+    {
+      "path": "dist/plugins-dev.d.ts",
+      "bytes": 160690,
+      "sha256": "2fa3e1d5fdd954edba75d2a57193eb94b7fb7a62c0c8d6e2e27b03253dce38a6"
+    },
+    {
+      "path": "dist/plugins-dev.js",
+      "bytes": 41272,
+      "sha256": "9160dbc594c8f9fa6e624cc358cb2093dc19281c5233168f0352203fc11b5c16"
+    },
+    {
+      "path": "dist/plugins.js",
+      "bytes": 940,
+      "sha256": "81e4c275f6200ab4b6aed66ba2836b2a8e68756a8609ced02daf91e226377e2d"
+    },
+    {
+      "path": "dist/rolldown-runtime.js",
+      "bytes": 1506,
+      "sha256": "5fc650d7f3c5b72629da633623bf7bc72fd972051fe82268c703b2681f26eb51"
+    },
+    {
+      "path": "dist/utils.js",
+      "bytes": 1057,
+      "sha256": "591682f61f6ff1ee264f9df278c71eb4f8f426d34f7ea9b14f77dbd30c989778"
+    },
+    {
+      "path": "dist/workspace.js",
+      "bytes": 289,
+      "sha256": "07d934175ffa28dedbfff3ba1b16bb96158d7fb9c5ebcdd91b7ad6fb1df4c160"
+    },
+    {
+      "path": "dist/workspace2.js",
+      "bytes": 1017,
+      "sha256": "bfc5efa892c05854dfc783625a03087861cbead465fe72c1dcf96e2c01629061"
+    },
+    {
+      "path": "package.json",
+      "bytes": 3527,
+      "sha256": "62338747dcba7d39cbf1ee17891f7d888eac65bfd918fd7ff080ab01746db5c8"
+    },
+    {
+      "path": "src-js/bindings.d.ts",
+      "bytes": 5384,
+      "sha256": "1844ff4cf26d6bf41a634915b102b13e8233b003a2a54f5f3c43b0054706bfb2"
+    },
+    {
+      "path": "src-js/bindings.js",
+      "bytes": 30086,
+      "sha256": "9192b45f67a50220bfebe423718104ca82793cab0bacb9cff1b7d5906f411f56"
+    },
+    {
+      "path": "src-js/oxlint.linux-arm64-gnu.node",
+      "bytes": 13524328,
+      "sha256": "66116f748b3cd307b1b9376c8b82e7d58e7d499f4ba63d5fe5206e875fe36ba5"
+    }
+  ]
+}

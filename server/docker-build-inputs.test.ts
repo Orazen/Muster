@@ -11,6 +11,25 @@ const workspace = z.object({ patchedDependencies: z.record(z.string(), z.string(
 const lock = z.object({ patchedDependencies: z.record(z.string(), z.object({ path: z.string() })) })
   .parse(parse(readFileSync(join(project, "pnpm-lock.yaml"), "utf8")));
 const patchPaths = Object.values(workspace.patchedDependencies);
+const manifest = z.object({
+  dependencies: z.record(z.string(), z.string()),
+  devDependencies: z.record(z.string(), z.string()),
+}).parse(JSON.parse(readFileSync(join(project, "package.json"), "utf8")));
+const localPackages = [...new Set(Object.values({ ...manifest.dependencies, ...manifest.devDependencies })
+  .filter(specifier => specifier.startsWith("file:"))
+  .map(specifier => {
+    const path = specifier.slice(5);
+    if (posix.isAbsolute(path) || path.split("/").some(part => !part || part === "." || part === "..")) {
+      throw new Error(`Local package must be inside the build context: ${specifier}`);
+    }
+    return path;
+  }))];
+
+function sourceFiles(path: string): string[] {
+  if (!statSync(join(project, path)).isDirectory()) return [path];
+  return readdirSync(join(project, path)).flatMap(entry => sourceFiles(posix.join(path, entry)));
+}
+const localPackageInputs = localPackages.flatMap(sourceFiles);
 
 // Inspect only the literal COPY instructions preceding the dependency install.
 // Resolve directory copies from the real context: checking for the word
@@ -42,7 +61,7 @@ function dependencyLayer(recipe: string): Map<string, string> {
 
 function requireInstallInputs(recipe: string): void {
   const available = dependencyLayer(recipe);
-  for (const path of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ...patchPaths]) {
+  for (const path of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ...patchPaths, ...localPackageInputs]) {
     if (available.get(path) !== path) throw new Error(`Missing dependency install input: ${path}`);
   }
 }
@@ -53,6 +72,16 @@ describe("container dependency layers", () => {
     expect(Object.fromEntries(Object.entries(lock.patchedDependencies).map(([name, value]) => [name, value.path])))
       .toEqual(workspace.patchedDependencies);
     for (const path of patchPaths) expect(readFileSync(join(project, path)).length).toBeGreaterThan(0);
+  });
+
+  it("includes the executable and preparation inputs from the actual local dependency", () => {
+    expect(localPackages).toContain("tools/oxlint-linux-arm64");
+    expect(localPackageInputs).toEqual(expect.arrayContaining([
+      "tools/oxlint-linux-arm64/package.json",
+      "tools/oxlint-linux-arm64/bin/oxlint.mjs",
+      "tools/oxlint-linux-arm64/prepare.mjs",
+      "tools/oxlint-linux-arm64/source-lock.json",
+    ]));
   });
 
   for (const filename of ["Dockerfile", "Dockerfile.cloud"]) {
@@ -67,5 +96,16 @@ describe("container dependency layers", () => {
       expect(() => requireInstallInputs(recipe.replace("COPY patches ./patches", "COPY patches ./wrong")))
         .toThrow("Missing dependency install input: patches/");
     });
+    for (const path of localPackages) {
+      it(`${filename} refuses missing, late and misplaced local-package inputs: ${path}`, () => {
+        const copy = `COPY ${path} ./${path}\n`;
+        const missing = recipe.replace(copy, "");
+        expect(missing).not.toBe(recipe);
+        expect(() => requireInstallInputs(missing)).toThrow(`Missing dependency install input: ${path}/`);
+        expect(() => requireInstallInputs(`${missing}\n${copy}`)).toThrow(`Missing dependency install input: ${path}/`);
+        expect(() => requireInstallInputs(recipe.replace(copy, `COPY ${path} ./wrong\n`)))
+          .toThrow(`Missing dependency install input: ${path}/`);
+      });
+    }
   }
 });

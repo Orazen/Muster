@@ -36,7 +36,7 @@
     "typecheck": "tsc -b && tsc -p tsconfig.server.json",
     "check:ci": "npm run typecheck && npx tsc --noEmit -p tsconfig.e2e.json",
     "test": "vitest run && pnpm test:native-load && pnpm broker:test && pnpm test:updater && pnpm test:desktop-lifecycle && pnpm test:packaged-server",
-    "test:native-load": "node scripts/prepare-native-fixture.mjs && vitest run --config tests-integration/vitest.config.ts",
+    "test:native-load": "pnpm test:lint-source && node scripts/prepare-native-fixture.mjs && vitest run --config tests-integration/vitest.config.ts",
     "test:desktop-lifecycle": "node --test electron/server-lifecycle.node-test.mjs",
     "test:updater": "node --test electron/updater-coordinator.node-test.mjs",
     "bench:observation": "node --experimental-strip-types scripts/bench-observation.ts",
@@ -67,7 +67,9 @@
     "broker:check": "pnpm broker:types && tsc -p cloudflare/composio-broker/tsconfig.json",
     "broker:test": "vitest run --config cloudflare/composio-broker/vitest.config.ts",
     "broker:deploy": "wrangler deploy --config cloudflare/composio-broker/wrangler.jsonc",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "lint:prepare": "node tools/oxlint-linux-arm64/prepare.mjs",
+    "test:lint-source": "node --test tools/oxlint-linux-arm64/launcher.test.mjs tools/oxlint-linux-arm64/prepare.test.mjs"
   },
   "dependencies": {
     "@alibaba-group/opensandbox": "^1.1.0",
@@ -112,7 +114,7 @@
     "electron-updater": "^6.8.9",
     "esbuild": "^0.28.2",
     "node-gyp": "12.4.0",
-    "oxlint": "1.86.0",
+    "oxlint": "file:tools/oxlint-linux-arm64",
     "playwright": "^1.63.0",
     "tailwindcss": "^4.1.11",
     "typescript": "^7.0.2",
