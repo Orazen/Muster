@@ -112,6 +112,15 @@ jobs:
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm broker:test
+      - name: Install locked Android prebuild dependencies
+        working-directory: android-companion
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prepare the reviewed Android toolchain
+        working-directory: android-companion
+        run: npm run prepare:toolchain
+      - name: Test Android prebuild configuration
+        working-directory: android-companion
+        run: npm run verify:autolinking
       - run: pnpm test:native-load
       - run: pnpm test:updater
       - run: pnpm test:desktop-lifecycle

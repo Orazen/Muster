@@ -34,6 +34,7 @@
     },
     "plugins": [
       "./plugins/with-companion-autolinking.cjs",
+      "./plugins/with-companion-agp.cjs",
       [
         "expo-camera",
         {
