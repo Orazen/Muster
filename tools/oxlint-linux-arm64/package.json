@@ -1,0 +1,26 @@
+{
+  "name": "@muster/oxlint-linux-arm64",
+  "version": "1.87.0-muster.523d537",
+  "private": true,
+  "type": "module",
+  "description": "Explicitly prepared, pinned Oxc source build for Muster Linux ARM64 GNU lint",
+  "license": "SEE LICENSE IN README.md",
+  "bin": {
+    "oxlint": "bin/oxlint.mjs"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "test": "node --test launcher.test.mjs prepare.test.mjs"
+  },
+  "dependencies": {
+    "upstream-oxlint": "npm:oxlint@1.86.0"
+  },
+  "files": [
+    "bin",
+    "prepare.mjs",
+    "source-lock.json",
+    "README.md"
+  ]
+}
